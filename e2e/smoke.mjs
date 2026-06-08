@@ -102,6 +102,18 @@ try {
   const visible = await visCount()
   assert.ok(visible >= 2, `split: expected >= 2 panes after toggle, got ${visible}`)
 
+  // No bottom-line clip: each visible terminal must fit within its pane.
+  await win.waitForTimeout(300)
+  const noClip = await win.evaluate(() =>
+    [...document.querySelectorAll('.pane')]
+      .filter((p) => getComputedStyle(p).display !== 'none')
+      .every((p) => {
+        const xt = p.querySelector('.xterm')
+        return !xt || xt.getBoundingClientRect().height <= p.getBoundingClientRect().height + 2
+      })
+  )
+  assert.ok(noClip, 'pane terminal overflows its pane (bottom-line clip)')
+
   // 3b) DRAG-RESIZE — drag the column divider right; the first column widens.
   const colsCss = () =>
     win.evaluate(() => getComputedStyle(document.getElementById('panes')).gridTemplateColumns)
@@ -213,7 +225,7 @@ try {
   assert.ok(restored >= 2, `persistence: expected >= 2 restored sessions, got ${restored}`)
 
   console.log(
-    `SMOKE_OK fontLoaded=${fontLoaded} projects=${projectCount} split=${visible} dragResize=${dragResize} roundTrip=true ` +
+    `SMOKE_OK fontLoaded=${fontLoaded} noClip=${noClip} projects=${projectCount} split=${visible} dragResize=${dragResize} roundTrip=true ` +
       `worktreeCreated=true agentLaunched=true multiAgent=${agentRows === 2} ` +
       `agentAfterSwitch=${agentAfterSwitch} kbdNav=${kbdNav} restored=${restored}`
   )
