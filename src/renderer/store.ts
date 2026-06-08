@@ -320,11 +320,11 @@ class Store {
     const n = this.sessionsOf(worktreeId).filter((s) => s.kind === kind).length
     const title = n === 0 ? kind : `${kind} ${n + 1}`
     const agent = kind === 'agent' ? 'claude' : undefined
-    // Estimate the pane size so the pty starts near its real dimensions — else
-    // the shell draws its first prompt at 80x24 and reflows into garbage.
+    // Estimate columns so the shell's first prompt renders at ~the right width
+    // (avoids reflow garbage). Rows are left to FitAddon to avoid over-counting
+    // and clipping the bottom line.
     const root = document.getElementById('panes')
     const cols = root ? Math.max(20, Math.floor(root.clientWidth / 7.8)) : 80
-    const rows = root ? Math.max(6, Math.floor(root.clientHeight / 17)) : 24
     try {
       const snap = await window.api.sessionCreate({
         worktreeId,
@@ -333,8 +333,7 @@ class Store {
         agent,
         cwd: wt.path,
         title,
-        cols,
-        rows
+        cols
       })
       this.sessions.set(snap.id, snap)
       this.activeWorktreeId = worktreeId

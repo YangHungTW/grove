@@ -81,9 +81,13 @@ function launchSpecFor(req: CreateSessionRequest): {
 } {
   const shell = process.env.SHELL || '/bin/zsh'
   if (req.kind === 'agent') {
+    // Login NON-interactive shell: gets PATH from the profile but does NOT load
+    // .zshrc/p10k, so the agent pane shows claude directly with no shell prompt.
+    // (The `claude` alias's args aren't applied here; override via CCM_AGENT_CMD.)
     const agentCmd = process.env.CCM_AGENT_CMD ?? 'claude'
-    return { command: shell, args: ['-il'], bootstrap: `${agentCmd}\r` }
+    return { command: shell, args: ['-lc', agentCmd] }
   }
+  // A shell pane is an interactive login shell (p10k prompt expected).
   return { command: shell, args: ['-il'] }
 }
 

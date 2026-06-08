@@ -48,7 +48,7 @@ const launchOpts = {
     CCM_REPO_ROOT: repoA,
     // Stand in for the real `claude` CLI so the agent-launch path is testable
     // without auth: typing this into the login shell creates a marker file.
-    CCM_AGENT_CMD: `touch '${agentMarker}'`
+    CCM_AGENT_CMD: `touch '${agentMarker}'; sleep 30`
   }
 }
 
