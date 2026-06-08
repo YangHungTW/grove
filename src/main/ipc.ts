@@ -1,5 +1,5 @@
 import type { SessionKind, SessionState } from '../core/types'
-import type { WorktreeInfo, CreateWorktreeOptions } from '../core/worktree'
+import type { WorktreeInfo, CreateWorktreeOptions, WorktreeStatus } from '../core/worktree'
 import type { ProjectEntry } from '../core/projectStore'
 import type { SessionDescriptor } from '../core/layoutStore'
 
@@ -15,6 +15,7 @@ export const Channels = {
   worktreeCreate: 'worktree:create',
   worktreeList: 'worktree:list',
   worktreeRemove: 'worktree:remove',
+  worktreeStatus: 'worktree:status',
   sessionCreate: 'session:create',
   sessionInput: 'session:input',
   sessionResize: 'session:resize',
@@ -89,6 +90,7 @@ export interface RendererApi {
   layoutLoad(): Promise<SessionDescriptor[]>
   worktreeCreate(repoRoot: string, opts: CreateWorktreeOptions): Promise<WorktreeInfo>
   worktreeList(repoRoot: string): Promise<WorktreeInfo[]>
+  worktreeStatus(worktreePath: string): Promise<WorktreeStatus>
   worktreeRemove(req: WorktreeRemoveRequest): Promise<void>
   sessionCreate(req: CreateSessionRequest): Promise<SessionSnapshot>
   sessionInput(id: string, data: string): void

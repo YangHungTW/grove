@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from 'el
 import { join } from 'node:path'
 import { SessionRegistry } from '../core/sessionRegistry'
 import { PtySession } from '../core/session'
-import { createWorktree, listWorktrees, removeWorktree, isGitRepo } from '../core/worktree'
+import { createWorktree, listWorktrees, removeWorktree, isGitRepo, worktreeStatus } from '../core/worktree'
 import { ProjectStore, type ProjectEntry } from '../core/projectStore'
 import { LayoutStore, type SessionDescriptor } from '../core/layoutStore'
 import { detectState } from '../core/stateDetection'
@@ -171,6 +171,9 @@ function registerIpc(): void {
   )
   ipcMain.handle(Channels.worktreeList, (_e: IpcMainInvokeEvent, repoRoot: string) =>
     listWorktrees(repoRoot)
+  )
+  ipcMain.handle(Channels.worktreeStatus, (_e: IpcMainInvokeEvent, worktreePath: string) =>
+    worktreeStatus(worktreePath)
   )
   ipcMain.handle(Channels.worktreeRemove, (_e: IpcMainInvokeEvent, req: WorktreeRemoveRequest) =>
     removeWorktree(req.repoRoot, req.path, { force: req.force })

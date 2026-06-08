@@ -22,6 +22,36 @@ function git(repoRoot: string, args: string[]): string {
   return execFileSync('git', args, { cwd: repoRoot, encoding: 'utf8' })
 }
 
+export interface WorktreeStatus {
+  /** Number of changed (porcelain) entries. */
+  dirty: number
+  ahead: number
+  behind: number
+}
+
+/** Working-tree status: dirty file count and ahead/behind vs upstream (0 if none). */
+export function worktreeStatus(path: string): WorktreeStatus {
+  let dirty = 0
+  let ahead = 0
+  let behind = 0
+  try {
+    const porcelain = git(path, ['status', '--porcelain'])
+    dirty = porcelain.split('\n').filter((l) => l.trim().length > 0).length
+  } catch {
+    /* not a repo */
+  }
+  try {
+    // left-right counts vs upstream; throws if no upstream configured.
+    const lr = git(path, ['rev-list', '--count', '--left-right', '@{upstream}...HEAD']).trim()
+    const [b, a] = lr.split(/\s+/).map((n) => parseInt(n, 10) || 0)
+    behind = b
+    ahead = a
+  } catch {
+    /* no upstream */
+  }
+  return { dirty, ahead, behind }
+}
+
 /** True if `path` is inside a git working tree (used to validate opened folders). */
 export function isGitRepo(path: string): boolean {
   try {

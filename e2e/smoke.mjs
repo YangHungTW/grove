@@ -72,18 +72,28 @@ try {
   await win.waitForSelector('.project.active .wt-title', { timeout: 10000 })
   const projA = win.locator('.project.active')
 
-  // 3) SPLIT PANES — two shells in A's main worktree, both visible.
+  const visCount = () =>
+    win.evaluate(
+      () => [...document.querySelectorAll('.pane')].filter((p) => getComputedStyle(p).display !== 'none').length
+    )
+
+  // 3) TABS + ON-DEMAND SPLIT — two shells become two tabs; single by default,
+  //    both visible after toggling split.
   await projA.getByRole('button', { name: '+ shell' }).first().click()
   await win.waitForSelector('.xterm', { timeout: 10000 })
   await projA.getByRole('button', { name: '+ shell' }).first().click()
+  await win.waitForFunction(() => document.querySelectorAll('.tab').length >= 2, { timeout: 10000 })
+  const tabs = await win.locator('.tab').count()
+  assert.ok(tabs >= 2, `tabs: expected >= 2 tabs, got ${tabs}`)
+  assert.equal(await visCount(), 1, 'single mode: exactly one pane visible by default')
+
+  await win.locator('#split-toggle').click()
   await win.waitForFunction(
     () => [...document.querySelectorAll('.pane')].filter((p) => getComputedStyle(p).display !== 'none').length >= 2,
     { timeout: 10000 }
   )
-  const visible = await win.evaluate(
-    () => [...document.querySelectorAll('.pane')].filter((p) => getComputedStyle(p).display !== 'none').length
-  )
-  assert.ok(visible >= 2, `split: expected >= 2 panes, got ${visible}`)
+  const visible = await visCount()
+  assert.ok(visible >= 2, `split: expected >= 2 panes after toggle, got ${visible}`)
 
   // 3b) DRAG-RESIZE — drag the column divider right; the first column widens.
   const colsCss = () =>
@@ -187,14 +197,10 @@ try {
   app = await electron.launch(launchOpts)
   const win2 = await app.firstWindow()
   await win2.waitForSelector('.project.active .wt-title', { timeout: 15000 })
-  await win2.waitForFunction(
-    () => [...document.querySelectorAll('.pane')].filter((p) => getComputedStyle(p).display !== 'none').length >= 2,
-    { timeout: 15000 }
-  )
-  const restored = await win2.evaluate(
-    () => [...document.querySelectorAll('.pane')].filter((p) => getComputedStyle(p).display !== 'none').length
-  )
-  assert.ok(restored >= 2, `persistence: expected >= 2 restored panes, got ${restored}`)
+  // Restored sessions show as tabs (split mode isn't persisted, so one pane shows).
+  await win2.waitForFunction(() => document.querySelectorAll('.tab').length >= 2, { timeout: 15000 })
+  const restored = await win2.locator('.tab').count()
+  assert.ok(restored >= 2, `persistence: expected >= 2 restored sessions, got ${restored}`)
 
   console.log(
     `SMOKE_OK projects=${projectCount} split=${visible} dragResize=${dragResize} roundTrip=true ` +

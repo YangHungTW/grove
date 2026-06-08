@@ -29,6 +29,8 @@ const api: RendererApi = {
     ipcRenderer.invoke(Channels.worktreeCreate, repoRoot, opts),
   worktreeList: (repoRoot: string): Promise<WorktreeInfo[]> =>
     ipcRenderer.invoke(Channels.worktreeList, repoRoot),
+  worktreeStatus: (worktreePath: string) =>
+    ipcRenderer.invoke(Channels.worktreeStatus, worktreePath),
   worktreeRemove: (req: WorktreeRemoveRequest): Promise<void> =>
     ipcRenderer.invoke(Channels.worktreeRemove, req),
   sessionCreate: (req: CreateSessionRequest): Promise<SessionSnapshot> =>

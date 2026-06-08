@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createWorktree, listWorktrees, removeWorktree, isGitRepo } from './worktree'
+import { createWorktree, listWorktrees, removeWorktree, isGitRepo, worktreeStatus } from './worktree'
 
 let repo: string
 
@@ -53,6 +53,20 @@ describe('worktree git operations', () => {
     } finally {
       rmSync(plain, { recursive: true, force: true })
     }
+  })
+
+  it('worktreeStatus reports dirty count (0 clean, grows with changes)', () => {
+    expect(worktreeStatus(repo).dirty).toBe(0)
+    writeFileSync(join(repo, 'new.txt'), 'x')
+    expect(worktreeStatus(repo).dirty).toBe(1)
+    writeFileSync(join(repo, 'README.md'), '# changed\n')
+    expect(worktreeStatus(repo).dirty).toBe(2)
+  })
+
+  it('worktreeStatus returns ahead/behind 0 with no upstream', () => {
+    const s = worktreeStatus(repo)
+    expect(s.ahead).toBe(0)
+    expect(s.behind).toBe(0)
   })
 
   it('removeWorktree makes it disappear from the list', () => {

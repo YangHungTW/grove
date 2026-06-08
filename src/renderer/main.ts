@@ -53,8 +53,23 @@ let restoring = false
 let colFr: number[] = []
 let rowFr: number[] = []
 
+// cmux-style UX state.
+const splitMode = new Map<string, boolean>() // worktreeId -> tile all vs single tab
+const lastLine = new Map<string, string>() // sessionId -> latest output line
+const wtStatus = new Map<string, { dirty: number; ahead: number; behind: number }>()
+
 const sidebar = document.getElementById('sidebar') as HTMLElement
 const panesRoot = document.getElementById('panes') as HTMLElement
+const tabsEl = document.getElementById('tabs') as HTMLElement
+const splitToggle = document.getElementById('split-toggle') as HTMLButtonElement
+const notifBtn = document.getElementById('notif-btn') as HTMLButtonElement
+const notifCount = document.getElementById('notif-count') as HTMLElement
+
+const ANSI_RE = /\[[0-9;?]*[A-Za-z]|\][^]*|[()][AB0]/g
+function lastNonEmptyLine(data: string): string | null {
+  const lines = data.replace(ANSI_RE, '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+  return lines.length ? lines[lines.length - 1] : null
+}
 
 function commandFor(kind: SessionKind): { command: string; args?: string[]; agent?: string } {
   switch (kind) {
@@ -126,6 +141,16 @@ async function loadWorktrees(project: ProjectView): Promise<void> {
     /* not a git repo / transient — leave empty */
   }
   project.loaded = true
+  // Fetch git status per worktree (async; refresh sidebar when each lands).
+  for (const wt of project.worktrees.values()) {
+    window.api
+      .worktreeStatus(wt.path)
+      .then((s) => {
+        wtStatus.set(wt.id, s)
+        renderSidebar()
+      })
+      .catch(() => {})
+  }
 }
 
 async function openProject(): Promise<void> {
@@ -251,8 +276,7 @@ async function addSession(worktreeId: string, kind: SessionKind): Promise<void> 
     sessions.set(snap.id, snap)
     mountPane(snap)
     activeWorktreeId = worktreeId
-    layoutPanes() // size/fit the new pane to fill its cell (else xterm stays 24 rows)
-    focusSession(snap.id)
+    focusSession(snap.id) // sets focus + lays out/fits the new pane
     persistLayout()
   } catch (err) {
     notify(errMsg(err)) // single-agent invariant etc.
@@ -308,19 +332,86 @@ function syncFocus(): void {
 
 function focusSession(id: string): void {
   focusedSessionId = id
-  panesRoot.querySelectorAll('.pane').forEach((p) => p.classList.remove('focused'))
+  pending.delete(id)
+  layoutPanes() // single mode: makes this the visible pane; also refits + tabs
   const pane = panes.get(id)
   if (pane) {
-    pane.el.classList.add('focused')
+    panesRoot.querySelectorAll('.pane').forEach((p) => p.classList.toggle('focused', p === pane.el))
     pane.term.focus()
   }
-  pending.delete(id)
   renderSidebar()
+  updateNotif()
 }
 
-/** Tile every session of the active worktree side-by-side; hide the rest. */
+// --- tabs / toolbar / notifications (cmux-style) -------------------------
+function renderTabs(): void {
+  tabsEl.innerHTML = ''
+  if (!activeWorktreeId) return
+  for (const s of sessionsOf(activeWorktreeId)) {
+    const tab = el('button', 'tab' + (s.id === focusedSessionId ? ' active' : ''))
+    if (pending.has(s.id)) tab.classList.add('attention')
+    tab.appendChild(el('span', `dot dot-${s.state}`))
+    tab.appendChild(el('span', 'tab-title', `${s.kind === 'agent' ? '★ ' : ''}${s.title}`))
+    tab.addEventListener('click', () => focusSession(s.id))
+    const x = el('button', 'tab-x', '×')
+    x.addEventListener('click', (e) => {
+      e.stopPropagation()
+      closeSession(s.id)
+    })
+    tab.appendChild(x)
+    tabsEl.appendChild(tab)
+  }
+}
+
+function updateToolbar(): void {
+  const split = activeWorktreeId ? !!splitMode.get(activeWorktreeId) : false
+  splitToggle.textContent = split ? '◳ single' : '⊟ split'
+  splitToggle.classList.toggle('active', split)
+}
+
+function toggleSplit(): void {
+  if (!activeWorktreeId) return
+  splitMode.set(activeWorktreeId, !splitMode.get(activeWorktreeId))
+  layoutPanes()
+}
+
+function updateNotif(): void {
+  notifCount.textContent = pending.size ? String(pending.size) : ''
+  notifBtn.classList.toggle('active', pending.size > 0)
+}
+
+/** Jump to the most recent session needing attention (⌘⇧U / bell button). */
+function jumpToPending(): void {
+  const ids = [...pending]
+  if (!ids.length) return
+  const id = ids[ids.length - 1]
+  const s = sessions.get(id)
+  if (!s) {
+    pending.delete(id)
+    return
+  }
+  for (const p of projects.values())
+    for (const wt of p.worktrees.values())
+      if (wt.id === s.worktreeId) {
+        activeProjectId = p.repoRoot
+        for (const o of projects.values()) o.expanded = o.repoRoot === p.repoRoot
+        activeWorktreeId = wt.id
+      }
+  focusSession(id)
+}
+
+/** Which session panes are shown: all (split) or just the focused one (single). */
+function visibleSessions(): string[] {
+  if (!activeWorktreeId) return []
+  const all = sessionsOf(activeWorktreeId).map((s) => s.id)
+  if (splitMode.get(activeWorktreeId)) return all
+  if (focusedSessionId && all.includes(focusedSessionId)) return [focusedSessionId]
+  return all.slice(0, 1)
+}
+
+/** Lay out the visible panes (single focused, or tiled when split mode is on). */
 function layoutPanes(): void {
-  const visible = activeWorktreeId ? sessionsOf(activeWorktreeId).map((s) => s.id) : []
+  const visible = visibleSessions()
   const n = Math.max(visible.length, 1)
   const cols = Math.ceil(Math.sqrt(n))
   const rows = Math.ceil(n / cols)
@@ -330,6 +421,8 @@ function layoutPanes(): void {
   for (const [id, pane] of panes) pane.el.style.display = visible.includes(id) ? 'block' : 'none'
   renderGutters(cols, rows)
   fitVisible(visible)
+  renderTabs()
+  updateToolbar()
 }
 
 function applyGridTemplate(): void {
@@ -474,6 +567,14 @@ function renderSidebar(): void {
         renderSidebar()
       })
       wtHead.appendChild(wtTitle)
+      const st = wtStatus.get(wt.id)
+      if (st && (st.dirty || st.ahead || st.behind)) {
+        const parts: string[] = []
+        if (st.dirty) parts.push(`●${st.dirty}`)
+        if (st.ahead) parts.push(`↑${st.ahead}`)
+        if (st.behind) parts.push(`↓${st.behind}`)
+        wtHead.appendChild(el('span', 'wt-status', parts.join(' ')))
+      }
       if (!wt.primary) {
         const rm = el('button', 'row-x', '×')
         rm.title = 'remove worktree'
@@ -490,13 +591,20 @@ function renderSidebar(): void {
       for (const s of sessionsOf(wt.id)) {
         const row = el('div', 'session-row' + (s.id === focusedSessionId ? ' active' : ''))
         if (pending.has(s.id)) row.classList.add('attention')
-        row.appendChild(el('span', `dot dot-${s.state}`))
+
+        const top = el('div', 'session-top')
+        top.appendChild(el('span', `dot dot-${s.state}`))
         const label = el('button', 'session-label', `${s.kind === 'agent' ? '★ ' : ''}${s.title}`)
         label.addEventListener('click', () => focusSession(s.id))
-        row.appendChild(label)
+        top.appendChild(label)
+        top.appendChild(el('span', 'session-state', s.state))
         const close = el('button', 'row-x', '×')
         close.addEventListener('click', () => closeSession(s.id))
-        row.appendChild(close)
+        top.appendChild(close)
+        row.appendChild(top)
+
+        const line = lastLine.get(s.id)
+        if (line) row.appendChild(el('div', 'session-line', line))
         block.appendChild(row)
       }
 
@@ -541,7 +649,21 @@ function notify(message: string): void {
 }
 
 // --- main-process events -------------------------------------------------
-window.api.onSessionData(({ id, data }) => panes.get(id)?.term.write(data))
+let lineRefreshScheduled = false
+window.api.onSessionData(({ id, data }) => {
+  panes.get(id)?.term.write(data)
+  const line = lastNonEmptyLine(data)
+  if (line) {
+    lastLine.set(id, line)
+    if (!lineRefreshScheduled) {
+      lineRefreshScheduled = true
+      setTimeout(() => {
+        lineRefreshScheduled = false
+        renderSidebar()
+      }, 600)
+    }
+  }
+})
 window.api.onSessionState(({ id, state }) => {
   const s = sessions.get(id)
   if (!s) return
@@ -551,11 +673,16 @@ window.api.onSessionState(({ id, state }) => {
     notify(`${s.title} needs your attention`)
   }
   renderSidebar()
+  renderTabs()
+  updateNotif()
 })
 window.api.onSessionExit(({ id }) => {
   const s = sessions.get(id)
   if (s) s.state = 'exited'
+  pending.delete(id)
   renderSidebar()
+  renderTabs()
+  updateNotif()
 })
 
 function switchWorktree(index: number): void {
@@ -574,11 +701,20 @@ async function switchProject(index: number): Promise<void> {
   if (p) await setActiveProject(p.repoRoot)
 }
 
+splitToggle.addEventListener('click', toggleSplit)
+notifBtn.addEventListener('click', jumpToPending)
+
 window.addEventListener('resize', () => layoutPanes())
 window.addEventListener('keydown', (e) => {
   if (!e.metaKey) return
   const k = e.key.toLowerCase()
-  if (k === 't' && activeWorktreeId) {
+  if (e.shiftKey && k === 'u') {
+    e.preventDefault()
+    jumpToPending()
+  } else if (k === 'd') {
+    e.preventDefault()
+    toggleSplit()
+  } else if (k === 't' && activeWorktreeId) {
     e.preventDefault()
     void addSession(activeWorktreeId, 'shell')
   } else if (k === 'w' && focusedSessionId) {
