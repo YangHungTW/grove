@@ -107,6 +107,13 @@ function Pane({
   focused: boolean
 }): JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
+  const termRef = useRef<Terminal | null>(null)
+
+  // Move keyboard focus to this terminal whenever it becomes the focused
+  // session — covers both newly-created sessions and tab switches.
+  useEffect(() => {
+    if (focused) requestAnimationFrame(() => termRef.current?.focus())
+  }, [focused])
 
   useEffect(() => {
     const el = ref.current
@@ -121,6 +128,7 @@ function Pane({
     term.loadAddon(fit)
     term.open(el)
     term.onData((d) => window.api.sessionInput(session.id, d))
+    termRef.current = term
     store.registerPane(session.id, term, fit)
 
     // Fit whenever this pane actually has a box — fires on display:none→block
