@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createWorktree, listWorktrees, removeWorktree } from './worktree'
+import { createWorktree, listWorktrees, removeWorktree, isGitRepo } from './worktree'
 
 let repo: string
 
@@ -43,6 +43,16 @@ describe('worktree git operations', () => {
     const list = listWorktrees(repo)
     const main = list.find((w) => w.branch === 'main')
     expect(main).toBeDefined()
+  })
+
+  it('isGitRepo is true for a git repo and false for a plain dir', () => {
+    expect(isGitRepo(repo)).toBe(true)
+    const plain = mkdtempSync(join(tmpdir(), 'ccm-plain-'))
+    try {
+      expect(isGitRepo(plain)).toBe(false)
+    } finally {
+      rmSync(plain, { recursive: true, force: true })
+    }
   })
 
   it('removeWorktree makes it disappear from the list', () => {

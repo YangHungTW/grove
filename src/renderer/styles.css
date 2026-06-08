@@ -32,6 +32,7 @@ body {
   overflow-y: auto;
 }
 
+.new-project,
 .new-worktree,
 .wt-input {
   width: 100%;
@@ -44,22 +45,47 @@ body {
   color: var(--fg);
   cursor: pointer;
 }
+.new-project {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+.new-worktree {
+  margin-left: 10px;
+  width: calc(100% - 10px);
+}
 .wt-input {
   cursor: text;
   outline: 1px solid var(--accent);
 }
 
+.section-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  opacity: 0.5;
+  padding: 2px 6px 6px;
+}
+
+.project-header,
 .wt-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   font-weight: 600;
-  margin-top: 6px;
   border-radius: 6px;
 }
-.wt-header.active {
-  background: rgba(79, 156, 255, 0.12);
+.project-header {
+  margin-top: 2px;
 }
+.wt-header {
+  margin: 2px 0 2px 10px;
+}
+.project-header.active,
+.wt-header.active {
+  background: rgba(79, 156, 255, 0.14);
+}
+.project-title,
 .wt-title {
   flex: 1;
   text-align: left;
@@ -70,8 +96,11 @@ body {
   padding: 4px 6px;
   cursor: pointer;
 }
-.wt-remove,
-.session-close {
+.wt-title {
+  font-weight: 500;
+  font-size: 13px;
+}
+.row-x {
   border: 0;
   background: transparent;
   color: #999;
@@ -79,8 +108,7 @@ body {
   padding: 0 6px;
   font-size: 14px;
 }
-.wt-remove:hover,
-.session-close:hover {
+.row-x:hover {
   color: #ff6b6b;
 }
 
@@ -88,8 +116,8 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  width: 100%;
-  padding: 4px 8px 4px 14px;
+  margin-left: 20px;
+  padding: 4px 8px;
   border-radius: 6px;
   font-size: 13px;
 }
@@ -143,7 +171,7 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-top: 12px;
+  margin: 6px 0 6px 20px;
 }
 .actions button {
   flex: 1 0 auto;

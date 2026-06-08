@@ -19,6 +19,10 @@ function subscribe<T>(channel: string, cb: (e: T) => void): () => void {
 
 const api: RendererApi = {
   repoRoot: (): Promise<string> => ipcRenderer.invoke(Channels.envRepoRoot),
+  projectOpenDialog: () => ipcRenderer.invoke(Channels.projectOpenDialog),
+  projectAdd: (repoRoot: string) => ipcRenderer.invoke(Channels.projectAdd, repoRoot),
+  projectListRecent: () => ipcRenderer.invoke(Channels.projectListRecent),
+  projectRemove: (repoRoot: string) => ipcRenderer.invoke(Channels.projectRemove, repoRoot),
   worktreeCreate: (repoRoot: string, opts: CreateWorktreeOptions): Promise<WorktreeInfo> =>
     ipcRenderer.invoke(Channels.worktreeCreate, repoRoot, opts),
   worktreeList: (repoRoot: string): Promise<WorktreeInfo[]> =>

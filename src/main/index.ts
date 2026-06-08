@@ -1,8 +1,9 @@
-import { app, BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { join } from 'node:path'
 import { SessionRegistry } from '../core/sessionRegistry'
 import { PtySession } from '../core/session'
-import { createWorktree, listWorktrees, removeWorktree } from '../core/worktree'
+import { createWorktree, listWorktrees, removeWorktree, isGitRepo } from '../core/worktree'
+import { ProjectStore, type ProjectEntry } from '../core/projectStore'
 import { detectState } from '../core/stateDetection'
 import type { CreateWorktreeOptions } from '../core/worktree'
 import {
@@ -18,6 +19,22 @@ import type { Session } from '../core/types'
 const registry = new SessionRegistry()
 const ptys = new Map<string, PtySession>()
 let mainWindow: BrowserWindow | null = null
+let projectStore: ProjectStore | null = null
+
+/** Recent-projects store path: CCM_STORE override (tests) or Electron userData. */
+function store(): ProjectStore {
+  if (!projectStore) {
+    const file = process.env.CCM_STORE ?? join(app.getPath('userData'), 'projects.json')
+    projectStore = new ProjectStore(file)
+  }
+  return projectStore
+}
+
+/** Validate + record a project by path. Throws if it is not a git repo. */
+function addProject(repoRoot: string): ProjectEntry {
+  if (!isGitRepo(repoRoot)) throw new Error(`not a git repository: ${repoRoot}`)
+  return store().add(repoRoot)
+}
 
 function send(channel: string, payload: unknown): void {
   mainWindow?.webContents.send(channel, payload)
@@ -93,6 +110,23 @@ function createSession(req: CreateSessionRequest): SessionSnapshot {
 
 function registerIpc(): void {
   ipcMain.handle(Channels.envRepoRoot, () => process.env.CCM_REPO_ROOT ?? process.cwd())
+
+  ipcMain.handle(Channels.projectOpenDialog, async (): Promise<ProjectEntry | null> => {
+    const res = await dialog.showOpenDialog(mainWindow ?? undefined!, {
+      title: 'Open project (git repository)',
+      properties: ['openDirectory', 'createDirectory']
+    })
+    if (res.canceled || res.filePaths.length === 0) return null
+    return addProject(res.filePaths[0])
+  })
+  ipcMain.handle(Channels.projectAdd, (_e: IpcMainInvokeEvent, repoRoot: string) =>
+    addProject(repoRoot)
+  )
+  ipcMain.handle(Channels.projectListRecent, () => store().list())
+  ipcMain.handle(Channels.projectRemove, (_e: IpcMainInvokeEvent, repoRoot: string) =>
+    store().remove(repoRoot)
+  )
+
   ipcMain.handle(
     Channels.worktreeCreate,
     (_e: IpcMainInvokeEvent, repoRoot: string, opts: CreateWorktreeOptions) =>

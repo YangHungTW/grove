@@ -6,17 +6,26 @@ import type { SessionKind, SessionState } from '../core/types'
 import type { SessionSnapshot } from '../main/ipc'
 
 /**
- * Renderer: cmux-style shell.
- *  - Multiple worktrees in the sidebar, each expandable to its sessions.
- *  - The active worktree's sessions are tiled side-by-side (split panes), so
- *    you watch the agent + a shell + a server at once.
+ * Renderer: cmux-style shell with a ccmanager-style hierarchy.
+ *   Project (a git repo) → Worktree (branch) → Session (pty pane).
+ *  - Open multiple projects (native dialog + persisted recent list).
+ *  - Each project expands to its worktrees; each worktree to its sessions.
+ *  - The active worktree's sessions are tiled side-by-side (split panes).
  */
 
 interface WorktreeView {
   id: string // = path
   path: string
   branch: string
-  primary: boolean // the repo's main worktree (cannot be removed)
+  primary: boolean
+}
+
+interface ProjectView {
+  repoRoot: string // = id
+  name: string
+  expanded: boolean
+  loaded: boolean
+  worktrees: Map<string, WorktreeView>
 }
 
 interface Pane {
@@ -25,13 +34,13 @@ interface Pane {
   el: HTMLDivElement
 }
 
-const worktrees = new Map<string, WorktreeView>()
+const projects = new Map<string, ProjectView>()
 const sessions = new Map<string, SessionSnapshot>()
 const panes = new Map<string, Pane>()
 const pending = new Set<string>()
+let activeProjectId: string | null = null
 let activeWorktreeId: string | null = null
 let focusedSessionId: string | null = null
-let repoRoot = ''
 
 const sidebar = document.getElementById('sidebar') as HTMLElement
 const panesRoot = document.getElementById('panes') as HTMLElement
@@ -50,139 +59,122 @@ function commandFor(kind: SessionKind): { command: string; args?: string[]; agen
   }
 }
 
-function sessionsOf(worktreeId: string): SessionSnapshot[] {
-  return [...sessions.values()].filter((s) => s.worktreeId === worktreeId)
-}
+const sessionsOf = (worktreeId: string): SessionSnapshot[] =>
+  [...sessions.values()].filter((s) => s.worktreeId === worktreeId)
 
-// --- sidebar -------------------------------------------------------------
-function renderSidebar(): void {
-  sidebar.innerHTML = ''
+const activeProject = (): ProjectView | undefined =>
+  activeProjectId ? projects.get(activeProjectId) : undefined
 
-  const newWt = document.createElement('button')
-  newWt.className = 'new-worktree'
-  newWt.textContent = '+ worktree'
-  newWt.addEventListener('click', showNewWorktreeInput)
-  sidebar.appendChild(newWt)
-
-  for (const wt of worktrees.values()) {
-    const header = document.createElement('div')
-    header.className = 'wt-header' + (wt.id === activeWorktreeId ? ' active' : '')
-
-    const title = document.createElement('button')
-    title.className = 'wt-title'
-    title.textContent = `▾ ${wt.branch || '(detached)'}${wt.primary ? ' ·main' : ''}`
-    title.addEventListener('click', () => setActiveWorktree(wt.id))
-    header.appendChild(title)
-
-    if (!wt.primary) {
-      const rm = document.createElement('button')
-      rm.className = 'wt-remove'
-      rm.textContent = '×'
-      rm.title = 'remove worktree'
-      rm.addEventListener('click', () => void removeWorktree(wt.id))
-      header.appendChild(rm)
-    }
-    sidebar.appendChild(header)
-
-    for (const s of sessionsOf(wt.id)) {
-      const row = document.createElement('div')
-      row.className = 'session-row'
-      if (s.id === focusedSessionId) row.classList.add('active')
-      if (pending.has(s.id)) row.classList.add('attention')
-
-      const dot = document.createElement('span')
-      dot.className = `dot dot-${s.state}`
-      row.appendChild(dot)
-
-      const label = document.createElement('button')
-      label.className = 'session-label'
-      label.textContent = `${s.kind === 'agent' ? '★ ' : ''}${s.title}`
-      label.addEventListener('click', () => {
-        setActiveWorktree(wt.id)
-        focusSession(s.id)
-      })
-      row.appendChild(label)
-
-      const close = document.createElement('button')
-      close.className = 'session-close'
-      close.textContent = '×'
-      close.addEventListener('click', () => closeSession(s.id))
-      row.appendChild(close)
-
-      sidebar.appendChild(row)
-    }
-
-    const actions = document.createElement('div')
-    actions.className = 'actions'
-    for (const kind of ['agent', 'shell', 'server', 'task'] as const) {
-      const btn = document.createElement('button')
-      btn.textContent = `+ ${kind}`
-      btn.addEventListener('click', () => void addSession(wt.id, kind))
-      actions.appendChild(btn)
-    }
-    sidebar.appendChild(actions)
-  }
-}
-
-function showNewWorktreeInput(): void {
-  const existing = sidebar.querySelector('.wt-input') as HTMLInputElement | null
-  if (existing) {
-    existing.focus()
-    return
-  }
-  const input = document.createElement('input')
-  input.className = 'wt-input'
-  input.placeholder = 'new branch name, Enter to create'
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && input.value.trim()) {
-      void createWorktree(input.value.trim())
-    } else if (e.key === 'Escape') {
-      renderSidebar()
-    }
-  })
-  sidebar.insertBefore(input, sidebar.children[1] ?? null)
-  input.focus()
-}
-
-// --- worktree ops --------------------------------------------------------
-async function createWorktree(branch: string): Promise<void> {
-  const path = `${repoRoot}-wt-${branch.replace(/[^\w.-]/g, '_')}`
+// --- projects ------------------------------------------------------------
+async function loadWorktrees(project: ProjectView): Promise<void> {
+  project.worktrees.clear()
   try {
-    const info = await window.api.worktreeCreate(repoRoot, { path, branch, newBranch: true })
-    worktrees.set(info.path, {
+    const list = await window.api.worktreeList(project.repoRoot)
+    list.forEach((w, i) =>
+      project.worktrees.set(w.path, {
+        id: w.path,
+        path: w.path,
+        branch: w.branch,
+        primary: i === 0 || w.path === project.repoRoot
+      })
+    )
+  } catch {
+    /* not a git repo / transient — leave empty */
+  }
+  project.loaded = true
+}
+
+async function openProject(): Promise<void> {
+  try {
+    const entry = await window.api.projectOpenDialog()
+    if (!entry) return
+    upsertProject(entry.repoRoot, entry.name)
+    await setActiveProject(entry.repoRoot)
+  } catch (err) {
+    notify(String(err))
+  }
+}
+
+function upsertProject(repoRoot: string, name: string): ProjectView {
+  let p = projects.get(repoRoot)
+  if (!p) {
+    p = { repoRoot, name, expanded: false, loaded: false, worktrees: new Map() }
+    projects.set(repoRoot, p)
+  }
+  return p
+}
+
+async function removeProject(repoRoot: string): Promise<void> {
+  for (const wt of projects.get(repoRoot)?.worktrees.values() ?? []) {
+    for (const s of sessionsOf(wt.id)) closeSession(s.id, true)
+  }
+  await window.api.projectRemove(repoRoot)
+  projects.delete(repoRoot)
+  if (activeProjectId === repoRoot) {
+    activeProjectId = projects.keys().next().value ?? null
+    const p = activeProject()
+    activeWorktreeId = p ? (p.worktrees.keys().next().value ?? null) : null
+  }
+  layoutPanes()
+  renderSidebar()
+}
+
+async function setActiveProject(repoRoot: string): Promise<void> {
+  const p = projects.get(repoRoot)
+  if (!p) return
+  activeProjectId = repoRoot
+  for (const other of projects.values()) other.expanded = other.repoRoot === repoRoot
+  if (!p.loaded) await loadWorktrees(p)
+  activeWorktreeId = p.worktrees.keys().next().value ?? null
+  syncFocus()
+  layoutPanes()
+  renderSidebar()
+}
+
+// --- worktrees -----------------------------------------------------------
+async function createWorktree(project: ProjectView, branch: string): Promise<void> {
+  const path = `${project.repoRoot}-wt-${branch.replace(/[^\w.-]/g, '_')}`
+  try {
+    const info = await window.api.worktreeCreate(project.repoRoot, {
+      path,
+      branch,
+      newBranch: true
+    })
+    project.worktrees.set(info.path, {
       id: info.path,
       path: info.path,
       branch: info.branch || branch,
       primary: false
     })
-    setActiveWorktree(info.path)
+    activeProjectId = project.repoRoot
+    activeWorktreeId = info.path
+    syncFocus()
+    layoutPanes()
+    renderSidebar()
   } catch (err) {
     notify(String(err))
     renderSidebar()
   }
 }
 
-async function removeWorktree(id: string): Promise<void> {
-  const wt = worktrees.get(id)
+async function removeWorktree(project: ProjectView, wtId: string): Promise<void> {
+  const wt = project.worktrees.get(wtId)
   if (!wt || wt.primary) return
-  for (const s of sessionsOf(id)) closeSession(s.id)
+  for (const s of sessionsOf(wtId)) closeSession(s.id, true)
   try {
-    await window.api.worktreeRemove({ repoRoot, path: wt.path, force: true })
+    await window.api.worktreeRemove({ repoRoot: project.repoRoot, path: wt.path, force: true })
   } catch (err) {
     notify(String(err))
   }
-  worktrees.delete(id)
-  if (activeWorktreeId === id) {
-    const next = worktrees.keys().next().value ?? null
-    activeWorktreeId = next
-  }
+  project.worktrees.delete(wtId)
+  if (activeWorktreeId === wtId) activeWorktreeId = project.worktrees.keys().next().value ?? null
   layoutPanes()
   renderSidebar()
 }
 
 // --- sessions ------------------------------------------------------------
 async function addSession(worktreeId: string, kind: SessionKind): Promise<void> {
-  const wt = worktrees.get(worktreeId)
+  const wt = activeProject()?.worktrees.get(worktreeId)
   if (!wt) return
   const { command, args, agent } = commandFor(kind)
   try {
@@ -197,14 +189,14 @@ async function addSession(worktreeId: string, kind: SessionKind): Promise<void> 
     })
     sessions.set(snap.id, snap)
     mountPane(snap)
-    setActiveWorktree(worktreeId)
+    activeWorktreeId = worktreeId
     focusSession(snap.id)
   } catch (err) {
     notify(String(err)) // single-agent invariant etc.
   }
 }
 
-function closeSession(id: string): void {
+function closeSession(id: string, quiet = false): void {
   window.api.sessionKill(id)
   const pane = panes.get(id)
   if (pane) {
@@ -215,8 +207,10 @@ function closeSession(id: string): void {
   sessions.delete(id)
   pending.delete(id)
   if (focusedSessionId === id) focusedSessionId = null
-  layoutPanes()
-  renderSidebar()
+  if (!quiet) {
+    layoutPanes()
+    renderSidebar()
+  }
 }
 
 function mountPane(snap: SessionSnapshot): void {
@@ -235,13 +229,10 @@ function mountPane(snap: SessionSnapshot): void {
   panes.set(snap.id, { term, fit, el })
 }
 
-function setActiveWorktree(id: string): void {
-  activeWorktreeId = id
-  const visible = new Set(sessionsOf(id).map((s) => s.id))
+function syncFocus(): void {
+  const visible = new Set(activeWorktreeId ? sessionsOf(activeWorktreeId).map((s) => s.id) : [])
   if (focusedSessionId && !visible.has(focusedSessionId)) focusedSessionId = null
   if (!focusedSessionId && visible.size) focusedSessionId = [...visible][0]
-  layoutPanes()
-  renderSidebar()
 }
 
 function focusSession(id: string): void {
@@ -261,10 +252,7 @@ function layoutPanes(): void {
   const visible = activeWorktreeId ? sessionsOf(activeWorktreeId).map((s) => s.id) : []
   const cols = Math.ceil(Math.sqrt(Math.max(visible.length, 1)))
   panesRoot.style.gridTemplateColumns = `repeat(${cols}, 1fr)`
-
-  for (const [id, pane] of panes) {
-    pane.el.style.display = visible.includes(id) ? 'block' : 'none'
-  }
+  for (const [id, pane] of panes) pane.el.style.display = visible.includes(id) ? 'block' : 'none'
   requestAnimationFrame(() => {
     for (const id of visible) {
       const pane = panes.get(id)
@@ -275,17 +263,118 @@ function layoutPanes(): void {
   })
 }
 
+// --- sidebar -------------------------------------------------------------
+function el<K extends keyof HTMLElementTagNameMap>(
+  tag: K,
+  className: string,
+  text?: string
+): HTMLElementTagNameMap[K] {
+  const node = document.createElement(tag)
+  node.className = className
+  if (text !== undefined) node.textContent = text
+  return node
+}
+
+function renderSidebar(): void {
+  sidebar.innerHTML = ''
+
+  const open = el('button', 'new-project', '+ Open project…')
+  open.addEventListener('click', () => void openProject())
+  sidebar.appendChild(open)
+  sidebar.appendChild(el('div', 'section-label', 'Projects'))
+
+  for (const project of projects.values()) {
+    const isActiveProject = project.repoRoot === activeProjectId
+    const block = el('div', 'project' + (isActiveProject ? ' active' : ''))
+    sidebar.appendChild(block)
+
+    const head = el('div', 'project-header' + (isActiveProject ? ' active' : ''))
+    const title = el('button', 'project-title', `${project.expanded ? '▾' : '▸'} ${project.name}`)
+    title.addEventListener('click', () => void setActiveProject(project.repoRoot))
+    head.appendChild(title)
+    const rmP = el('button', 'row-x', '×')
+    rmP.title = 'remove from recent'
+    rmP.addEventListener('click', (e) => {
+      e.stopPropagation()
+      void removeProject(project.repoRoot)
+    })
+    head.appendChild(rmP)
+    block.appendChild(head)
+
+    if (!project.expanded) continue
+
+    for (const wt of project.worktrees.values()) {
+      const isActiveWt = project.repoRoot === activeProjectId && wt.id === activeWorktreeId
+      const wtHead = el('div', 'wt-header' + (isActiveWt ? ' active' : ''))
+      const wtTitle = el('button', 'wt-title', `▾ ${wt.branch || '(detached)'}${wt.primary ? ' ·main' : ''}`)
+      wtTitle.addEventListener('click', () => {
+        activeProjectId = project.repoRoot
+        activeWorktreeId = wt.id
+        syncFocus()
+        layoutPanes()
+        renderSidebar()
+      })
+      wtHead.appendChild(wtTitle)
+      if (!wt.primary) {
+        const rm = el('button', 'row-x', '×')
+        rm.title = 'remove worktree'
+        rm.addEventListener('click', (e) => {
+          e.stopPropagation()
+          void removeWorktree(project, wt.id)
+        })
+        wtHead.appendChild(rm)
+      }
+      block.appendChild(wtHead)
+
+      if (!isActiveWt) continue
+
+      for (const s of sessionsOf(wt.id)) {
+        const row = el('div', 'session-row' + (s.id === focusedSessionId ? ' active' : ''))
+        if (pending.has(s.id)) row.classList.add('attention')
+        row.appendChild(el('span', `dot dot-${s.state}`))
+        const label = el('button', 'session-label', `${s.kind === 'agent' ? '★ ' : ''}${s.title}`)
+        label.addEventListener('click', () => focusSession(s.id))
+        row.appendChild(label)
+        const close = el('button', 'row-x', '×')
+        close.addEventListener('click', () => closeSession(s.id))
+        row.appendChild(close)
+        block.appendChild(row)
+      }
+
+      const actions = el('div', 'actions')
+      for (const kind of ['agent', 'shell', 'server', 'task'] as const) {
+        const btn = el('button', '', `+ ${kind}`)
+        btn.addEventListener('click', () => void addSession(wt.id, kind))
+        actions.appendChild(btn)
+      }
+      block.appendChild(actions)
+    }
+
+    const newWt = el('button', 'new-worktree', '+ worktree')
+    newWt.addEventListener('click', () => showWorktreeInput(project, newWt))
+    block.appendChild(newWt)
+  }
+}
+
+function showWorktreeInput(project: ProjectView, anchor: HTMLElement): void {
+  const input = el('input', 'wt-input')
+  input.placeholder = 'new branch name, Enter to create'
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && input.value.trim()) void createWorktree(project, input.value.trim())
+    else if (e.key === 'Escape') renderSidebar()
+  })
+  anchor.replaceWith(input)
+  input.focus()
+}
+
 function notify(message: string): void {
-  const el = document.createElement('div')
-  el.className = 'toast'
-  el.textContent = message
-  document.body.appendChild(el)
-  setTimeout(() => el.remove(), 4000)
+  const node = el('div', 'toast', message)
+  document.body.appendChild(node)
+  setTimeout(() => node.remove(), 4000)
 }
 
 // --- main-process events -------------------------------------------------
 window.api.onSessionData(({ id, data }) => panes.get(id)?.term.write(data))
-
 window.api.onSessionState(({ id, state }) => {
   const s = sessions.get(id)
   if (!s) return
@@ -296,7 +385,6 @@ window.api.onSessionState(({ id, state }) => {
   }
   renderSidebar()
 })
-
 window.api.onSessionExit(({ id }) => {
   const s = sessions.get(id)
   if (s) s.state = 'exited'
@@ -313,26 +401,21 @@ window.addEventListener('keydown', (e) => {
 
 // --- bootstrap -----------------------------------------------------------
 async function init(): Promise<void> {
-  repoRoot = await window.api.repoRoot()
+  const recent = await window.api.projectListRecent()
+  for (const p of recent) upsertProject(p.repoRoot, p.name)
+
+  // Ensure the launched repo is present + selectable.
+  const launched = await window.api.repoRoot()
   try {
-    const list = await window.api.worktreeList(repoRoot)
-    list.forEach((w, i) =>
-      worktrees.set(w.path, {
-        id: w.path,
-        path: w.path,
-        branch: w.branch,
-        primary: i === 0 || w.path === repoRoot
-      })
-    )
+    const entry = await window.api.projectAdd(launched)
+    upsertProject(entry.repoRoot, entry.name)
   } catch {
-    // Not a git repo — seed a single local worktree at the repo root.
-    worktrees.set(repoRoot, { id: repoRoot, path: repoRoot, branch: 'local', primary: true })
+    /* launched dir is not a git repo — skip auto-add */
   }
-  if (worktrees.size === 0) {
-    worktrees.set(repoRoot, { id: repoRoot, path: repoRoot, branch: 'local', primary: true })
-  }
-  activeWorktreeId = worktrees.keys().next().value ?? null
-  renderSidebar()
+
+  const first = projects.keys().next().value as string | undefined
+  if (first) await setActiveProject(first)
+  else renderSidebar()
 }
 
 void init()

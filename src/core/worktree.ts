@@ -22,6 +22,15 @@ function git(repoRoot: string, args: string[]): string {
   return execFileSync('git', args, { cwd: repoRoot, encoding: 'utf8' })
 }
 
+/** True if `path` is inside a git working tree (used to validate opened folders). */
+export function isGitRepo(path: string): boolean {
+  try {
+    return git(path, ['rev-parse', '--is-inside-work-tree']).trim() === 'true'
+  } catch {
+    return false
+  }
+}
+
 /** `git worktree add` — returns the resulting worktree's parsed info. */
 export function createWorktree(repoRoot: string, opts: CreateWorktreeOptions): WorktreeInfo {
   const args = ['worktree', 'add']

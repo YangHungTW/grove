@@ -1,62 +1,79 @@
 /**
- * End-to-end smoke test against the BUILT Electron app. Runs against a throwaway
- * temp git repo (CCM_REPO_ROOT) so the real repo is untouched.
+ * End-to-end smoke test against the BUILT Electron app. Exercises the full
+ * Project → Worktree → Session hierarchy against throwaway temp git repos.
  *
- * Proves: full stack round-trip (renderer→IPC→main→pty→shell side effect),
- * split panes (N sessions visible at once in one worktree), and worktree
- * management (create + remove a real git worktree from the UI).
+ * Proves:
+ *  - multi-project: a seeded recent project + the launched repo both listed,
+ *    and selecting one loads its worktrees;
+ *  - per-project worktree create (real `git worktree add`);
+ *  - split panes (N sessions visible at once);
+ *  - full round-trip (renderer→IPC→main→pty→shell side effect on disk).
  *
  * Run: npm run build && node e2e/smoke.mjs   — exit 0 on success.
  */
 import { _electron as electron } from 'playwright'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, existsSync } from 'node:fs'
+import { mkdtempSync, rmSync, existsSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, basename } from 'node:path'
 import assert from 'node:assert/strict'
 
-const repo = mkdtempSync(join(tmpdir(), 'ccm-e2e-'))
-const wtPath = `${repo}-wt-feature-x`
-const marker = join(repo, `marker_${Date.now()}`)
+function makeRepo(prefix) {
+  const dir = mkdtempSync(join(tmpdir(), prefix))
+  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: dir })
+  execFileSync('git', ['config', 'user.email', 't@e.com'], { cwd: dir })
+  execFileSync('git', ['config', 'user.name', 'T'], { cwd: dir })
+  execFileSync('git', ['commit', '-q', '--allow-empty', '-m', 'init'], { cwd: dir })
+  return dir
+}
+
+const repoA = makeRepo('ccm-e2e-a-')
+const repoB = makeRepo('ccm-e2e-b-')
+const storeDir = mkdtempSync(join(tmpdir(), 'ccm-store-'))
+const storeFile = join(storeDir, 'projects.json')
+const wtPath = `${repoA}-wt-feat`
+const marker = join(repoA, `marker_${Date.now()}`)
 let app
 let failed = false
 
-function git(args) {
-  execFileSync('git', args, { cwd: repo })
-}
-
-async function visiblePaneCount(win) {
-  return win.evaluate(
-    () => [...document.querySelectorAll('.pane')].filter((p) => getComputedStyle(p).display !== 'none').length
-  )
-}
-
 try {
-  git(['init', '-q', '-b', 'main'])
-  git(['config', 'user.email', 't@e.com'])
-  git(['config', 'user.name', 'T'])
-  execFileSync('git', ['commit', '-q', '--allow-empty', '-m', 'init'], { cwd: repo })
+  // Seed the recent-projects store with repoB (simulates a previously-opened project).
+  writeFileSync(storeFile, JSON.stringify([{ repoRoot: repoB, name: basename(repoB) }]))
 
   app = await electron.launch({
     args: ['.'],
     cwd: process.cwd(),
-    env: { ...process.env, CCM_REPO_ROOT: repo }
+    env: { ...process.env, CCM_STORE: storeFile, CCM_REPO_ROOT: repoA }
   })
   const win = await app.firstWindow()
-  await win.waitForSelector('.wt-header', { timeout: 15000 })
+  await win.waitForSelector('.project-header', { timeout: 15000 })
 
-  // 1) SPLIT PANES — add two shells to the (one) worktree; both visible at once.
-  await win.getByRole('button', { name: '+ shell' }).first().click()
+  // 1) MULTI-PROJECT — both the seeded repo and the launched repo are listed.
+  const projectCount = await win.locator('.project-header').count()
+  assert.ok(projectCount >= 2, `expected >= 2 projects listed, got ${projectCount}`)
+  const titles = await win.locator('.project-title').allInnerTexts()
+  assert.ok(titles.some((t) => t.includes(basename(repoA))), 'launched project A should be listed')
+  assert.ok(titles.some((t) => t.includes(basename(repoB))), 'seeded project B should be listed')
+
+  // 2) SELECT PROJECT A — loads its worktrees.
+  await win.locator('.project-title', { hasText: basename(repoA) }).click()
+  await win.waitForSelector('.project.active .wt-title', { timeout: 10000 })
+  const projA = win.locator('.project.active')
+
+  // 3) SPLIT PANES — two shells in A's main worktree, both visible.
+  await projA.getByRole('button', { name: '+ shell' }).first().click()
   await win.waitForSelector('.xterm', { timeout: 10000 })
-  await win.getByRole('button', { name: '+ shell' }).first().click()
+  await projA.getByRole('button', { name: '+ shell' }).first().click()
   await win.waitForFunction(
     () => [...document.querySelectorAll('.pane')].filter((p) => getComputedStyle(p).display !== 'none').length >= 2,
     { timeout: 10000 }
   )
-  const visible = await visiblePaneCount(win)
-  assert.ok(visible >= 2, `split: expected >= 2 panes visible, got ${visible}`)
+  const visible = await win.evaluate(
+    () => [...document.querySelectorAll('.pane')].filter((p) => getComputedStyle(p).display !== 'none').length
+  )
+  assert.ok(visible >= 2, `split: expected >= 2 panes, got ${visible}`)
 
-  // 2) ROUND-TRIP — type in the focused pane, expect a real file on disk.
+  // 4) ROUND-TRIP — typed command creates a real file under repoA.
   await win.locator('.pane.focused .xterm-helper-textarea').focus()
   await win.keyboard.type(`touch '${marker}' && echo CCM_DONE\r`)
   let roundTrip = false
@@ -67,34 +84,30 @@ try {
     }
     await new Promise((r) => setTimeout(r, 250))
   }
-  assert.ok(roundTrip, 'round-trip: shell marker file should appear on disk')
+  assert.ok(roundTrip, 'round-trip: marker file should appear under project A')
 
-  // 3) WORKTREE MANAGEMENT — create a new git worktree from the UI.
-  await win.getByRole('button', { name: '+ worktree' }).click()
-  await win.locator('.wt-input').fill('feature-x')
-  await win.locator('.wt-input').press('Enter')
+  // 5) PER-PROJECT WORKTREE — create a real git worktree under A.
+  await projA.getByRole('button', { name: '+ worktree' }).click()
+  await win.locator('.project.active .wt-input').fill('feat')
+  await win.locator('.project.active .wt-input').press('Enter')
   await win.waitForFunction(
-    () => [...document.querySelectorAll('.wt-title')].some((t) => t.textContent?.includes('feature-x')),
+    () => [...document.querySelectorAll('.wt-title')].some((t) => t.textContent?.includes('feat')),
     { timeout: 10000 }
   )
-  assert.ok(existsSync(wtPath), `worktree dir should exist on disk at ${wtPath}`)
-  assert.ok(
-    existsSync(join(wtPath, '.git')),
-    'new worktree should be a real git worktree (.git link present)'
-  )
+  assert.ok(existsSync(join(wtPath, '.git')), `worktree should exist at ${wtPath}`)
 
-  // Re-activate the main worktree so the screenshot shows the tiled split panes.
+  // Re-select A's main worktree so the screenshot shows the split panes.
   await win.locator('.wt-title', { hasText: 'main' }).first().click()
   await win.waitForTimeout(400)
   await win.screenshot({ path: join(process.cwd(), 'e2e', 'smoke.png') })
-  console.log(`SMOKE_OK split=${visible} roundTrip=true worktreeCreated=true`)
+
+  console.log(`SMOKE_OK projects=${projectCount} split=${visible} roundTrip=true worktreeCreated=true`)
 } catch (err) {
   failed = true
   console.error('SMOKE_FAIL', err?.stack ?? err?.message ?? err)
 } finally {
   if (app) await app.close()
-  rmSync(repo, { recursive: true, force: true })
-  rmSync(wtPath, { recursive: true, force: true })
+  for (const d of [repoA, repoB, wtPath, storeDir]) rmSync(d, { recursive: true, force: true })
 }
 
 process.exit(failed ? 1 : 0)

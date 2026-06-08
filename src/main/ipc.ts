@@ -1,9 +1,14 @@
 import type { SessionKind, SessionState } from '../core/types'
 import type { WorktreeInfo, CreateWorktreeOptions } from '../core/worktree'
+import type { ProjectEntry } from '../core/projectStore'
 
 /** Channel names. Request/response (invoke) and event (send) are split. */
 export const Channels = {
   envRepoRoot: 'env:repo-root',
+  projectOpenDialog: 'project:open-dialog',
+  projectAdd: 'project:add',
+  projectListRecent: 'project:list-recent',
+  projectRemove: 'project:remove',
   worktreeCreate: 'worktree:create',
   worktreeList: 'worktree:list',
   worktreeRemove: 'worktree:remove',
@@ -69,6 +74,13 @@ export interface WorktreeRemoveRequest {
 export interface RendererApi {
   /** The repo root the app was launched against (CCM_REPO_ROOT or cwd). */
   repoRoot(): Promise<string>
+  /** Open a native folder picker; validates it is a git repo. null if cancelled. */
+  projectOpenDialog(): Promise<ProjectEntry | null>
+  /** Add a project by path (validates git repo; rejects otherwise). */
+  projectAdd(repoRoot: string): Promise<ProjectEntry>
+  /** Recently-opened projects, most-recent first. */
+  projectListRecent(): Promise<ProjectEntry[]>
+  projectRemove(repoRoot: string): Promise<void>
   worktreeCreate(repoRoot: string, opts: CreateWorktreeOptions): Promise<WorktreeInfo>
   worktreeList(repoRoot: string): Promise<WorktreeInfo[]>
   worktreeRemove(req: WorktreeRemoveRequest): Promise<void>
