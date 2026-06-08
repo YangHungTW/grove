@@ -48,7 +48,10 @@ function addProject(repoRoot: string): ProjectEntry {
 }
 
 function send(channel: string, payload: unknown): void {
-  mainWindow?.webContents.send(channel, payload)
+  // A pty can emit data after the window/webContents is destroyed (close or
+  // reload). Sending to a destroyed object throws "Object has been destroyed".
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return
+  mainWindow.webContents.send(channel, payload)
 }
 
 function snapshot(s: Session): SessionSnapshot {
@@ -210,6 +213,14 @@ function createWindow(): void {
   })
 
   mainWindow.on('ready-to-show', () => mainWindow?.show())
+
+  // When the window goes away, stop ptys and drop the ref so late pty data
+  // events don't try to post to a destroyed webContents.
+  mainWindow.on('closed', () => {
+    for (const p of ptys.values()) p.kill()
+    ptys.clear()
+    mainWindow = null
+  })
 
   if (process.env.ELECTRON_RENDERER_URL) {
     void mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
