@@ -1,0 +1,449 @@
+import type { Terminal } from '@xterm/xterm'
+import type { FitAddon } from '@xterm/addon-fit'
+import type { SessionKind, SessionState } from '../core/types'
+import type { SessionSnapshot } from '../main/ipc'
+import type { SessionDescriptor } from '../core/layoutStore'
+
+export interface WorktreeView {
+  id: string // = path
+  path: string
+  branch: string
+  primary: boolean
+}
+export interface ProjectView {
+  repoRoot: string // = id
+  name: string
+  expanded: boolean
+  loaded: boolean
+  worktrees: Map<string, WorktreeView>
+}
+export interface WtStatus {
+  dirty: number
+  ahead: number
+  behind: number
+}
+interface PaneRef {
+  term: Terminal
+  fit: FitAddon
+}
+
+const ANSI_RE = /\[[0-9;?]*[A-Za-z]|\][^]*|[()][AB0]/g
+function lastNonEmptyLine(data: string): string | null {
+  const lines = data
+    .replace(ANSI_RE, '')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+  return lines.length ? lines[lines.length - 1] : null
+}
+
+/**
+ * Single source of truth for the renderer. Holds all UI state + actions + the
+ * pty/IPC wiring. React subscribes via `useSyncExternalStore(subscribe,
+ * getVersion)` and reads fields directly; every mutating action calls notify().
+ * Terminal instances are created by the React <Pane> but registered here so the
+ * data stream and fit/resize can reach them imperatively.
+ */
+class Store {
+  projects = new Map<string, ProjectView>()
+  sessions = new Map<string, SessionSnapshot>()
+  panes = new Map<string, PaneRef>()
+  pending = new Set<string>()
+  splitMode = new Map<string, boolean>()
+  lastLine = new Map<string, string>()
+  wtStatus = new Map<string, WtStatus>()
+  activeProjectId: string | null = null
+  activeWorktreeId: string | null = null
+  focusedSessionId: string | null = null
+  colFr: number[] = []
+  rowFr: number[] = []
+
+  private savedLayout: SessionDescriptor[] = []
+  private restoredProjects = new Set<string>()
+  private restoring = false
+  private repoRoot = ''
+  private prevVisible: string[] = []
+  private lineRefreshScheduled = false
+
+  private version = 0
+  private listeners = new Set<() => void>()
+  subscribe = (cb: () => void): (() => void) => {
+    this.listeners.add(cb)
+    return () => this.listeners.delete(cb)
+  }
+  getVersion = (): number => this.version
+  private notify(): void {
+    this.version++
+    this.listeners.forEach((l) => l())
+  }
+
+  // --- selectors ---------------------------------------------------------
+  sessionsOf(worktreeId: string): SessionSnapshot[] {
+    return [...this.sessions.values()].filter((s) => s.worktreeId === worktreeId)
+  }
+  activeProject(): ProjectView | undefined {
+    return this.activeProjectId ? this.projects.get(this.activeProjectId) : undefined
+  }
+  /** Sessions whose panes are shown: all (split) or just the focused one. */
+  visibleSessions(): string[] {
+    if (!this.activeWorktreeId) return []
+    const all = this.sessionsOf(this.activeWorktreeId).map((s) => s.id)
+    if (this.splitMode.get(this.activeWorktreeId)) return all
+    if (this.focusedSessionId && all.includes(this.focusedSessionId)) return [this.focusedSessionId]
+    return all.slice(0, 1)
+  }
+  /** Ensure colFr/rowFr match the grid shape; returns {cols, rows, visible}. */
+  computeGrid(): { cols: number; rows: number; visible: string[] } {
+    const visible = this.visibleSessions()
+    const n = Math.max(visible.length, 1)
+    const cols = Math.ceil(Math.sqrt(n))
+    const rows = Math.ceil(n / cols)
+    if (this.colFr.length !== cols) this.colFr = Array(cols).fill(1)
+    if (this.rowFr.length !== rows) this.rowFr = Array(rows).fill(1)
+    return { cols, rows, visible }
+  }
+
+  // --- terminal registration (called by <Pane>) --------------------------
+  registerPane(id: string, term: Terminal, fit: FitAddon): void {
+    this.panes.set(id, { term, fit })
+  }
+  unregisterPane(id: string): void {
+    this.panes.get(id)?.term.dispose()
+    this.panes.delete(id)
+  }
+
+  /** Fit + resize visible panes; nudge newly-shown panes so TUIs repaint. */
+  fitVisible(): void {
+    const visible = this.visibleSessions()
+    const newlyShown = visible.filter((id) => !this.prevVisible.includes(id))
+    this.prevVisible = visible.slice()
+    requestAnimationFrame(() => {
+      for (const id of visible) {
+        const pane = this.panes.get(id)
+        if (!pane) continue
+        pane.fit.fit()
+        const { cols, rows } = pane.term
+        window.api.sessionResize(id, cols, rows)
+        if (newlyShown.includes(id) && rows > 1) {
+          pane.term.resize(cols, rows - 1)
+          window.api.sessionResize(id, cols, rows - 1)
+          requestAnimationFrame(() => {
+            pane.term.resize(cols, rows)
+            window.api.sessionResize(id, cols, rows)
+          })
+        }
+      }
+    })
+  }
+
+  // --- persistence -------------------------------------------------------
+  private currentDescriptors(): SessionDescriptor[] {
+    const out: SessionDescriptor[] = []
+    for (const project of this.projects.values())
+      for (const wt of project.worktrees.values())
+        for (const s of this.sessionsOf(wt.id))
+          out.push({ repoRoot: project.repoRoot, worktreePath: wt.path, kind: s.kind, title: s.title })
+    return out
+  }
+  private persistLayout(): void {
+    if (this.restoring) return
+    const keep = this.savedLayout.filter((d) => !this.restoredProjects.has(d.repoRoot))
+    const merged = [...keep, ...this.currentDescriptors()]
+    this.savedLayout = merged
+    window.api.layoutSave(merged)
+  }
+  private async restoreProject(project: ProjectView): Promise<void> {
+    if (this.restoredProjects.has(project.repoRoot)) return
+    this.restoredProjects.add(project.repoRoot)
+    const toRestore = this.savedLayout.filter((d) => d.repoRoot === project.repoRoot)
+    if (toRestore.length === 0) return
+    this.restoring = true
+    for (const d of toRestore) {
+      const wt = [...project.worktrees.values()].find((w) => w.path === d.worktreePath)
+      if (wt) await this.addSession(wt.id, d.kind)
+    }
+    this.restoring = false
+    this.persistLayout()
+  }
+
+  // --- projects ----------------------------------------------------------
+  private async loadWorktrees(project: ProjectView): Promise<void> {
+    project.worktrees.clear()
+    try {
+      const list = await window.api.worktreeList(project.repoRoot)
+      list.forEach((w, i) =>
+        project.worktrees.set(w.path, {
+          id: w.path,
+          path: w.path,
+          branch: w.branch,
+          primary: i === 0 || w.path === project.repoRoot
+        })
+      )
+    } catch {
+      /* not a git repo */
+    }
+    project.loaded = true
+    for (const wt of project.worktrees.values()) {
+      window.api
+        .worktreeStatus(wt.path)
+        .then((s) => {
+          this.wtStatus.set(wt.id, s)
+          this.notify()
+        })
+        .catch(() => {})
+    }
+  }
+  private upsertProject(repoRoot: string, name: string): ProjectView {
+    let p = this.projects.get(repoRoot)
+    if (!p) {
+      p = { repoRoot, name, expanded: false, loaded: false, worktrees: new Map() }
+      this.projects.set(repoRoot, p)
+    }
+    return p
+  }
+  async openProject(): Promise<void> {
+    try {
+      const entry = await window.api.projectOpenDialog()
+      if (!entry) return
+      this.upsertProject(entry.repoRoot, entry.name)
+      await this.setActiveProject(entry.repoRoot)
+    } catch (err) {
+      this.toast(errMsg(err))
+    }
+  }
+  toggleProjectExpand(repoRoot: string): void {
+    const p = this.projects.get(repoRoot)
+    if (!p) return
+    p.expanded = !p.expanded
+    this.notify()
+  }
+  async setActiveProject(repoRoot: string): Promise<void> {
+    const p = this.projects.get(repoRoot)
+    if (!p) return
+    this.activeProjectId = repoRoot
+    p.expanded = true // select expands this one; never collapses others
+    if (!p.loaded) await this.loadWorktrees(p)
+    await this.restoreProject(p)
+    this.activeWorktreeId = p.worktrees.keys().next().value ?? null
+    this.syncFocus()
+    this.notify()
+  }
+  async removeProject(repoRoot: string): Promise<void> {
+    for (const wt of this.projects.get(repoRoot)?.worktrees.values() ?? [])
+      for (const s of this.sessionsOf(wt.id)) this.closeSession(s.id, true)
+    await window.api.projectRemove(repoRoot)
+    this.projects.delete(repoRoot)
+    this.savedLayout = this.savedLayout.filter((d) => d.repoRoot !== repoRoot)
+    this.restoredProjects.add(repoRoot)
+    if (this.activeProjectId === repoRoot) {
+      this.activeProjectId = this.projects.keys().next().value ?? null
+      this.activeWorktreeId = this.activeProject()?.worktrees.keys().next().value ?? null
+    }
+    this.persistLayout()
+    this.notify()
+  }
+
+  // --- worktrees ---------------------------------------------------------
+  async createWorktree(project: ProjectView, branch: string): Promise<void> {
+    const path = `${project.repoRoot}-wt-${branch.replace(/[^\w.-]/g, '_')}`
+    try {
+      const info = await window.api.worktreeCreate(project.repoRoot, { path, branch, newBranch: true })
+      project.worktrees.set(info.path, {
+        id: info.path,
+        path: info.path,
+        branch: info.branch || branch,
+        primary: false
+      })
+      this.activeProjectId = project.repoRoot
+      this.activeWorktreeId = info.path
+      this.syncFocus()
+    } catch (err) {
+      this.toast(errMsg(err))
+    }
+    this.notify()
+  }
+  async removeWorktree(project: ProjectView, wtId: string): Promise<void> {
+    const wt = project.worktrees.get(wtId)
+    if (!wt || wt.primary) return
+    for (const s of this.sessionsOf(wtId)) this.closeSession(s.id, true)
+    try {
+      await window.api.worktreeRemove({ repoRoot: project.repoRoot, path: wt.path, force: true })
+    } catch (err) {
+      this.toast(errMsg(err))
+    }
+    project.worktrees.delete(wtId)
+    if (this.activeWorktreeId === wtId)
+      this.activeWorktreeId = project.worktrees.keys().next().value ?? null
+    this.persistLayout()
+    this.notify()
+  }
+  selectWorktree(projectId: string, wtId: string): void {
+    this.activeProjectId = projectId
+    this.activeWorktreeId = wtId
+    this.syncFocus()
+    this.notify()
+  }
+  switchWorktree(index: number): void {
+    const p = this.activeProject()
+    if (!p) return
+    const wt = [...p.worktrees.values()][index]
+    if (wt) this.selectWorktree(p.repoRoot, wt.id)
+  }
+  async switchProject(index: number): Promise<void> {
+    const p = [...this.projects.values()][index]
+    if (p) await this.setActiveProject(p.repoRoot)
+  }
+
+  // --- sessions ----------------------------------------------------------
+  async addSession(worktreeId: string, kind: SessionKind): Promise<void> {
+    const wt = this.activeProject()?.worktrees.get(worktreeId)
+    if (!wt) return
+    const n = this.sessionsOf(worktreeId).filter((s) => s.kind === kind).length
+    const title = n === 0 ? kind : `${kind} ${n + 1}`
+    const agent = kind === 'agent' ? 'claude' : undefined
+    try {
+      const snap = await window.api.sessionCreate({
+        worktreeId,
+        kind,
+        command: kind,
+        agent,
+        cwd: wt.path,
+        title
+      })
+      this.sessions.set(snap.id, snap)
+      this.activeWorktreeId = worktreeId
+      this.focusedSessionId = snap.id
+      this.persistLayout()
+    } catch (err) {
+      this.toast(errMsg(err))
+    }
+    this.notify()
+  }
+  closeSession(id: string, quiet = false): void {
+    window.api.sessionKill(id)
+    this.sessions.delete(id)
+    this.pending.delete(id)
+    if (this.focusedSessionId === id) this.focusedSessionId = null
+    if (!quiet) {
+      this.persistLayout()
+      this.notify()
+    }
+  }
+  focusSession(id: string): void {
+    this.focusedSessionId = id
+    this.pending.delete(id)
+    this.notify()
+    this.panes.get(id)?.term.focus()
+  }
+  private syncFocus(): void {
+    const visible = new Set(
+      this.activeWorktreeId ? this.sessionsOf(this.activeWorktreeId).map((s) => s.id) : []
+    )
+    if (this.focusedSessionId && !visible.has(this.focusedSessionId)) this.focusedSessionId = null
+    if (!this.focusedSessionId && visible.size) this.focusedSessionId = [...visible][0]
+  }
+
+  // --- split / notifications --------------------------------------------
+  toggleSplit(): void {
+    if (!this.activeWorktreeId) return
+    this.splitMode.set(this.activeWorktreeId, !this.splitMode.get(this.activeWorktreeId))
+    this.notify()
+  }
+  isSplit(): boolean {
+    return this.activeWorktreeId ? !!this.splitMode.get(this.activeWorktreeId) : false
+  }
+  setFractions(col: number[], row: number[]): void {
+    this.colFr = col
+    this.rowFr = row
+    this.notify()
+  }
+  jumpToPending(): void {
+    const ids = [...this.pending]
+    if (!ids.length) return
+    const id = ids[ids.length - 1]
+    const s = this.sessions.get(id)
+    if (!s) {
+      this.pending.delete(id)
+      return
+    }
+    for (const p of this.projects.values())
+      for (const wt of p.worktrees.values())
+        if (wt.id === s.worktreeId) {
+          this.activeProjectId = p.repoRoot
+          p.expanded = true
+          this.activeWorktreeId = wt.id
+        }
+    this.focusSession(id)
+  }
+
+  // --- toast (kept imperative; tiny + transient) -------------------------
+  toast(message: string): void {
+    const node = document.createElement('div')
+    node.className = 'toast'
+    node.textContent = message
+    document.body.appendChild(node)
+    setTimeout(() => node.remove(), 4000)
+  }
+
+  // --- bootstrap ---------------------------------------------------------
+  wireEvents(): void {
+    window.api.onSessionData(({ id, data }) => {
+      this.panes.get(id)?.term.write(data)
+      const line = lastNonEmptyLine(data)
+      if (line) {
+        this.lastLine.set(id, line)
+        if (!this.lineRefreshScheduled) {
+          this.lineRefreshScheduled = true
+          setTimeout(() => {
+            this.lineRefreshScheduled = false
+            this.notify()
+          }, 600)
+        }
+      }
+    })
+    window.api.onSessionState(({ id, state }) => {
+      const s = this.sessions.get(id)
+      if (!s) return
+      s.state = state
+      if ((state as SessionState) === 'waiting' && id !== this.focusedSessionId) {
+        this.pending.add(id)
+        this.toast(`${s.title} needs your attention`)
+      }
+      this.notify()
+    })
+    window.api.onSessionExit(({ id }) => {
+      const s = this.sessions.get(id)
+      if (s) s.state = 'exited'
+      this.pending.delete(id)
+      this.notify()
+    })
+  }
+
+  async init(): Promise<void> {
+    await document.fonts.load('13px "MesloLGS NF"').catch(() => {})
+    await document.fonts.load('700 13px "MesloLGS NF"').catch(() => {})
+    this.wireEvents()
+    this.savedLayout = await window.api.layoutLoad()
+    const recent = await window.api.projectListRecent()
+    for (const p of recent) this.upsertProject(p.repoRoot, p.name)
+    this.repoRoot = await window.api.repoRoot()
+    try {
+      const entry = await window.api.projectAdd(this.repoRoot)
+      this.upsertProject(entry.repoRoot, entry.name)
+    } catch {
+      /* launched dir not a git repo */
+    }
+    const first = this.projects.keys().next().value as string | undefined
+    if (first) await this.setActiveProject(first)
+    else this.notify()
+  }
+}
+
+function errMsg(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err)
+  return raw
+    .replace(/^Error: Error invoking remote method '[^']*':\s*/, '')
+    .replace(/^\w*Error:\s*/, '')
+}
+
+export const store = new Store()
