@@ -52,6 +52,26 @@ function snapshot(s: Session): SessionSnapshot {
   }
 }
 
+/**
+ * How to launch a session's pty. Coding agents are started inside the user's
+ * interactive login shell and the agent command is typed in (bootstrap) — this
+ * is exactly like opening a terminal and running `claude`, so PATH, profile and
+ * shell aliases (e.g. `claude` → `claude --plugin-dir …`) all apply. The agent
+ * command is overridable via CCM_AGENT_CMD (used by tests to avoid real auth).
+ */
+function launchSpecFor(req: CreateSessionRequest): {
+  command: string
+  args?: string[]
+  bootstrap?: string
+} {
+  if (req.kind === 'agent') {
+    const shell = process.env.SHELL || '/bin/zsh'
+    const agentCmd = process.env.CCM_AGENT_CMD ?? 'claude'
+    return { command: shell, args: ['-il'], bootstrap: `${agentCmd}\r` }
+  }
+  return { command: req.command, args: req.args }
+}
+
 function createSession(req: CreateSessionRequest): SessionSnapshot {
   // Registry enforces the single-agent-per-worktree invariant (may throw).
   const record = registry.addSession({
@@ -62,12 +82,14 @@ function createSession(req: CreateSessionRequest): SessionSnapshot {
   })
 
   const agent = req.agent ?? (req.kind === 'agent' ? 'claude' : '')
+  const spec = launchSpecFor(req)
   const pty = new PtySession({
     id: record.id,
     worktreeId: req.worktreeId,
     kind: req.kind,
-    command: req.command,
-    args: req.args,
+    command: spec.command,
+    args: spec.args,
+    bootstrap: spec.bootstrap,
     cwd: req.cwd,
     cols: req.cols,
     rows: req.rows,

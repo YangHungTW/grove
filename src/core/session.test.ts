@@ -58,6 +58,26 @@ describe('PtySession — pty lifecycle', () => {
     expect(isAlive(pid)).toBe(false)
   })
 
+  it('writes the bootstrap command into the pty after spawn', async () => {
+    const s = new PtySession({
+      worktreeId: 'wt-1',
+      kind: 'agent',
+      command: 'bash',
+      cwd: process.cwd(),
+      bootstrap: 'echo BOOT_MARKER\n'
+    })
+    const got = await new Promise<string>((resolve) => {
+      let buf = ''
+      s.onData((d) => {
+        buf += d
+        if (buf.includes('BOOT_MARKER')) resolve(buf)
+      })
+      s.start()
+    })
+    expect(got).toContain('BOOT_MARKER')
+    s.kill()
+  })
+
   it('resize() on a live session does not throw', () => {
     const s = new PtySession({
       worktreeId: 'wt-1',

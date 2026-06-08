@@ -33,6 +33,7 @@ const storeDir = mkdtempSync(join(tmpdir(), 'ccm-store-'))
 const storeFile = join(storeDir, 'projects.json')
 const wtPath = `${repoA}-wt-feat`
 const marker = join(repoA, `marker_${Date.now()}`)
+const agentMarker = join(repoA, `agent_${Date.now()}`)
 let app
 let failed = false
 
@@ -43,7 +44,14 @@ try {
   app = await electron.launch({
     args: ['.'],
     cwd: process.cwd(),
-    env: { ...process.env, CCM_STORE: storeFile, CCM_REPO_ROOT: repoA }
+    env: {
+      ...process.env,
+      CCM_STORE: storeFile,
+      CCM_REPO_ROOT: repoA,
+      // Stand in for the real `claude` CLI so the agent-launch path is testable
+      // without auth: typing this into the login shell creates a marker file.
+      CCM_AGENT_CMD: `touch '${agentMarker}'`
+    }
   })
   const win = await app.firstWindow()
   await win.waitForSelector('.project-header', { timeout: 15000 })
@@ -96,18 +104,41 @@ try {
   )
   assert.ok(existsSync(join(wtPath, '.git')), `worktree should exist at ${wtPath}`)
 
-  // Re-select A's main worktree so the screenshot shows the split panes.
-  await win.locator('.wt-title', { hasText: 'main' }).first().click()
+  // Re-select A's main worktree.
+  await win.locator('.project.active .wt-title', { hasText: 'main' }).first().click()
   await win.waitForTimeout(400)
+
+  // 6) AGENT LAUNCH — '+ agent' starts the login shell + bootstraps the agent
+  //    command (here CCM_AGENT_CMD), which creates a marker file on disk.
+  await projA.getByRole('button', { name: '+ agent' }).click()
+  let agentLaunched = false
+  for (let i = 0; i < 60; i++) {
+    if (existsSync(agentMarker)) {
+      agentLaunched = true
+      break
+    }
+    await new Promise((r) => setTimeout(r, 250))
+  }
+  assert.ok(agentLaunched, 'agent launch: CCM_AGENT_CMD marker should appear on disk')
+
+  // 7) SINGLE-AGENT INVARIANT — a second '+ agent' is rejected (still one ★).
+  await projA.getByRole('button', { name: '+ agent' }).click()
+  await win.waitForTimeout(500)
+  const agentRows = await win.locator('.session-label', { hasText: '★' }).count()
+  assert.equal(agentRows, 1, `single-agent: expected exactly 1 agent row, got ${agentRows}`)
+
   await win.screenshot({ path: join(process.cwd(), 'e2e', 'smoke.png') })
 
-  console.log(`SMOKE_OK projects=${projectCount} split=${visible} roundTrip=true worktreeCreated=true`)
+  console.log(
+    `SMOKE_OK projects=${projectCount} split=${visible} roundTrip=true worktreeCreated=true agentLaunched=true singleAgent=true`
+  )
 } catch (err) {
   failed = true
   console.error('SMOKE_FAIL', err?.stack ?? err?.message ?? err)
 } finally {
   if (app) await app.close()
   for (const d of [repoA, repoB, wtPath, storeDir]) rmSync(d, { recursive: true, force: true })
+  rmSync(agentMarker, { force: true })
 }
 
 process.exit(failed ? 1 : 0)

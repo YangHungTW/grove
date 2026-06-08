@@ -14,6 +14,8 @@ export interface PtySessionOptions {
   cols?: number
   rows?: number
   title?: string
+  /** Input written into the pty immediately after spawn (e.g. `claude\r`). */
+  bootstrap?: string
 }
 
 export interface ExitInfo {
@@ -86,6 +88,8 @@ export class PtySession {
     })
 
     this.setState('idle')
+
+    if (this.opts.bootstrap) this.proc.write(this.opts.bootstrap)
   }
 
   write(data: string): void {
