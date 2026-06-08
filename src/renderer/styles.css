@@ -206,6 +206,11 @@ body {
 .pane.focused {
   border-color: var(--accent);
 }
+.pane .xterm,
+.pane .xterm .xterm-viewport,
+.pane .xterm .xterm-screen {
+  height: 100% !important;
+}
 
 .toast {
   position: fixed;

@@ -34,25 +34,29 @@ const storeFile = join(storeDir, 'projects.json')
 const wtPath = `${repoA}-wt-feat`
 const marker = join(repoA, `marker_${Date.now()}`)
 const agentMarker = join(repoA, `agent_${Date.now()}`)
+const layoutFile = join(storeDir, 'layout.json')
 let app
 let failed = false
+
+const launchOpts = {
+  args: ['.'],
+  cwd: process.cwd(),
+  env: {
+    ...process.env,
+    CCM_STORE: storeFile,
+    CCM_LAYOUT: layoutFile,
+    CCM_REPO_ROOT: repoA,
+    // Stand in for the real `claude` CLI so the agent-launch path is testable
+    // without auth: typing this into the login shell creates a marker file.
+    CCM_AGENT_CMD: `touch '${agentMarker}'`
+  }
+}
 
 try {
   // Seed the recent-projects store with repoB (simulates a previously-opened project).
   writeFileSync(storeFile, JSON.stringify([{ repoRoot: repoB, name: basename(repoB) }]))
 
-  app = await electron.launch({
-    args: ['.'],
-    cwd: process.cwd(),
-    env: {
-      ...process.env,
-      CCM_STORE: storeFile,
-      CCM_REPO_ROOT: repoA,
-      // Stand in for the real `claude` CLI so the agent-launch path is testable
-      // without auth: typing this into the login shell creates a marker file.
-      CCM_AGENT_CMD: `touch '${agentMarker}'`
-    }
-  })
+  app = await electron.launch(launchOpts)
   const win = await app.firstWindow()
   await win.waitForSelector('.project-header', { timeout: 15000 })
 
@@ -108,6 +112,23 @@ try {
   await win.locator('.project.active .wt-title', { hasText: 'main' }).first().click()
   await win.waitForTimeout(400)
 
+  // 5b) KEYBOARD NAV — ⌘2 switches to the 2nd worktree (feat), ⌘1 back to main.
+  const activeWt = () =>
+    win.evaluate(
+      () => document.querySelector('.project.active .wt-header.active .wt-title')?.textContent ?? ''
+    )
+  await win.keyboard.press('Meta+2')
+  await win.waitForFunction(
+    () => (document.querySelector('.project.active .wt-header.active .wt-title')?.textContent ?? '').includes('feat'),
+    { timeout: 5000 }
+  )
+  await win.keyboard.press('Meta+1')
+  await win.waitForFunction(
+    () => (document.querySelector('.project.active .wt-header.active .wt-title')?.textContent ?? '').includes('main'),
+    { timeout: 5000 }
+  )
+  const kbdNav = (await activeWt()).includes('main')
+
   // 6) AGENT LAUNCH — '+ agent' starts the login shell + bootstraps the agent
   //    command (here CCM_AGENT_CMD), which creates a marker file on disk.
   await projA.getByRole('button', { name: '+ agent' }).click()
@@ -129,8 +150,24 @@ try {
 
   await win.screenshot({ path: join(process.cwd(), 'e2e', 'smoke.png') })
 
+  // 8) PERSISTENCE — close, relaunch with the same stores; sessions are restored.
+  await win.waitForTimeout(600) // let the final layout save flush
+  await app.close()
+  app = await electron.launch(launchOpts)
+  const win2 = await app.firstWindow()
+  await win2.waitForSelector('.project.active .wt-title', { timeout: 15000 })
+  await win2.waitForFunction(
+    () => [...document.querySelectorAll('.pane')].filter((p) => getComputedStyle(p).display !== 'none').length >= 2,
+    { timeout: 15000 }
+  )
+  const restored = await win2.evaluate(
+    () => [...document.querySelectorAll('.pane')].filter((p) => getComputedStyle(p).display !== 'none').length
+  )
+  assert.ok(restored >= 2, `persistence: expected >= 2 restored panes, got ${restored}`)
+
   console.log(
-    `SMOKE_OK projects=${projectCount} split=${visible} roundTrip=true worktreeCreated=true agentLaunched=true singleAgent=true`
+    `SMOKE_OK projects=${projectCount} split=${visible} roundTrip=true worktreeCreated=true ` +
+      `agentLaunched=true singleAgent=true kbdNav=${kbdNav} restored=${restored}`
   )
 } catch (err) {
   failed = true

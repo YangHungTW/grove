@@ -4,6 +4,7 @@ import '@xterm/xterm/css/xterm.css'
 import './styles.css'
 import type { SessionKind, SessionState } from '../core/types'
 import type { SessionSnapshot } from '../main/ipc'
+import type { SessionDescriptor } from '../core/layoutStore'
 
 /**
  * Renderer: cmux-style shell with a ccmanager-style hierarchy.
@@ -42,6 +43,11 @@ let activeProjectId: string | null = null
 let activeWorktreeId: string | null = null
 let focusedSessionId: string | null = null
 
+// Persistence: descriptors saved at launch; projects respawned lazily on select.
+let savedLayout: SessionDescriptor[] = []
+const restoredProjects = new Set<string>()
+let restoring = false
+
 const sidebar = document.getElementById('sidebar') as HTMLElement
 const panesRoot = document.getElementById('panes') as HTMLElement
 
@@ -64,6 +70,39 @@ const sessionsOf = (worktreeId: string): SessionSnapshot[] =>
 
 const activeProject = (): ProjectView | undefined =>
   activeProjectId ? projects.get(activeProjectId) : undefined
+
+function currentDescriptors(): SessionDescriptor[] {
+  const out: SessionDescriptor[] = []
+  for (const project of projects.values())
+    for (const wt of project.worktrees.values())
+      for (const s of sessionsOf(wt.id))
+        out.push({ repoRoot: project.repoRoot, worktreePath: wt.path, kind: s.kind, title: s.title })
+  return out
+}
+
+/** Save layout = live sessions + saved descriptors of not-yet-restored projects. */
+function persistLayout(): void {
+  if (restoring) return
+  const keep = savedLayout.filter((d) => !restoredProjects.has(d.repoRoot))
+  const merged = [...keep, ...currentDescriptors()]
+  savedLayout = merged
+  window.api.layoutSave(merged)
+}
+
+/** Respawn the persisted sessions of a project once its worktrees are loaded. */
+async function restoreProject(project: ProjectView): Promise<void> {
+  if (restoredProjects.has(project.repoRoot)) return
+  restoredProjects.add(project.repoRoot)
+  const toRestore = savedLayout.filter((d) => d.repoRoot === project.repoRoot)
+  if (toRestore.length === 0) return
+  restoring = true
+  for (const d of toRestore) {
+    const wt = [...project.worktrees.values()].find((w) => w.path === d.worktreePath)
+    if (wt) await addSession(wt.id, d.kind)
+  }
+  restoring = false
+  persistLayout()
+}
 
 // --- projects ------------------------------------------------------------
 async function loadWorktrees(project: ProjectView): Promise<void> {
@@ -110,11 +149,14 @@ async function removeProject(repoRoot: string): Promise<void> {
   }
   await window.api.projectRemove(repoRoot)
   projects.delete(repoRoot)
+  savedLayout = savedLayout.filter((d) => d.repoRoot !== repoRoot)
+  restoredProjects.add(repoRoot) // its descriptors are gone; don't re-merge
   if (activeProjectId === repoRoot) {
     activeProjectId = projects.keys().next().value ?? null
     const p = activeProject()
     activeWorktreeId = p ? (p.worktrees.keys().next().value ?? null) : null
   }
+  persistLayout()
   layoutPanes()
   renderSidebar()
 }
@@ -125,6 +167,7 @@ async function setActiveProject(repoRoot: string): Promise<void> {
   activeProjectId = repoRoot
   for (const other of projects.values()) other.expanded = other.repoRoot === repoRoot
   if (!p.loaded) await loadWorktrees(p)
+  await restoreProject(p)
   activeWorktreeId = p.worktrees.keys().next().value ?? null
   syncFocus()
   layoutPanes()
@@ -168,6 +211,7 @@ async function removeWorktree(project: ProjectView, wtId: string): Promise<void>
   }
   project.worktrees.delete(wtId)
   if (activeWorktreeId === wtId) activeWorktreeId = project.worktrees.keys().next().value ?? null
+  persistLayout()
   layoutPanes()
   renderSidebar()
 }
@@ -190,7 +234,9 @@ async function addSession(worktreeId: string, kind: SessionKind): Promise<void> 
     sessions.set(snap.id, snap)
     mountPane(snap)
     activeWorktreeId = worktreeId
+    layoutPanes() // size/fit the new pane to fill its cell (else xterm stays 24 rows)
     focusSession(snap.id)
+    persistLayout()
   } catch (err) {
     notify(String(err)) // single-agent invariant etc.
   }
@@ -208,6 +254,7 @@ function closeSession(id: string, quiet = false): void {
   pending.delete(id)
   if (focusedSessionId === id) focusedSessionId = null
   if (!quiet) {
+    persistLayout()
     layoutPanes()
     renderSidebar()
   }
@@ -391,16 +438,43 @@ window.api.onSessionExit(({ id }) => {
   renderSidebar()
 })
 
+function switchWorktree(index: number): void {
+  const p = activeProject()
+  if (!p) return
+  const wt = [...p.worktrees.values()][index]
+  if (!wt) return
+  activeWorktreeId = wt.id
+  syncFocus()
+  layoutPanes()
+  renderSidebar()
+}
+
+async function switchProject(index: number): Promise<void> {
+  const p = [...projects.values()][index]
+  if (p) await setActiveProject(p.repoRoot)
+}
+
 window.addEventListener('resize', () => layoutPanes())
 window.addEventListener('keydown', (e) => {
-  if (e.metaKey && e.key.toLowerCase() === 't' && activeWorktreeId) {
+  if (!e.metaKey) return
+  const k = e.key.toLowerCase()
+  if (k === 't' && activeWorktreeId) {
     e.preventDefault()
     void addSession(activeWorktreeId, 'shell')
+  } else if (k === 'w' && focusedSessionId) {
+    e.preventDefault()
+    closeSession(focusedSessionId)
+  } else if (/^[1-9]$/.test(e.key)) {
+    e.preventDefault()
+    const idx = Number(e.key) - 1
+    if (e.altKey) void switchProject(idx)
+    else switchWorktree(idx)
   }
 })
 
 // --- bootstrap -----------------------------------------------------------
 async function init(): Promise<void> {
+  savedLayout = await window.api.layoutLoad()
   const recent = await window.api.projectListRecent()
   for (const p of recent) upsertProject(p.repoRoot, p.name)
 

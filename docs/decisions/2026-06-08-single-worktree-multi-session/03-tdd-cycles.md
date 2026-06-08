@@ -10,10 +10,12 @@
 | 5 | `ProjectStore` — recent projects, persisted (6)      | 2026-06-08T05:50Z | 2026-06-08T05:51Z | no — small + focused                 |
 | 6 | `isGitRepo` — validate opened folder (1)             | 2026-06-08T05:53Z | 2026-06-08T05:53Z | no                                   |
 | 7 | `PtySession.bootstrap` — type cmd after spawn (1)    | 2026-06-08T06:10Z | 2026-06-08T06:11Z | no — enables real agent launch       |
+| 8 | `LayoutStore` — persist/restore session layout (4)   | 2026-06-08T07:10Z | 2026-06-08T07:11Z | no                                   |
 
-**Totals:** 7 cycles, 24 tests, all green. Core engine (`src/core/*`) complete.
-Cycles 5–6 added with the Project layer (`07-project-layer.md`); cycle 7 with the
-real-claude agent launch (`08-agent-cli.md`).
+**Totals:** 8 cycles, 28 tests, all green. Core engine (`src/core/*`) complete.
+Cycles 5–6: Project layer (`07-project-layer.md`); cycle 7: real-claude agent
+launch (`08-agent-cli.md`); cycle 8: keyboard nav + persistence + a UI fill bug
+fix (`09-keyboard-persistence-uifix.md`).
 
 Remaining work (Electron wiring) is validated by acceptance criterion 5
 (`typecheck && build`), not by unit tests — IPC/renderer are integration glue,

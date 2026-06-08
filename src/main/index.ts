@@ -4,6 +4,7 @@ import { SessionRegistry } from '../core/sessionRegistry'
 import { PtySession } from '../core/session'
 import { createWorktree, listWorktrees, removeWorktree, isGitRepo } from '../core/worktree'
 import { ProjectStore, type ProjectEntry } from '../core/projectStore'
+import { LayoutStore, type SessionDescriptor } from '../core/layoutStore'
 import { detectState } from '../core/stateDetection'
 import type { CreateWorktreeOptions } from '../core/worktree'
 import {
@@ -20,6 +21,7 @@ const registry = new SessionRegistry()
 const ptys = new Map<string, PtySession>()
 let mainWindow: BrowserWindow | null = null
 let projectStore: ProjectStore | null = null
+let layoutStore: LayoutStore | null = null
 
 /** Recent-projects store path: CCM_STORE override (tests) or Electron userData. */
 function store(): ProjectStore {
@@ -28,6 +30,15 @@ function store(): ProjectStore {
     projectStore = new ProjectStore(file)
   }
   return projectStore
+}
+
+/** Session-layout store path: CCM_LAYOUT override (tests) or Electron userData. */
+function layout(): LayoutStore {
+  if (!layoutStore) {
+    const file = process.env.CCM_LAYOUT ?? join(app.getPath('userData'), 'layout.json')
+    layoutStore = new LayoutStore(file)
+  }
+  return layoutStore
 }
 
 /** Validate + record a project by path. Throws if it is not a git repo. */
@@ -147,6 +158,10 @@ function registerIpc(): void {
   ipcMain.handle(Channels.projectListRecent, () => store().list())
   ipcMain.handle(Channels.projectRemove, (_e: IpcMainInvokeEvent, repoRoot: string) =>
     store().remove(repoRoot)
+  )
+  ipcMain.handle(Channels.layoutLoad, () => layout().load())
+  ipcMain.on(Channels.layoutSave, (_e, descriptors: SessionDescriptor[]) =>
+    layout().save(descriptors)
   )
 
   ipcMain.handle(
