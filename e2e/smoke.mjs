@@ -166,11 +166,14 @@ try {
   }
   assert.ok(agentLaunched, 'agent launch: CCM_AGENT_CMD marker should appear on disk')
 
-  // 7) SINGLE-AGENT INVARIANT — a second '+ agent' is rejected (still one ★).
+  // 7) MULTIPLE AGENTS — a second '+ agent' is allowed (two ★ agents).
   await projA.getByRole('button', { name: '+ agent' }).click()
-  await win.waitForTimeout(500)
+  await win.waitForFunction(
+    () => [...document.querySelectorAll('.session-label')].filter((l) => l.textContent?.includes('★')).length >= 2,
+    { timeout: 5000 }
+  )
   const agentRows = await win.locator('.session-label', { hasText: '★' }).count()
-  assert.equal(agentRows, 1, `single-agent: expected exactly 1 agent row, got ${agentRows}`)
+  assert.equal(agentRows, 2, `multi-agent: expected 2 agent rows, got ${agentRows}`)
 
   // 7b) PROJECT SWITCH preserves sessions — switch to B then back to A.
   await win.locator('.project-title', { hasText: basename(repoB) }).click()
@@ -183,7 +186,7 @@ try {
   await win.waitForSelector('.project.active .wt-title', { timeout: 5000 })
   await win.waitForTimeout(300)
   const agentAfterSwitch = await win.locator('.session-label', { hasText: '★' }).count()
-  assert.equal(agentAfterSwitch, 1, `project switch lost the agent (★=${agentAfterSwitch})`)
+  assert.equal(agentAfterSwitch, 2, `project switch lost agents (★=${agentAfterSwitch})`)
   const visibleAfterSwitch = await win.evaluate(
     () => [...document.querySelectorAll('.pane')].filter((p) => getComputedStyle(p).display !== 'none').length
   )
@@ -204,7 +207,7 @@ try {
 
   console.log(
     `SMOKE_OK projects=${projectCount} split=${visible} dragResize=${dragResize} roundTrip=true ` +
-      `worktreeCreated=true agentLaunched=true singleAgent=true ` +
+      `worktreeCreated=true agentLaunched=true multiAgent=${agentRows === 2} ` +
       `agentAfterSwitch=${agentAfterSwitch} kbdNav=${kbdNav} restored=${restored}`
   )
 } catch (err) {

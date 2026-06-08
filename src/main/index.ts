@@ -64,23 +64,24 @@ function snapshot(s: Session): SessionSnapshot {
 }
 
 /**
- * How to launch a session's pty. Coding agents are started inside the user's
- * interactive login shell and the agent command is typed in (bootstrap) — this
- * is exactly like opening a terminal and running `claude`, so PATH, profile and
- * shell aliases (e.g. `claude` → `claude --plugin-dir …`) all apply. The agent
- * command is overridable via CCM_AGENT_CMD (used by tests to avoid real auth).
+ * How to launch a session's pty. Every session runs the user's default shell as
+ * an interactive login shell ($SHELL -il, e.g. zsh) — exactly like opening a
+ * terminal tab, so PATH/profile/aliases (and the p10k prompt) all apply. An
+ * `agent` additionally has its command typed in (bootstrap), so the `claude`
+ * alias expands. The agent command is overridable via CCM_AGENT_CMD (tests use
+ * it to avoid real auth).
  */
 function launchSpecFor(req: CreateSessionRequest): {
   command: string
   args?: string[]
   bootstrap?: string
 } {
+  const shell = process.env.SHELL || '/bin/zsh'
   if (req.kind === 'agent') {
-    const shell = process.env.SHELL || '/bin/zsh'
     const agentCmd = process.env.CCM_AGENT_CMD ?? 'claude'
     return { command: shell, args: ['-il'], bootstrap: `${agentCmd}\r` }
   }
-  return { command: req.command, args: req.args }
+  return { command: shell, args: ['-il'] }
 }
 
 function createSession(req: CreateSessionRequest): SessionSnapshot {
@@ -131,8 +132,7 @@ function createSession(req: CreateSessionRequest): SessionSnapshot {
   try {
     pty.start()
   } catch (err) {
-    // Spawn failed (e.g. command not on PATH) — roll back so a dead agent
-    // record does not permanently occupy the single-agent slot.
+    // Spawn failed (e.g. shell not found) — roll back the registry record.
     ptys.delete(record.id)
     registry.removeSession(record.id)
     throw err

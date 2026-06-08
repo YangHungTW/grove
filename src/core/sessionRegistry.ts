@@ -1,13 +1,5 @@
 import type { NewSession, Session } from './types'
 
-/** Thrown when a second `agent` session is added to a worktree that already has one. */
-export class SingleAgentError extends Error {
-  constructor(worktreeId: string) {
-    super(`worktree "${worktreeId}" already has a primary agent session`)
-    this.name = 'SingleAgentError'
-  }
-}
-
 let counter = 0
 function genId(): string {
   counter += 1
@@ -15,21 +7,14 @@ function genId(): string {
 }
 
 /**
- * In-memory registry mapping a worktree to its sessions.
- *
- * Invariant: at most ONE live `kind:'agent'` session per worktree; auxiliary
- * kinds (`shell`/`server`/`task`) are unbounded. This is what makes
- * "single worktree, multiple sessions" safe — only the agent writes files.
+ * In-memory registry mapping a worktree to its sessions. A worktree may hold any
+ * number of sessions of any kind (multiple agents + shells).
  */
 export class SessionRegistry {
   private readonly byId = new Map<string, Session>()
   private readonly byWorktree = new Map<string, Set<string>>()
 
   addSession(input: NewSession): Session {
-    if (input.kind === 'agent' && this.hasAgent(input.worktreeId)) {
-      throw new SingleAgentError(input.worktreeId)
-    }
-
     const session: Session = {
       id: input.id ?? genId(),
       worktreeId: input.worktreeId,

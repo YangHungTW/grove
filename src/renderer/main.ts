@@ -71,20 +71,6 @@ function lastNonEmptyLine(data: string): string | null {
   return lines.length ? lines[lines.length - 1] : null
 }
 
-function commandFor(kind: SessionKind): { command: string; args?: string[]; agent?: string } {
-  switch (kind) {
-    case 'agent':
-      return { command: 'claude', agent: 'claude' }
-    case 'server':
-      return { command: 'bash', args: ['-lc', 'echo "dev server pane"; exec bash'] }
-    case 'task':
-      return { command: 'bash', args: ['-lc', 'echo "task pane"; exec bash'] }
-    case 'shell':
-    default:
-      return { command: 'bash' }
-  }
-}
-
 const sessionsOf = (worktreeId: string): SessionSnapshot[] =>
   [...sessions.values()].filter((s) => s.worktreeId === worktreeId)
 
@@ -251,27 +237,19 @@ async function addSession(worktreeId: string, kind: SessionKind): Promise<void> 
   const wt = activeProject()?.worktrees.get(worktreeId)
   if (!wt) return
 
-  // Only one agent per worktree: clicking "+ agent" again just focuses it.
-  if (kind === 'agent') {
-    const existing = sessionsOf(worktreeId).find((s) => s.kind === 'agent')
-    if (existing) {
-      activeWorktreeId = worktreeId
-      layoutPanes()
-      focusSession(existing.id)
-      return
-    }
-  }
+  // Number duplicates so multiple agents/shells are distinguishable.
+  const n = sessionsOf(worktreeId).filter((s) => s.kind === kind).length
+  const title = n === 0 ? kind : `${kind} ${n + 1}`
+  const agent = kind === 'agent' ? 'claude' : undefined
 
-  const { command, args, agent } = commandFor(kind)
   try {
     const snap = await window.api.sessionCreate({
       worktreeId,
       kind,
-      command,
-      args,
+      command: kind, // placeholder — main launches $SHELL -il for every session
       agent,
       cwd: wt.path,
-      title: kind
+      title
     })
     sessions.set(snap.id, snap)
     mountPane(snap)
@@ -609,7 +587,7 @@ function renderSidebar(): void {
       }
 
       const actions = el('div', 'actions')
-      for (const kind of ['agent', 'shell', 'server', 'task'] as const) {
+      for (const kind of ['agent', 'shell'] as const) {
         const btn = el('button', '', `+ ${kind}`)
         btn.addEventListener('click', () => void addSession(wt.id, kind))
         actions.appendChild(btn)

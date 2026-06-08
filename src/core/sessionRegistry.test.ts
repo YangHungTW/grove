@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { SessionRegistry, SingleAgentError } from './sessionRegistry'
+import { SessionRegistry } from './sessionRegistry'
 
-describe('SessionRegistry — one worktree holds N sessions, one primary agent', () => {
+describe('SessionRegistry — multiple sessions (incl. multiple agents) per worktree', () => {
   let reg: SessionRegistry
 
   beforeEach(() => {
@@ -16,33 +16,30 @@ describe('SessionRegistry — one worktree holds N sessions, one primary agent',
     const sessions = reg.getSessions(wt)
     expect(sessions).toHaveLength(2)
     expect(sessions.map((s) => s.id).sort()).toEqual([a.id, b.id].sort())
-    // ids are unique and assigned
     expect(a.id).not.toEqual(b.id)
   })
 
-  it('rejects a second agent in the same worktree (single primary agent)', () => {
-    const wt = 'wt-1'
-    reg.addSession({ worktreeId: wt, kind: 'agent', title: 'claude' })
-    expect(() => reg.addSession({ worktreeId: wt, kind: 'agent', title: 'codex' })).toThrow(
-      SingleAgentError
-    )
-  })
-
-  it('allows unbounded auxiliary sessions alongside the one agent', () => {
+  it('allows MULTIPLE agents in the same worktree', () => {
     const wt = 'wt-1'
     reg.addSession({ worktreeId: wt, kind: 'agent' })
-    for (let i = 0; i < 5; i++) reg.addSession({ worktreeId: wt, kind: 'shell' })
-    reg.addSession({ worktreeId: wt, kind: 'server' })
-    reg.addSession({ worktreeId: wt, kind: 'task' })
-
-    const sessions = reg.getSessions(wt)
-    expect(sessions).toHaveLength(8)
-    expect(sessions.filter((s) => s.kind === 'agent')).toHaveLength(1)
+    reg.addSession({ worktreeId: wt, kind: 'agent' })
+    reg.addSession({ worktreeId: wt, kind: 'agent' })
+    expect(reg.getSessions(wt).filter((s) => s.kind === 'agent')).toHaveLength(3)
   })
 
-  it('a different worktree may have its own agent', () => {
+  it('mixes agents and shells without limit', () => {
+    const wt = 'wt-1'
+    reg.addSession({ worktreeId: wt, kind: 'agent' })
+    reg.addSession({ worktreeId: wt, kind: 'agent' })
+    for (let i = 0; i < 4; i++) reg.addSession({ worktreeId: wt, kind: 'shell' })
+    expect(reg.getSessions(wt)).toHaveLength(6)
+  })
+
+  it('keeps sessions of different worktrees separate', () => {
     reg.addSession({ worktreeId: 'wt-1', kind: 'agent' })
-    expect(() => reg.addSession({ worktreeId: 'wt-2', kind: 'agent' })).not.toThrow()
+    reg.addSession({ worktreeId: 'wt-2', kind: 'agent' })
+    expect(reg.getSessions('wt-1')).toHaveLength(1)
+    expect(reg.getSessions('wt-2')).toHaveLength(1)
   })
 
   it('removeSession drops it; getSession reflects removal', () => {
@@ -52,12 +49,5 @@ describe('SessionRegistry — one worktree holds N sessions, one primary agent',
     reg.removeSession(a.id)
     expect(reg.getSession(a.id)).toBeUndefined()
     expect(reg.getSessions(wt)).toHaveLength(0)
-  })
-
-  it('allows a new agent after the previous agent is removed', () => {
-    const wt = 'wt-1'
-    const agent = reg.addSession({ worktreeId: wt, kind: 'agent' })
-    reg.removeSession(agent.id)
-    expect(() => reg.addSession({ worktreeId: wt, kind: 'agent' })).not.toThrow()
   })
 })

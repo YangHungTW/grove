@@ -17,12 +17,10 @@ export interface Worktree {
 
 /**
  * What a session is running.
- * - `agent`  : a coding agent (Claude Code, etc.). At most ONE per worktree.
- * - `shell`  : an interactive shell.
- * - `server` : a long-running process (dev server).
- * - `task`   : a one-shot command (tests, build, git).
+ * - `agent` : a coding agent (Claude Code, etc.). Multiple allowed per worktree.
+ * - `shell` : an interactive login shell ($SHELL).
  */
-export type SessionKind = 'agent' | 'shell' | 'server' | 'task'
+export type SessionKind = 'agent' | 'shell'
 
 /** Lifecycle / attention state of a session. */
 export type SessionState = 'starting' | 'idle' | 'busy' | 'waiting' | 'exited'
