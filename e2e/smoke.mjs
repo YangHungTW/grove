@@ -85,6 +85,20 @@ try {
   )
   assert.ok(visible >= 2, `split: expected >= 2 panes, got ${visible}`)
 
+  // 3b) DRAG-RESIZE — drag the column divider right; the first column widens.
+  const colsCss = () =>
+    win.evaluate(() => getComputedStyle(document.getElementById('panes')).gridTemplateColumns)
+  const before = (await colsCss()).split(' ').map(parseFloat)
+  const gb = await win.locator('.gutter-col').first().boundingBox()
+  await win.mouse.move(gb.x + gb.width / 2, gb.y + gb.height / 2)
+  await win.mouse.down()
+  await win.mouse.move(gb.x + 160, gb.y + gb.height / 2, { steps: 6 })
+  await win.mouse.up()
+  await win.waitForTimeout(250)
+  const after = (await colsCss()).split(' ').map(parseFloat)
+  assert.ok(after[0] > before[0] + 20, `drag-resize: col0 should widen (${before[0]}→${after[0]})`)
+  const dragResize = true
+
   // 4) ROUND-TRIP — typed command creates a real file under repoA.
   await win.locator('.pane.focused .xterm-helper-textarea').focus()
   await win.keyboard.type(`touch '${marker}' && echo CCM_DONE\r`)
@@ -148,6 +162,23 @@ try {
   const agentRows = await win.locator('.session-label', { hasText: '★' }).count()
   assert.equal(agentRows, 1, `single-agent: expected exactly 1 agent row, got ${agentRows}`)
 
+  // 7b) PROJECT SWITCH preserves sessions — switch to B then back to A.
+  await win.locator('.project-title', { hasText: basename(repoB) }).click()
+  await win.waitForFunction(
+    (b) => (document.querySelector('.project.active .project-title')?.textContent ?? '').includes(b),
+    basename(repoB),
+    { timeout: 5000 }
+  )
+  await win.locator('.project-title', { hasText: basename(repoA) }).click()
+  await win.waitForSelector('.project.active .wt-title', { timeout: 5000 })
+  await win.waitForTimeout(300)
+  const agentAfterSwitch = await win.locator('.session-label', { hasText: '★' }).count()
+  assert.equal(agentAfterSwitch, 1, `project switch lost the agent (★=${agentAfterSwitch})`)
+  const visibleAfterSwitch = await win.evaluate(
+    () => [...document.querySelectorAll('.pane')].filter((p) => getComputedStyle(p).display !== 'none').length
+  )
+  assert.ok(visibleAfterSwitch >= 1, `project switch hid all panes (visible=${visibleAfterSwitch})`)
+
   await win.screenshot({ path: join(process.cwd(), 'e2e', 'smoke.png') })
 
   // 8) PERSISTENCE — close, relaunch with the same stores; sessions are restored.
@@ -166,8 +197,9 @@ try {
   assert.ok(restored >= 2, `persistence: expected >= 2 restored panes, got ${restored}`)
 
   console.log(
-    `SMOKE_OK projects=${projectCount} split=${visible} roundTrip=true worktreeCreated=true ` +
-      `agentLaunched=true singleAgent=true kbdNav=${kbdNav} restored=${restored}`
+    `SMOKE_OK projects=${projectCount} split=${visible} dragResize=${dragResize} roundTrip=true ` +
+      `worktreeCreated=true agentLaunched=true singleAgent=true ` +
+      `agentAfterSwitch=${agentAfterSwitch} kbdNav=${kbdNav} restored=${restored}`
   )
 } catch (err) {
   failed = true

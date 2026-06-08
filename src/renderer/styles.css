@@ -188,11 +188,35 @@ body {
 }
 
 #panes {
+  position: relative;
   display: grid;
   grid-auto-rows: 1fr;
   gap: 2px;
   background: #000;
   overflow: hidden;
+}
+
+.gutter {
+  position: absolute;
+  z-index: 5;
+  background: transparent;
+  transition: background 0.1s;
+}
+.gutter:hover,
+.gutter:active {
+  background: var(--accent);
+}
+.gutter-col {
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+}
+.gutter-row {
+  left: 0;
+  right: 0;
+  height: 6px;
+  cursor: row-resize;
 }
 .pane {
   position: relative;

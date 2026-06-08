@@ -48,6 +48,11 @@ let savedLayout: SessionDescriptor[] = []
 const restoredProjects = new Set<string>()
 let restoring = false
 
+// Split-pane sizing: per-column / per-row fractions for the active grid. Reset
+// to equal whenever the grid shape (column/row count) changes.
+let colFr: number[] = []
+let rowFr: number[] = []
+
 const sidebar = document.getElementById('sidebar') as HTMLElement
 const panesRoot = document.getElementById('panes') as HTMLElement
 
@@ -267,7 +272,14 @@ function mountPane(snap: SessionSnapshot): void {
   el.addEventListener('mousedown', () => focusSession(snap.id))
   panesRoot.appendChild(el)
 
-  const term = new Terminal({ convertEol: true, fontSize: 13, cursorBlink: true })
+  const term = new Terminal({
+    convertEol: true,
+    fontSize: 13,
+    // Prefer a Nerd Font (powerlevel10k's recommended MesloLGS NF) so powerline
+    // glyphs render; fall back to system monospace.
+    fontFamily: '"MesloLGS NF", "MesloLGS Nerd Font", Menlo, Monaco, "Courier New", monospace',
+    cursorBlink: true
+  })
   const fit = new FitAddon()
   term.loadAddon(fit)
   term.open(el)
@@ -297,17 +309,105 @@ function focusSession(id: string): void {
 /** Tile every session of the active worktree side-by-side; hide the rest. */
 function layoutPanes(): void {
   const visible = activeWorktreeId ? sessionsOf(activeWorktreeId).map((s) => s.id) : []
-  const cols = Math.ceil(Math.sqrt(Math.max(visible.length, 1)))
-  panesRoot.style.gridTemplateColumns = `repeat(${cols}, 1fr)`
+  const n = Math.max(visible.length, 1)
+  const cols = Math.ceil(Math.sqrt(n))
+  const rows = Math.ceil(n / cols)
+  if (colFr.length !== cols) colFr = Array(cols).fill(1)
+  if (rowFr.length !== rows) rowFr = Array(rows).fill(1)
+  applyGridTemplate()
   for (const [id, pane] of panes) pane.el.style.display = visible.includes(id) ? 'block' : 'none'
+  renderGutters(cols, rows)
+  fitVisible(visible)
+}
+
+function applyGridTemplate(): void {
+  panesRoot.style.gridTemplateColumns = colFr.map((f) => `${f}fr`).join(' ')
+  panesRoot.style.gridTemplateRows = rowFr.map((f) => `${f}fr`).join(' ')
+}
+
+let prevVisible: string[] = []
+
+function fitVisible(visible: string[]): void {
+  const newlyShown = visible.filter((id) => !prevVisible.includes(id))
+  prevVisible = visible.slice()
   requestAnimationFrame(() => {
     for (const id of visible) {
       const pane = panes.get(id)
       if (!pane) continue
       pane.fit.fit()
-      window.api.sessionResize(id, pane.term.cols, pane.term.rows)
+      const { cols, rows } = pane.term
+      window.api.sessionResize(id, cols, rows)
+      // A pane that was hidden (display:none) loses its rendered canvas. Full
+      // screen TUI agents (claude) only repaint on SIGWINCH, so nudge the size
+      // on reshow to force a redraw — otherwise the pane looks blank ("gone").
+      if (newlyShown.includes(id) && rows > 1) {
+        pane.term.resize(cols, rows - 1)
+        window.api.sessionResize(id, cols, rows - 1)
+        requestAnimationFrame(() => {
+          pane.term.resize(cols, rows)
+          window.api.sessionResize(id, cols, rows)
+        })
+      }
     }
   })
+}
+
+/** Draggable dividers between columns/rows of the active worktree's pane grid. */
+function renderGutters(cols: number, rows: number): void {
+  panesRoot.querySelectorAll('.gutter').forEach((g) => g.remove())
+  const w = panesRoot.clientWidth
+  const h = panesRoot.clientHeight
+
+  const ctot = colFr.reduce((a, b) => a + b, 0)
+  let acc = 0
+  for (let i = 0; i < cols - 1; i++) {
+    acc += colFr[i]
+    const g = el('div', 'gutter gutter-col')
+    g.style.left = `${(w * acc) / ctot - 3}px`
+    g.addEventListener('mousedown', (e) => startDrag(e, 'col', i, g))
+    panesRoot.appendChild(g)
+  }
+  const rtot = rowFr.reduce((a, b) => a + b, 0)
+  acc = 0
+  for (let i = 0; i < rows - 1; i++) {
+    acc += rowFr[i]
+    const g = el('div', 'gutter gutter-row')
+    g.style.top = `${(h * acc) / rtot - 3}px`
+    g.addEventListener('mousedown', (e) => startDrag(e, 'row', i, g))
+    panesRoot.appendChild(g)
+  }
+}
+
+function startDrag(e: MouseEvent, axis: 'col' | 'row', i: number, handle: HTMLElement): void {
+  e.preventDefault()
+  const isCol = axis === 'col'
+  const fr = isCol ? colFr : rowFr
+  const rect = panesRoot.getBoundingClientRect()
+  const size = isCol ? rect.width : rect.height
+  const tot = fr.reduce((a, b) => a + b, 0)
+  const pxPerFr = size / tot
+  const start = isCol ? e.clientX : e.clientY
+  const a0 = fr[i]
+  const b0 = fr[i + 1]
+  const min = 0.15
+
+  const onMove = (ev: MouseEvent): void => {
+    let d = ((isCol ? ev.clientX : ev.clientY) - start) / pxPerFr
+    d = Math.max(-(a0 - min), Math.min(b0 - min, d))
+    fr[i] = a0 + d
+    fr[i + 1] = b0 - d
+    applyGridTemplate()
+    const pos = (isCol ? ev.clientX - rect.left : ev.clientY - rect.top) - 3
+    if (isCol) handle.style.left = `${pos}px`
+    else handle.style.top = `${pos}px`
+  }
+  const onUp = (): void => {
+    document.removeEventListener('mousemove', onMove)
+    document.removeEventListener('mouseup', onUp)
+    layoutPanes() // reposition gutters precisely + refit terminals
+  }
+  document.addEventListener('mousemove', onMove)
+  document.addEventListener('mouseup', onUp)
 }
 
 // --- sidebar -------------------------------------------------------------
