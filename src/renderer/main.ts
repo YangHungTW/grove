@@ -548,10 +548,22 @@ function renderSidebar(): void {
       const st = wtStatus.get(wt.id)
       if (st && (st.dirty || st.ahead || st.behind)) {
         const parts: string[] = []
-        if (st.dirty) parts.push(`●${st.dirty}`)
-        if (st.ahead) parts.push(`↑${st.ahead}`)
-        if (st.behind) parts.push(`↓${st.behind}`)
-        wtHead.appendChild(el('span', 'wt-status', parts.join(' ')))
+        const tip: string[] = []
+        if (st.dirty) {
+          parts.push(`●${st.dirty}`)
+          tip.push(`${st.dirty} uncommitted change${st.dirty > 1 ? 's' : ''}`)
+        }
+        if (st.ahead) {
+          parts.push(`↑${st.ahead}`)
+          tip.push(`${st.ahead} commit${st.ahead > 1 ? 's' : ''} ahead`)
+        }
+        if (st.behind) {
+          parts.push(`↓${st.behind}`)
+          tip.push(`${st.behind} commit${st.behind > 1 ? 's' : ''} behind`)
+        }
+        const badge = el('span', 'wt-status' + (st.dirty ? ' dirty' : ''), parts.join(' '))
+        badge.title = tip.join(' · ')
+        wtHead.appendChild(badge)
       }
       if (!wt.primary) {
         const rm = el('button', 'row-x', '×')
@@ -708,6 +720,11 @@ window.addEventListener('keydown', (e) => {
 
 // --- bootstrap -----------------------------------------------------------
 async function init(): Promise<void> {
+  // Load the bundled terminal font before any xterm is created so glyph metrics
+  // (and Nerd/powerline glyphs) are correct from the first paint.
+  await document.fonts.load('13px "MesloLGS NF"').catch(() => {})
+  await document.fonts.load('700 13px "MesloLGS NF"').catch(() => {})
+
   savedLayout = await window.api.layoutLoad()
   const recent = await window.api.projectListRecent()
   for (const p of recent) upsertProject(p.repoRoot, p.name)

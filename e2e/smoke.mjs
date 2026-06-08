@@ -60,6 +60,13 @@ try {
   const win = await app.firstWindow()
   await win.waitForSelector('.project-header', { timeout: 15000 })
 
+  // 0) BUNDLED FONT — the Nerd Font is available (not falling back to system).
+  const fontLoaded = await win.evaluate(async () => {
+    await document.fonts.ready
+    return document.fonts.check('13px "MesloLGS NF"')
+  })
+  assert.ok(fontLoaded, 'bundled MesloLGS NF font should be loaded')
+
   // 1) MULTI-PROJECT — both the seeded repo and the launched repo are listed.
   const projectCount = await win.locator('.project-header').count()
   assert.ok(projectCount >= 2, `expected >= 2 projects listed, got ${projectCount}`)
@@ -206,7 +213,7 @@ try {
   assert.ok(restored >= 2, `persistence: expected >= 2 restored sessions, got ${restored}`)
 
   console.log(
-    `SMOKE_OK projects=${projectCount} split=${visible} dragResize=${dragResize} roundTrip=true ` +
+    `SMOKE_OK fontLoaded=${fontLoaded} projects=${projectCount} split=${visible} dragResize=${dragResize} roundTrip=true ` +
       `worktreeCreated=true agentLaunched=true multiAgent=${agentRows === 2} ` +
       `agentAfterSwitch=${agentAfterSwitch} kbdNav=${kbdNav} restored=${restored}`
   )

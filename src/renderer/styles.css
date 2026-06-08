@@ -1,3 +1,29 @@
+/* Bundled Nerd Font so powerline/agent glyphs render without a system install. */
+@font-face {
+  font-family: 'MesloLGS NF';
+  font-weight: 400;
+  font-style: normal;
+  src: url('./assets/fonts/MesloLGS-NF-Regular.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'MesloLGS NF';
+  font-weight: 700;
+  font-style: normal;
+  src: url('./assets/fonts/MesloLGS-NF-Bold.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'MesloLGS NF';
+  font-weight: 400;
+  font-style: italic;
+  src: url('./assets/fonts/MesloLGS-NF-Italic.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'MesloLGS NF';
+  font-weight: 700;
+  font-style: italic;
+  src: url('./assets/fonts/MesloLGS-NF-Bold-Italic.ttf') format('truetype');
+}
+
 :root {
   --bg: #1b1b1f;
   --panel: #232329;
@@ -115,6 +141,10 @@ button {
   color: var(--muted);
   padding: 0 6px;
   white-space: nowrap;
+  cursor: default;
+}
+.wt-status.dirty {
+  color: #fbbf24;
 }
 
 .row-x {
