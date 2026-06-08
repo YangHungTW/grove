@@ -89,7 +89,12 @@ export class PtySession {
 
     this.setState('idle')
 
-    if (this.opts.bootstrap) this.proc.write(this.opts.bootstrap)
+    // Delay the bootstrap command so the renderer can size the pty first; typing
+    // into the shell before it knows its real width produces wrapped prompt junk.
+    if (this.opts.bootstrap) {
+      const bs = this.opts.bootstrap
+      setTimeout(() => this.proc?.write(bs), 400)
+    }
   }
 
   write(data: string): void {

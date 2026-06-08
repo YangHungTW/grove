@@ -340,9 +340,14 @@ class Store {
   }
   closeSession(id: string, quiet = false): void {
     window.api.sessionKill(id)
+    const wtId = this.sessions.get(id)?.worktreeId
     this.sessions.delete(id)
     this.pending.delete(id)
-    if (this.focusedSessionId === id) this.focusedSessionId = null
+    this.lastLine.delete(id)
+    // If the closed session was focused, move focus to a sibling in its worktree.
+    if (this.focusedSessionId === id) {
+      this.focusedSessionId = wtId ? (this.sessionsOf(wtId)[0]?.id ?? null) : null
+    }
     if (!quiet) {
       this.persistLayout()
       this.notify()
@@ -431,10 +436,8 @@ class Store {
       this.notify()
     })
     window.api.onSessionExit(({ id }) => {
-      const s = this.sessions.get(id)
-      if (s) s.state = 'exited'
-      this.pending.delete(id)
-      this.notify()
+      // The pty ended (shell/agent exited) — auto-close its tab/pane.
+      if (this.sessions.has(id)) this.closeSession(id)
     })
   }
 
