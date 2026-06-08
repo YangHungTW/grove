@@ -6,12 +6,18 @@ import type { SessionKind, SessionState } from '../core/types'
 import type { SessionSnapshot } from '../main/ipc'
 
 /**
- * Renderer: a cmux-style shell. One default worktree hosts multiple sessions;
- * the sidebar lists them with state dots, the main area shows the active
- * terminal. This is the UI layer over the main-process engine.
+ * Renderer: cmux-style shell.
+ *  - Multiple worktrees in the sidebar, each expandable to its sessions.
+ *  - The active worktree's sessions are tiled side-by-side (split panes), so
+ *    you watch the agent + a shell + a server at once.
  */
 
-const WORKTREE_ID = 'local'
+interface WorktreeView {
+  id: string // = path
+  path: string
+  branch: string
+  primary: boolean // the repo's main worktree (cannot be removed)
+}
 
 interface Pane {
   term: Terminal
@@ -19,15 +25,17 @@ interface Pane {
   el: HTMLDivElement
 }
 
+const worktrees = new Map<string, WorktreeView>()
 const sessions = new Map<string, SessionSnapshot>()
 const panes = new Map<string, Pane>()
-const pending = new Set<string>() // sessions in 'waiting' (need attention)
-let activeId: string | null = null
+const pending = new Set<string>()
+let activeWorktreeId: string | null = null
+let focusedSessionId: string | null = null
+let repoRoot = ''
 
 const sidebar = document.getElementById('sidebar') as HTMLElement
 const panesRoot = document.getElementById('panes') as HTMLElement
 
-/** Default command per kind. Agents get state detection wired in main. */
 function commandFor(kind: SessionKind): { command: string; args?: string[]; agent?: string } {
   switch (kind) {
     case 'agent':
@@ -42,71 +50,180 @@ function commandFor(kind: SessionKind): { command: string; args?: string[]; agen
   }
 }
 
-function dotClass(state: SessionState): string {
-  return `dot dot-${state}`
+function sessionsOf(worktreeId: string): SessionSnapshot[] {
+  return [...sessions.values()].filter((s) => s.worktreeId === worktreeId)
 }
 
+// --- sidebar -------------------------------------------------------------
 function renderSidebar(): void {
   sidebar.innerHTML = ''
 
-  const header = document.createElement('div')
-  header.className = 'wt-header'
-  header.textContent = `▾ worktree: ${WORKTREE_ID}`
-  sidebar.appendChild(header)
+  const newWt = document.createElement('button')
+  newWt.className = 'new-worktree'
+  newWt.textContent = '+ worktree'
+  newWt.addEventListener('click', showNewWorktreeInput)
+  sidebar.appendChild(newWt)
 
-  for (const s of sessions.values()) {
-    const row = document.createElement('button')
-    row.className = 'session-row' + (s.id === activeId ? ' active' : '')
-    if (pending.has(s.id)) row.classList.add('attention')
+  for (const wt of worktrees.values()) {
+    const header = document.createElement('div')
+    header.className = 'wt-header' + (wt.id === activeWorktreeId ? ' active' : '')
 
-    const dot = document.createElement('span')
-    dot.className = dotClass(s.state)
-    row.appendChild(dot)
+    const title = document.createElement('button')
+    title.className = 'wt-title'
+    title.textContent = `▾ ${wt.branch || '(detached)'}${wt.primary ? ' ·main' : ''}`
+    title.addEventListener('click', () => setActiveWorktree(wt.id))
+    header.appendChild(title)
 
-    const label = document.createElement('span')
-    label.textContent = `${s.kind === 'agent' ? '★ ' : ''}${s.title}`
-    row.appendChild(label)
+    if (!wt.primary) {
+      const rm = document.createElement('button')
+      rm.className = 'wt-remove'
+      rm.textContent = '×'
+      rm.title = 'remove worktree'
+      rm.addEventListener('click', () => void removeWorktree(wt.id))
+      header.appendChild(rm)
+    }
+    sidebar.appendChild(header)
 
-    row.addEventListener('click', () => selectSession(s.id))
-    sidebar.appendChild(row)
+    for (const s of sessionsOf(wt.id)) {
+      const row = document.createElement('div')
+      row.className = 'session-row'
+      if (s.id === focusedSessionId) row.classList.add('active')
+      if (pending.has(s.id)) row.classList.add('attention')
+
+      const dot = document.createElement('span')
+      dot.className = `dot dot-${s.state}`
+      row.appendChild(dot)
+
+      const label = document.createElement('button')
+      label.className = 'session-label'
+      label.textContent = `${s.kind === 'agent' ? '★ ' : ''}${s.title}`
+      label.addEventListener('click', () => {
+        setActiveWorktree(wt.id)
+        focusSession(s.id)
+      })
+      row.appendChild(label)
+
+      const close = document.createElement('button')
+      close.className = 'session-close'
+      close.textContent = '×'
+      close.addEventListener('click', () => closeSession(s.id))
+      row.appendChild(close)
+
+      sidebar.appendChild(row)
+    }
+
+    const actions = document.createElement('div')
+    actions.className = 'actions'
+    for (const kind of ['agent', 'shell', 'server', 'task'] as const) {
+      const btn = document.createElement('button')
+      btn.textContent = `+ ${kind}`
+      btn.addEventListener('click', () => void addSession(wt.id, kind))
+      actions.appendChild(btn)
+    }
+    sidebar.appendChild(actions)
   }
-
-  const actions = document.createElement('div')
-  actions.className = 'actions'
-  for (const kind of ['agent', 'shell', 'server', 'task'] as const) {
-    const btn = document.createElement('button')
-    btn.textContent = `+ ${kind}`
-    btn.addEventListener('click', () => void addSession(kind))
-    actions.appendChild(btn)
-  }
-  sidebar.appendChild(actions)
 }
 
-async function addSession(kind: SessionKind): Promise<void> {
+function showNewWorktreeInput(): void {
+  const existing = sidebar.querySelector('.wt-input') as HTMLInputElement | null
+  if (existing) {
+    existing.focus()
+    return
+  }
+  const input = document.createElement('input')
+  input.className = 'wt-input'
+  input.placeholder = 'new branch name, Enter to create'
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && input.value.trim()) {
+      void createWorktree(input.value.trim())
+    } else if (e.key === 'Escape') {
+      renderSidebar()
+    }
+  })
+  sidebar.insertBefore(input, sidebar.children[1] ?? null)
+  input.focus()
+}
+
+// --- worktree ops --------------------------------------------------------
+async function createWorktree(branch: string): Promise<void> {
+  const path = `${repoRoot}-wt-${branch.replace(/[^\w.-]/g, '_')}`
+  try {
+    const info = await window.api.worktreeCreate(repoRoot, { path, branch, newBranch: true })
+    worktrees.set(info.path, {
+      id: info.path,
+      path: info.path,
+      branch: info.branch || branch,
+      primary: false
+    })
+    setActiveWorktree(info.path)
+  } catch (err) {
+    notify(String(err))
+    renderSidebar()
+  }
+}
+
+async function removeWorktree(id: string): Promise<void> {
+  const wt = worktrees.get(id)
+  if (!wt || wt.primary) return
+  for (const s of sessionsOf(id)) closeSession(s.id)
+  try {
+    await window.api.worktreeRemove({ repoRoot, path: wt.path, force: true })
+  } catch (err) {
+    notify(String(err))
+  }
+  worktrees.delete(id)
+  if (activeWorktreeId === id) {
+    const next = worktrees.keys().next().value ?? null
+    activeWorktreeId = next
+  }
+  layoutPanes()
+  renderSidebar()
+}
+
+// --- sessions ------------------------------------------------------------
+async function addSession(worktreeId: string, kind: SessionKind): Promise<void> {
+  const wt = worktrees.get(worktreeId)
+  if (!wt) return
   const { command, args, agent } = commandFor(kind)
   try {
     const snap = await window.api.sessionCreate({
-      worktreeId: WORKTREE_ID,
+      worktreeId,
       kind,
       command,
       args,
       agent,
+      cwd: wt.path,
       title: kind
     })
     sessions.set(snap.id, snap)
     mountPane(snap)
-    selectSession(snap.id)
-    renderSidebar()
+    setActiveWorktree(worktreeId)
+    focusSession(snap.id)
   } catch (err) {
-    // Single-agent invariant violation surfaces here.
-    notify(String(err))
+    notify(String(err)) // single-agent invariant etc.
   }
+}
+
+function closeSession(id: string): void {
+  window.api.sessionKill(id)
+  const pane = panes.get(id)
+  if (pane) {
+    pane.term.dispose()
+    pane.el.remove()
+    panes.delete(id)
+  }
+  sessions.delete(id)
+  pending.delete(id)
+  if (focusedSessionId === id) focusedSessionId = null
+  layoutPanes()
+  renderSidebar()
 }
 
 function mountPane(snap: SessionSnapshot): void {
   const el = document.createElement('div')
   el.className = 'pane'
-  el.style.display = 'none'
+  el.dataset.sessionId = snap.id
+  el.addEventListener('mousedown', () => focusSession(snap.id))
   panesRoot.appendChild(el)
 
   const term = new Terminal({ convertEol: true, fontSize: 13, cursorBlink: true })
@@ -118,19 +235,44 @@ function mountPane(snap: SessionSnapshot): void {
   panes.set(snap.id, { term, fit, el })
 }
 
-function selectSession(id: string): void {
-  activeId = id
-  for (const [sid, pane] of panes) {
-    pane.el.style.display = sid === id ? 'block' : 'none'
-  }
-  pending.delete(id)
+function setActiveWorktree(id: string): void {
+  activeWorktreeId = id
+  const visible = new Set(sessionsOf(id).map((s) => s.id))
+  if (focusedSessionId && !visible.has(focusedSessionId)) focusedSessionId = null
+  if (!focusedSessionId && visible.size) focusedSessionId = [...visible][0]
+  layoutPanes()
+  renderSidebar()
+}
+
+function focusSession(id: string): void {
+  focusedSessionId = id
+  panesRoot.querySelectorAll('.pane').forEach((p) => p.classList.remove('focused'))
   const pane = panes.get(id)
   if (pane) {
-    pane.fit.fit()
+    pane.el.classList.add('focused')
     pane.term.focus()
-    window.api.sessionResize(id, pane.term.cols, pane.term.rows)
   }
+  pending.delete(id)
   renderSidebar()
+}
+
+/** Tile every session of the active worktree side-by-side; hide the rest. */
+function layoutPanes(): void {
+  const visible = activeWorktreeId ? sessionsOf(activeWorktreeId).map((s) => s.id) : []
+  const cols = Math.ceil(Math.sqrt(Math.max(visible.length, 1)))
+  panesRoot.style.gridTemplateColumns = `repeat(${cols}, 1fr)`
+
+  for (const [id, pane] of panes) {
+    pane.el.style.display = visible.includes(id) ? 'block' : 'none'
+  }
+  requestAnimationFrame(() => {
+    for (const id of visible) {
+      const pane = panes.get(id)
+      if (!pane) continue
+      pane.fit.fit()
+      window.api.sessionResize(id, pane.term.cols, pane.term.rows)
+    }
+  })
 }
 
 function notify(message: string): void {
@@ -142,15 +284,13 @@ function notify(message: string): void {
 }
 
 // --- main-process events -------------------------------------------------
-window.api.onSessionData(({ id, data }) => {
-  panes.get(id)?.term.write(data)
-})
+window.api.onSessionData(({ id, data }) => panes.get(id)?.term.write(data))
 
 window.api.onSessionState(({ id, state }) => {
   const s = sessions.get(id)
   if (!s) return
   s.state = state
-  if (state === 'waiting' && id !== activeId) {
+  if ((state as SessionState) === 'waiting' && id !== focusedSessionId) {
     pending.add(id)
     notify(`${s.title} needs your attention`)
   }
@@ -163,16 +303,36 @@ window.api.onSessionExit(({ id }) => {
   renderSidebar()
 })
 
-window.addEventListener('resize', () => {
-  if (activeId) panes.get(activeId)?.fit.fit()
-})
-
-// keyboard: ⌘T new shell in current worktree
+window.addEventListener('resize', () => layoutPanes())
 window.addEventListener('keydown', (e) => {
-  if (e.metaKey && e.key.toLowerCase() === 't') {
+  if (e.metaKey && e.key.toLowerCase() === 't' && activeWorktreeId) {
     e.preventDefault()
-    void addSession('shell')
+    void addSession(activeWorktreeId, 'shell')
   }
 })
 
-renderSidebar()
+// --- bootstrap -----------------------------------------------------------
+async function init(): Promise<void> {
+  repoRoot = await window.api.repoRoot()
+  try {
+    const list = await window.api.worktreeList(repoRoot)
+    list.forEach((w, i) =>
+      worktrees.set(w.path, {
+        id: w.path,
+        path: w.path,
+        branch: w.branch,
+        primary: i === 0 || w.path === repoRoot
+      })
+    )
+  } catch {
+    // Not a git repo — seed a single local worktree at the repo root.
+    worktrees.set(repoRoot, { id: repoRoot, path: repoRoot, branch: 'local', primary: true })
+  }
+  if (worktrees.size === 0) {
+    worktrees.set(repoRoot, { id: repoRoot, path: repoRoot, branch: 'local', primary: true })
+  }
+  activeWorktreeId = worktrees.keys().next().value ?? null
+  renderSidebar()
+}
+
+void init()

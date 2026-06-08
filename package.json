@@ -9,9 +9,15 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest"
+    "test": "vitest",
+    "e2e": "electron-vite build && node e2e/smoke.mjs"
   },
-  "keywords": ["electron", "pty", "worktree", "ccmanager"],
+  "keywords": [
+    "electron",
+    "pty",
+    "worktree",
+    "ccmanager"
+  ],
   "license": "MIT",
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",
@@ -21,6 +27,7 @@
   "devDependencies": {
     "electron": "^33.0.0",
     "electron-vite": "^2.3.0",
+    "playwright": "^1.60.0",
     "typescript": "^5.6.0",
     "vite": "^5.4.0",
     "vitest": "^2.1.0"

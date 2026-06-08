@@ -3,6 +3,7 @@ import type { WorktreeInfo, CreateWorktreeOptions } from '../core/worktree'
 
 /** Channel names. Request/response (invoke) and event (send) are split. */
 export const Channels = {
+  envRepoRoot: 'env:repo-root',
   worktreeCreate: 'worktree:create',
   worktreeList: 'worktree:list',
   worktreeRemove: 'worktree:remove',
@@ -66,6 +67,8 @@ export interface WorktreeRemoveRequest {
  * Defined once so preload, renderer, and main stay in lock-step.
  */
 export interface RendererApi {
+  /** The repo root the app was launched against (CCM_REPO_ROOT or cwd). */
+  repoRoot(): Promise<string>
   worktreeCreate(repoRoot: string, opts: CreateWorktreeOptions): Promise<WorktreeInfo>
   worktreeList(repoRoot: string): Promise<WorktreeInfo[]>
   worktreeRemove(req: WorktreeRemoveRequest): Promise<void>

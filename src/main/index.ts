@@ -78,12 +78,21 @@ function createSession(req: CreateSessionRequest): SessionSnapshot {
   })
 
   ptys.set(record.id, pty)
-  pty.start()
+  try {
+    pty.start()
+  } catch (err) {
+    // Spawn failed (e.g. command not on PATH) — roll back so a dead agent
+    // record does not permanently occupy the single-agent slot.
+    ptys.delete(record.id)
+    registry.removeSession(record.id)
+    throw err
+  }
   record.pid = pty.pid
   return snapshot(record)
 }
 
 function registerIpc(): void {
+  ipcMain.handle(Channels.envRepoRoot, () => process.env.CCM_REPO_ROOT ?? process.cwd())
   ipcMain.handle(
     Channels.worktreeCreate,
     (_e: IpcMainInvokeEvent, repoRoot: string, opts: CreateWorktreeOptions) =>
