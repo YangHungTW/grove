@@ -150,6 +150,14 @@ async function openProject(): Promise<void> {
   }
 }
 
+/** Collapse/expand a project independently, without touching others or active. */
+function toggleProjectExpand(repoRoot: string): void {
+  const p = projects.get(repoRoot)
+  if (!p) return
+  p.expanded = !p.expanded
+  renderSidebar()
+}
+
 function upsertProject(repoRoot: string, name: string): ProjectView {
   let p = projects.get(repoRoot)
   if (!p) {
@@ -181,7 +189,7 @@ async function setActiveProject(repoRoot: string): Promise<void> {
   const p = projects.get(repoRoot)
   if (!p) return
   activeProjectId = repoRoot
-  for (const other of projects.values()) other.expanded = other.repoRoot === repoRoot
+  p.expanded = true // selecting expands this project — but never collapses others
   if (!p.loaded) await loadWorktrees(p)
   await restoreProject(p)
   activeWorktreeId = p.worktrees.keys().next().value ?? null
@@ -372,7 +380,7 @@ function jumpToPending(): void {
     for (const wt of p.worktrees.values())
       if (wt.id === s.worktreeId) {
         activeProjectId = p.repoRoot
-        for (const o of projects.values()) o.expanded = o.repoRoot === p.repoRoot
+        p.expanded = true
         activeWorktreeId = wt.id
       }
   focusSession(id)
@@ -519,7 +527,13 @@ function renderSidebar(): void {
     sidebar.appendChild(block)
 
     const head = el('div', 'project-header' + (isActiveProject ? ' active' : ''))
-    const title = el('button', 'project-title', `${project.expanded ? '▾' : '▸'} ${project.name}`)
+    const caret = el('button', 'caret', project.expanded ? '▾' : '▸')
+    caret.addEventListener('click', (e) => {
+      e.stopPropagation()
+      toggleProjectExpand(project.repoRoot)
+    })
+    head.appendChild(caret)
+    const title = el('button', 'project-title', project.name)
     title.addEventListener('click', () => void setActiveProject(project.repoRoot))
     head.appendChild(title)
     const rmP = el('button', 'row-x', '×')
@@ -564,6 +578,14 @@ function renderSidebar(): void {
         const badge = el('span', 'wt-status' + (st.dirty ? ' dirty' : ''), parts.join(' '))
         badge.title = tip.join(' · ')
         wtHead.appendChild(badge)
+      }
+      // Show a session count on worktrees that aren't expanded, so you can see
+      // which ones have activity without selecting them.
+      const cnt = sessionsOf(wt.id).length
+      if (!isActiveWt && cnt) {
+        const c = el('span', 'wt-count', String(cnt))
+        if (sessionsOf(wt.id).some((s) => pending.has(s.id))) c.classList.add('attention')
+        wtHead.appendChild(c)
       }
       if (!wt.primary) {
         const rm = el('button', 'row-x', '×')
