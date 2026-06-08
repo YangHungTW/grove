@@ -1,0 +1,28 @@
+{
+  "name": "ccmanager-gui",
+  "version": "0.1.0",
+  "description": "Electron GUI for managing multiple PTY sessions per git worktree (ccmanager-gui)",
+  "main": "out/main/index.js",
+  "type": "module",
+  "scripts": {
+    "postinstall": "node -e \"try{const fs=require('fs'),p=require('path'),d=p.join('node_modules','node-pty','prebuilds');for(const a of fs.readdirSync(d)){const f=p.join(d,a,'spawn-helper');if(fs.existsSync(f))fs.chmodSync(f,0o755)}}catch(e){}\"",
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest"
+  },
+  "keywords": ["electron", "pty", "worktree", "ccmanager"],
+  "license": "MIT",
+  "dependencies": {
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
+    "node-pty": "^1.0.0"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-vite": "^2.3.0",
+    "typescript": "^5.6.0",
+    "vite": "^5.4.0",
+    "vitest": "^2.1.0"
+  }
+}

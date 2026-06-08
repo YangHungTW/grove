@@ -1,0 +1,8 @@
+vitest.config.ts
+electron.vite.config.ts
+src/core/types.ts
+src/main/ipc.ts
+src/main/index.ts
+src/preload/index.ts
+src/renderer/env.d.ts
+src/renderer/main.ts

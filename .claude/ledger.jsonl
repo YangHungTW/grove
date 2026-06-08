@@ -1,0 +1,1 @@
+{"ts":"2026-06-08T03:33:23Z","feature":"single-worktree-multi-session","phase":"summary","agent":"main","outcome":"in-progress","files":27,"tokens":0,"tools":{"Write":22,"Edit":6,"Bash":14},"cycles":4,"pr":null,"commit":null,"plan_path":".claude/plans/single-worktree-multi-session.md","goal_turns":null,"orchestration":"single","discipline":"tdd"}

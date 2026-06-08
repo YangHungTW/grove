@@ -1,0 +1,80 @@
+import type { SessionKind, SessionState } from '../core/types'
+import type { WorktreeInfo, CreateWorktreeOptions } from '../core/worktree'
+
+/** Channel names. Request/response (invoke) and event (send) are split. */
+export const Channels = {
+  worktreeCreate: 'worktree:create',
+  worktreeList: 'worktree:list',
+  worktreeRemove: 'worktree:remove',
+  sessionCreate: 'session:create',
+  sessionInput: 'session:input',
+  sessionResize: 'session:resize',
+  sessionKill: 'session:kill',
+  sessionList: 'session:list',
+  // events (main -> renderer)
+  sessionData: 'session:data',
+  sessionStateChange: 'session:state-change',
+  sessionExit: 'session:exit'
+} as const
+
+/** Serializable view of a session sent across the IPC boundary. */
+export interface SessionSnapshot {
+  id: string
+  worktreeId: string
+  kind: SessionKind
+  title: string
+  cwd?: string
+  state: SessionState
+  pid?: number
+}
+
+export interface CreateSessionRequest {
+  worktreeId: string
+  kind: SessionKind
+  command: string
+  args?: string[]
+  cwd?: string
+  title?: string
+  cols?: number
+  rows?: number
+  /** Agent id used for state detection (e.g. 'claude'); defaults from kind. */
+  agent?: string
+}
+
+export interface SessionDataEvent {
+  id: string
+  data: string
+}
+export interface SessionStateEvent {
+  id: string
+  state: SessionState
+}
+export interface SessionExitEvent {
+  id: string
+  exitCode: number
+  signal?: number
+}
+
+export interface WorktreeRemoveRequest {
+  repoRoot: string
+  path: string
+  force?: boolean
+}
+
+/**
+ * The surface exposed to the renderer via contextBridge (`window.api`).
+ * Defined once so preload, renderer, and main stay in lock-step.
+ */
+export interface RendererApi {
+  worktreeCreate(repoRoot: string, opts: CreateWorktreeOptions): Promise<WorktreeInfo>
+  worktreeList(repoRoot: string): Promise<WorktreeInfo[]>
+  worktreeRemove(req: WorktreeRemoveRequest): Promise<void>
+  sessionCreate(req: CreateSessionRequest): Promise<SessionSnapshot>
+  sessionInput(id: string, data: string): void
+  sessionResize(id: string, cols: number, rows: number): void
+  sessionKill(id: string): void
+  sessionList(worktreeId?: string): Promise<SessionSnapshot[]>
+  onSessionData(cb: (e: SessionDataEvent) => void): () => void
+  onSessionState(cb: (e: SessionStateEvent) => void): () => void
+  onSessionExit(cb: (e: SessionExitEvent) => void): () => void
+}
