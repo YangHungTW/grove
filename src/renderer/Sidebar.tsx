@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useStore } from './useStore'
 import { store, type ProjectView, type WorktreeView } from './store'
-import type { SessionSnapshot } from '../main/ipc'
 
 export function Sidebar(): JSX.Element {
   const s = useStore()
@@ -12,120 +11,94 @@ export function Sidebar(): JSX.Element {
       </button>
       <div className="section-label">Projects</div>
       {[...s.projects.values()].map((p) => (
-        <ProjectItem key={p.repoRoot} project={p} />
+        <ProjectGroup key={p.repoRoot} project={p} />
       ))}
     </aside>
   )
 }
 
-function ProjectItem({ project }: { project: ProjectView }): JSX.Element {
+function ProjectGroup({ project }: { project: ProjectView }): JSX.Element {
   const s = useStore()
   const [adding, setAdding] = useState(false)
-  const active = project.repoRoot === s.activeProjectId
 
   return (
-    <div className={'project' + (active ? ' active' : '')}>
-      <div className={'project-header' + (active ? ' active' : '')}>
-        <button
-          className="caret"
-          onClick={(e) => {
-            e.stopPropagation()
-            store.toggleProjectExpand(project.repoRoot)
-          }}
-        >
-          {project.expanded ? '▾' : '▸'}
-        </button>
-        <button className="project-title" onClick={() => void store.setActiveProject(project.repoRoot)}>
-          {project.name}
+    <div className="project-group">
+      <div className="group-label">
+        <span className="group-name">{project.name}</span>
+        <button className="group-add" title="New worktree" onClick={() => setAdding(true)}>
+          +
         </button>
         <button
           className="row-x"
-          title="remove from recent"
-          onClick={(e) => {
-            e.stopPropagation()
-            void store.removeProject(project.repoRoot)
-          }}
+          title="Remove from recent"
+          onClick={() => void store.removeProject(project.repoRoot)}
         >
           ×
         </button>
       </div>
 
-      {project.expanded &&
-        [...project.worktrees.values()].map((wt) => (
-          <WorktreeItem key={wt.id} project={project} wt={wt} />
-        ))}
+      {[...project.worktrees.values()].map((wt) => (
+        <WorktreeCard key={wt.id} project={project} wt={wt} active={wt.id === s.activeWorktreeId} />
+      ))}
 
-      {project.expanded &&
-        (adding ? (
-          <input
-            className="wt-input"
-            placeholder="new branch name, Enter to create"
-            autoFocus
-            onKeyDown={(e) => {
-              const v = (e.target as HTMLInputElement).value.trim()
-              if (e.key === 'Enter' && v) {
-                void store.createWorktree(project, v)
-                setAdding(false)
-              } else if (e.key === 'Escape') setAdding(false)
-            }}
-          />
-        ) : (
-          <button className="new-worktree" onClick={() => setAdding(true)}>
-            + worktree
-          </button>
-        ))}
+      {adding && (
+        <input
+          className="wt-input"
+          placeholder="new branch name, Enter to create"
+          autoFocus
+          onKeyDown={(e) => {
+            const v = (e.target as HTMLInputElement).value.trim()
+            if (e.key === 'Enter' && v) {
+              void store.createWorktree(project, v)
+              setAdding(false)
+            } else if (e.key === 'Escape') setAdding(false)
+          }}
+        />
+      )}
     </div>
   )
 }
 
-function WorktreeItem({ project, wt }: { project: ProjectView; wt: WorktreeView }): JSX.Element {
+function WorktreeCard({
+  project,
+  wt,
+  active
+}: {
+  project: ProjectView
+  wt: WorktreeView
+  active: boolean
+}): JSX.Element {
   const s = useStore()
-  const isActive = project.repoRoot === s.activeProjectId && wt.id === s.activeWorktreeId
   const st = s.wtStatus.get(wt.id)
-  const sessions = s.sessionsOf(wt.id)
-  const cnt = sessions.length
+  const line = s.worktreeLastLine(wt.id)
+  const cnt = s.sessionsOf(wt.id).length
+  const stateDot = s.worktreeState(wt.id)
+  const attention = s.worktreePending(wt.id)
 
   const statusParts: string[] = []
-  const tip: string[] = []
-  if (st) {
-    if (st.dirty) {
-      statusParts.push(`●${st.dirty}`)
-      tip.push(`${st.dirty} uncommitted change${st.dirty > 1 ? 's' : ''}`)
-    }
-    if (st.ahead) {
-      statusParts.push(`↑${st.ahead}`)
-      tip.push(`${st.ahead} ahead`)
-    }
-    if (st.behind) {
-      statusParts.push(`↓${st.behind}`)
-      tip.push(`${st.behind} behind`)
-    }
-  }
+  if (st?.dirty) statusParts.push(`●${st.dirty}`)
+  if (st?.ahead) statusParts.push(`↑${st.ahead}`)
+  if (st?.behind) statusParts.push(`↓${st.behind}`)
 
   return (
-    <>
-      <div className={'wt-header' + (isActive ? ' active' : '')}>
-        <button
-          className="wt-title"
-          onClick={() => store.selectWorktree(project.repoRoot, wt.id)}
-        >
-          ▾ {wt.branch || '(detached)'}
+    <div
+      className={'card' + (active ? ' active' : '') + (attention ? ' attention' : '')}
+      onClick={() => void store.selectWorktree(project.repoRoot, wt.id)}
+    >
+      <div className="card-top">
+        {stateDot !== 'none' && <span className={`dot dot-${stateDot}`} />}
+        <span className="card-title">
+          {wt.branch || '(detached)'}
           {wt.primary ? ' ·main' : ''}
-        </button>
+        </span>
+        {cnt > 0 && <span className="card-count">{cnt}</span>}
         {statusParts.length > 0 && (
-          <span className={'wt-status' + (st?.dirty ? ' dirty' : '')} title={tip.join(' · ')}>
-            {statusParts.join(' ')}
-          </span>
-        )}
-        {!isActive && cnt > 0 && (
-          <span className={'wt-count' + (sessions.some((x) => s.pending.has(x.id)) ? ' attention' : '')}>
-            {cnt}
-          </span>
+          <span className={'wt-status' + (st?.dirty ? ' dirty' : '')}>{statusParts.join(' ')}</span>
         )}
         {!wt.primary && (
           <button
             className="row-x"
-            title="remove worktree"
+            title="Remove worktree"
             onClick={(e) => {
               e.stopPropagation()
               void store.removeWorktree(project, wt.id)
@@ -135,48 +108,7 @@ function WorktreeItem({ project, wt }: { project: ProjectView; wt: WorktreeView 
           </button>
         )}
       </div>
-
-      {isActive && (
-        <>
-          {sessions.map((sess) => (
-            <SessionRow key={sess.id} session={sess} />
-          ))}
-          <div className="actions">
-            {(['agent', 'shell'] as const).map((kind) => (
-              <button key={kind} onClick={() => void store.addSession(wt.id, kind)}>
-                + {kind}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-    </>
-  )
-}
-
-function SessionRow({ session }: { session: SessionSnapshot }): JSX.Element {
-  const s = useStore()
-  const line = s.lastLine.get(session.id)
-  return (
-    <div
-      className={
-        'session-row' +
-        (session.id === s.focusedSessionId ? ' active' : '') +
-        (s.pending.has(session.id) ? ' attention' : '')
-      }
-    >
-      <div className="session-top">
-        <span className={`dot dot-${session.state}`} />
-        <button className="session-label" onClick={() => store.focusSession(session.id)}>
-          {session.kind === 'agent' ? '★ ' : ''}
-          {session.title}
-        </button>
-        <span className="session-state">{session.state}</span>
-        <button className="row-x" onClick={() => store.closeSession(session.id)}>
-          ×
-        </button>
-      </div>
-      {line && <div className="session-line">{line}</div>}
+      {line && <div className="card-sub">{line}</div>}
     </div>
   )
 }

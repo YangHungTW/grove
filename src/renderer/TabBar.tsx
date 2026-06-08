@@ -38,6 +38,21 @@ export function TabBar(): JSX.Element {
       </div>
       <div id="toolbar">
         <button
+          className="add-session"
+          disabled={!s.activeWorktreeId}
+          onClick={() => s.activeWorktreeId && void store.addSession(s.activeWorktreeId, 'agent')}
+        >
+          + agent
+        </button>
+        <button
+          className="add-session"
+          disabled={!s.activeWorktreeId}
+          onClick={() => s.activeWorktreeId && void store.addSession(s.activeWorktreeId, 'shell')}
+        >
+          + shell
+        </button>
+        <span className="toolbar-sep" />
+        <button
           id="split-toggle"
           className={split ? 'active' : ''}
           title="Toggle split (⌘D)"

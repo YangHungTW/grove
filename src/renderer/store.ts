@@ -84,6 +84,23 @@ class Store {
   activeProject(): ProjectView | undefined {
     return this.activeProjectId ? this.projects.get(this.activeProjectId) : undefined
   }
+  /** Representative latest output line for a worktree card (prefers the agent). */
+  worktreeLastLine(wtId: string): string {
+    const ss = this.sessionsOf(wtId)
+    const pick = ss.find((s) => s.kind === 'agent') ?? ss[0]
+    return pick ? (this.lastLine.get(pick.id) ?? '') : ''
+  }
+  worktreePending(wtId: string): boolean {
+    return this.sessionsOf(wtId).some((s) => this.pending.has(s.id))
+  }
+  /** Worst session state in a worktree, for the card's status dot. */
+  worktreeState(wtId: string): SessionState | 'none' {
+    const ss = this.sessionsOf(wtId)
+    if (ss.some((s) => this.pending.has(s.id))) return 'waiting'
+    if (ss.some((s) => s.state === 'busy')) return 'busy'
+    if (ss.some((s) => s.state === 'idle')) return 'idle'
+    return ss.length ? ss[0].state : 'none'
+  }
   /** Sessions whose panes are shown: all (split) or just the focused one. */
   visibleSessions(): string[] {
     if (!this.activeWorktreeId) return []
@@ -277,9 +294,11 @@ class Store {
     this.persistLayout()
     this.notify()
   }
-  selectWorktree(projectId: string, wtId: string): void {
+  async selectWorktree(projectId: string, wtId: string): Promise<void> {
     this.activeProjectId = projectId
     this.activeWorktreeId = wtId
+    const p = this.projects.get(projectId)
+    if (p) await this.restoreProject(p) // respawn this project's sessions on first select
     this.syncFocus()
     this.notify()
   }
@@ -287,7 +306,7 @@ class Store {
     const p = this.activeProject()
     if (!p) return
     const wt = [...p.worktrees.values()][index]
-    if (wt) this.selectWorktree(p.repoRoot, wt.id)
+    if (wt) void this.selectWorktree(p.repoRoot, wt.id)
   }
   async switchProject(index: number): Promise<void> {
     const p = [...this.projects.values()][index]
@@ -433,6 +452,8 @@ class Store {
     } catch {
       /* launched dir not a git repo */
     }
+    // Load every project's worktrees so all cards render in the flat sidebar.
+    for (const p of this.projects.values()) await this.loadWorktrees(p)
     const first = this.projects.keys().next().value as string | undefined
     if (first) await this.setActiveProject(first)
     else this.notify()

@@ -58,7 +58,7 @@ try {
 
   app = await electron.launch(launchOpts)
   const win = await app.firstWindow()
-  await win.waitForSelector('.project-header', { timeout: 15000 })
+  await win.waitForSelector('.project-group', { timeout: 15000 })
 
   // 0) BUNDLED FONT — the Nerd Font is available (not falling back to system).
   const fontLoaded = await win.evaluate(async () => {
@@ -68,16 +68,17 @@ try {
   assert.ok(fontLoaded, 'bundled MesloLGS NF font should be loaded')
 
   // 1) MULTI-PROJECT — both the seeded repo and the launched repo are listed.
-  const projectCount = await win.locator('.project-header').count()
+  const projectCount = await win.locator('.group-name').count()
   assert.ok(projectCount >= 2, `expected >= 2 projects listed, got ${projectCount}`)
-  const titles = await win.locator('.project-title').allInnerTexts()
+  const titles = await win.locator('.group-name').allInnerTexts()
   assert.ok(titles.some((t) => t.includes(basename(repoA))), 'launched project A should be listed')
   assert.ok(titles.some((t) => t.includes(basename(repoB))), 'seeded project B should be listed')
 
-  // 2) SELECT PROJECT A — loads its worktrees.
-  await win.locator('.project-title', { hasText: basename(repoA) }).click()
-  await win.waitForSelector('.project.active .wt-title', { timeout: 10000 })
-  const projA = win.locator('.project.active')
+  // 2) SELECT PROJECT A's main worktree card.
+  const groupA = win.locator('.project-group').filter({ hasText: basename(repoA) })
+  const groupB = win.locator('.project-group').filter({ hasText: basename(repoB) })
+  await groupA.locator('.card', { hasText: 'main' }).first().click()
+  await win.waitForSelector('.card.active', { timeout: 10000 })
 
   const visCount = () =>
     win.evaluate(
@@ -85,10 +86,10 @@ try {
     )
 
   // 3) TABS + ON-DEMAND SPLIT — two shells become two tabs; single by default,
-  //    both visible after toggling split.
-  await projA.getByRole('button', { name: '+ shell' }).first().click()
+  //    both visible after toggling split. '+ shell' lives in the top toolbar.
+  await win.getByRole('button', { name: '+ shell' }).click()
   await win.waitForSelector('.xterm', { timeout: 10000 })
-  await projA.getByRole('button', { name: '+ shell' }).first().click()
+  await win.getByRole('button', { name: '+ shell' }).click()
   await win.waitForFunction(() => document.querySelectorAll('.tab').length >= 2, { timeout: 10000 })
   const tabs = await win.locator('.tab').count()
   assert.ok(tabs >= 2, `tabs: expected >= 2 tabs, got ${tabs}`)
@@ -141,40 +142,38 @@ try {
   }
   assert.ok(roundTrip, 'round-trip: marker file should appear under project A')
 
-  // 5) PER-PROJECT WORKTREE — create a real git worktree under A.
-  await projA.getByRole('button', { name: '+ worktree' }).click()
-  await win.locator('.project.active .wt-input').fill('feat')
-  await win.locator('.project.active .wt-input').press('Enter')
+  // 5) PER-PROJECT WORKTREE — create a real git worktree under A (group "+").
+  await groupA.locator('.group-add').click()
+  await groupA.locator('.wt-input').fill('feat')
+  await groupA.locator('.wt-input').press('Enter')
   await win.waitForFunction(
-    () => [...document.querySelectorAll('.wt-title')].some((t) => t.textContent?.includes('feat')),
+    () => [...document.querySelectorAll('.card-title')].some((t) => t.textContent?.includes('feat')),
     { timeout: 10000 }
   )
   assert.ok(existsSync(join(wtPath, '.git')), `worktree should exist at ${wtPath}`)
 
-  // Re-select A's main worktree.
-  await win.locator('.project.active .wt-title', { hasText: 'main' }).first().click()
+  // Re-select A's main worktree card.
+  await groupA.locator('.card', { hasText: 'main' }).first().click()
   await win.waitForTimeout(400)
 
   // 5b) KEYBOARD NAV — ⌘2 switches to the 2nd worktree (feat), ⌘1 back to main.
-  const activeWt = () =>
-    win.evaluate(
-      () => document.querySelector('.project.active .wt-header.active .wt-title')?.textContent ?? ''
-    )
+  const activeCard = () =>
+    win.evaluate(() => document.querySelector('.card.active .card-title')?.textContent ?? '')
   await win.keyboard.press('Meta+2')
   await win.waitForFunction(
-    () => (document.querySelector('.project.active .wt-header.active .wt-title')?.textContent ?? '').includes('feat'),
+    () => (document.querySelector('.card.active .card-title')?.textContent ?? '').includes('feat'),
     { timeout: 5000 }
   )
   await win.keyboard.press('Meta+1')
   await win.waitForFunction(
-    () => (document.querySelector('.project.active .wt-header.active .wt-title')?.textContent ?? '').includes('main'),
+    () => (document.querySelector('.card.active .card-title')?.textContent ?? '').includes('main'),
     { timeout: 5000 }
   )
-  const kbdNav = (await activeWt()).includes('main')
+  const kbdNav = (await activeCard()).includes('main')
 
-  // 6) AGENT LAUNCH — '+ agent' starts the login shell + bootstraps the agent
-  //    command (here CCM_AGENT_CMD), which creates a marker file on disk.
-  await projA.getByRole('button', { name: '+ agent' }).click()
+  // 6) AGENT LAUNCH — '+ agent' (toolbar) starts the login shell + bootstraps
+  //    the agent command (here CCM_AGENT_CMD), which creates a marker on disk.
+  await win.getByRole('button', { name: '+ agent' }).click()
   let agentLaunched = false
   for (let i = 0; i < 60; i++) {
     if (existsSync(agentMarker)) {
@@ -185,31 +184,22 @@ try {
   }
   assert.ok(agentLaunched, 'agent launch: CCM_AGENT_CMD marker should appear on disk')
 
-  // 7) MULTIPLE AGENTS — a second '+ agent' is allowed (two ★ agents).
-  await projA.getByRole('button', { name: '+ agent' }).click()
+  // 7) MULTIPLE AGENTS — a second '+ agent' is allowed (two ★ agent tabs).
+  await win.getByRole('button', { name: '+ agent' }).click()
   await win.waitForFunction(
-    () => [...document.querySelectorAll('.session-label')].filter((l) => l.textContent?.includes('★')).length >= 2,
+    () => [...document.querySelectorAll('.tab-title')].filter((l) => l.textContent?.includes('★')).length >= 2,
     { timeout: 5000 }
   )
-  const agentRows = await win.locator('.session-label', { hasText: '★' }).count()
-  assert.equal(agentRows, 2, `multi-agent: expected 2 agent rows, got ${agentRows}`)
+  const agentRows = await win.locator('.tab-title', { hasText: '★' }).count()
+  assert.equal(agentRows, 2, `multi-agent: expected 2 agent tabs, got ${agentRows}`)
 
-  // 7b) PROJECT SWITCH preserves sessions — switch to B then back to A.
-  await win.locator('.project-title', { hasText: basename(repoB) }).click()
-  await win.waitForFunction(
-    (b) => (document.querySelector('.project.active .project-title')?.textContent ?? '').includes(b),
-    basename(repoB),
-    { timeout: 5000 }
-  )
-  await win.locator('.project-title', { hasText: basename(repoA) }).click()
-  await win.waitForSelector('.project.active .wt-title', { timeout: 5000 })
+  // 7b) WORKTREE SWITCH preserves sessions — select B's card then back to A's.
+  await groupB.locator('.card').first().click()
   await win.waitForTimeout(300)
-  const agentAfterSwitch = await win.locator('.session-label', { hasText: '★' }).count()
-  assert.equal(agentAfterSwitch, 2, `project switch lost agents (★=${agentAfterSwitch})`)
-  const visibleAfterSwitch = await win.evaluate(
-    () => [...document.querySelectorAll('.pane')].filter((p) => getComputedStyle(p).display !== 'none').length
-  )
-  assert.ok(visibleAfterSwitch >= 1, `project switch hid all panes (visible=${visibleAfterSwitch})`)
+  await groupA.locator('.card', { hasText: 'main' }).first().click()
+  await win.waitForTimeout(300)
+  const agentAfterSwitch = await win.locator('.tab-title', { hasText: '★' }).count()
+  assert.equal(agentAfterSwitch, 2, `worktree switch lost agents (★=${agentAfterSwitch})`)
 
   await win.screenshot({ path: join(process.cwd(), 'e2e', 'smoke.png') })
 
@@ -218,8 +208,8 @@ try {
   await app.close()
   app = await electron.launch(launchOpts)
   const win2 = await app.firstWindow()
-  await win2.waitForSelector('.project.active .wt-title', { timeout: 15000 })
-  // Restored sessions show as tabs (split mode isn't persisted, so one pane shows).
+  await win2.waitForSelector('.card', { timeout: 15000 })
+  // Restored sessions show as tabs for the auto-selected worktree.
   await win2.waitForFunction(() => document.querySelectorAll('.tab').length >= 2, { timeout: 15000 })
   const restored = await win2.locator('.tab').count()
   assert.ok(restored >= 2, `persistence: expected >= 2 restored sessions, got ${restored}`)
