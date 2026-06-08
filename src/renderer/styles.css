@@ -230,11 +230,8 @@ body {
 .pane.focused {
   border-color: var(--accent);
 }
-.pane .xterm,
-.pane .xterm .xterm-viewport,
-.pane .xterm .xterm-screen {
-  height: 100% !important;
-}
+/* Let xterm/FitAddon size the terminal to whole rows — do NOT force height:100%,
+   which makes fit overcount by a row and clips the bottom line. */
 
 .toast {
   position: fixed;

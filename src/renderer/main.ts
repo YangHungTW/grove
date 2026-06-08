@@ -135,7 +135,7 @@ async function openProject(): Promise<void> {
     upsertProject(entry.repoRoot, entry.name)
     await setActiveProject(entry.repoRoot)
   } catch (err) {
-    notify(String(err))
+    notify(errMsg(err))
   }
 }
 
@@ -200,7 +200,7 @@ async function createWorktree(project: ProjectView, branch: string): Promise<voi
     layoutPanes()
     renderSidebar()
   } catch (err) {
-    notify(String(err))
+    notify(errMsg(err))
     renderSidebar()
   }
 }
@@ -212,7 +212,7 @@ async function removeWorktree(project: ProjectView, wtId: string): Promise<void>
   try {
     await window.api.worktreeRemove({ repoRoot: project.repoRoot, path: wt.path, force: true })
   } catch (err) {
-    notify(String(err))
+    notify(errMsg(err))
   }
   project.worktrees.delete(wtId)
   if (activeWorktreeId === wtId) activeWorktreeId = project.worktrees.keys().next().value ?? null
@@ -225,6 +225,18 @@ async function removeWorktree(project: ProjectView, wtId: string): Promise<void>
 async function addSession(worktreeId: string, kind: SessionKind): Promise<void> {
   const wt = activeProject()?.worktrees.get(worktreeId)
   if (!wt) return
+
+  // Only one agent per worktree: clicking "+ agent" again just focuses it.
+  if (kind === 'agent') {
+    const existing = sessionsOf(worktreeId).find((s) => s.kind === 'agent')
+    if (existing) {
+      activeWorktreeId = worktreeId
+      layoutPanes()
+      focusSession(existing.id)
+      return
+    }
+  }
+
   const { command, args, agent } = commandFor(kind)
   try {
     const snap = await window.api.sessionCreate({
@@ -243,7 +255,7 @@ async function addSession(worktreeId: string, kind: SessionKind): Promise<void> 
     focusSession(snap.id)
     persistLayout()
   } catch (err) {
-    notify(String(err)) // single-agent invariant etc.
+    notify(errMsg(err)) // single-agent invariant etc.
   }
 }
 
@@ -512,6 +524,14 @@ function showWorktreeInput(project: ProjectView, anchor: HTMLElement): void {
   })
   anchor.replaceWith(input)
   input.focus()
+}
+
+/** Strip Electron's "Error invoking remote method '…':" / "FooError:" noise. */
+function errMsg(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err)
+  return raw
+    .replace(/^Error: Error invoking remote method '[^']*':\s*/, '')
+    .replace(/^\w*Error:\s*/, '')
 }
 
 function notify(message: string): void {

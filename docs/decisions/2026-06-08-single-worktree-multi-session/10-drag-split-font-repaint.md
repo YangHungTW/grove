@@ -27,6 +27,15 @@ is why the E2E with a shell agent didn't catch it.
 - E2E: `dragResize=true` (drag the column divider widens col 0),
   `agentAfterSwitch=1` (project switch preserves the agent), plus all prior checks.
 
+## Follow-on fixes (same session)
+- **Bottom line clipped in full screen:** the earlier `.xterm{height:100%!important}`
+  hack made FitAddon overcount rows by one → the last line was clipped. Removed it;
+  fit now sizes to whole rows (tiny sub-row gap is normal).
+- **`+ agent` error on re-click:** clicking `+ agent` when the worktree already has
+  one showed a raw `SingleAgentError` toast. Now it just focuses the existing agent
+  (no backend call, no error). Other error toasts cleaned via `errMsg()` which
+  strips the `Error invoking remote method '…':` IPC wrapper.
+
 ## Still open
 - Persist split fractions + active worktree/project across relaunch.
 - State-detection (busy/waiting dots) polish under shell-wrapped agents.
