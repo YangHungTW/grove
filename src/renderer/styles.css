@@ -527,6 +527,11 @@ button {
 .pane.focused {
   box-shadow: inset 0 0 0 2px var(--accent);
 }
+/* No focus ring when there's only one pane — it's only useful to distinguish
+   panes in a split. */
+#panes.single .pane.focused {
+  box-shadow: none;
+}
 /* Keep xterm's hidden input invisible (it can otherwise show an outline/box at
    the cursor position when focused). */
 .pane .xterm-helper-textarea {

@@ -84,7 +84,7 @@ export function PaneGrid(): JSX.Element {
   }
 
   return (
-    <div id="panes" ref={ref} style={style}>
+    <div id="panes" ref={ref} style={style} className={visible.length <= 1 ? 'single' : ''}>
       {[...s.sessions.values()].map((sess) => (
         <Pane
           key={sess.id}
