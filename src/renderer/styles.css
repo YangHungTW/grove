@@ -519,7 +519,7 @@ button {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: var(--bg);
+  background: #000;
   /* No padding/border: FitAddon measures the pane height directly, so any
      box-model inset would make it overcount rows and clip the bottom line.
      The focus ring uses inset box-shadow, which doesn't affect layout. */
@@ -541,6 +541,12 @@ button {
   position: absolute !important;
   top: 0 !important;
   left: 0 !important;
+}
+/* Hide the scrollbar so FitAddon doesn't reserve ~15px on the right (leaving a
+   grey strip). Wheel-scroll still works. */
+.pane .xterm-viewport::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
 }
 
 .gutter {
