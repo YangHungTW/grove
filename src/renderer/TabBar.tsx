@@ -8,7 +8,14 @@ export function TabBar(): JSX.Element {
   const split = s.isSplit()
   const agents = s.availableAgents
   const [menuOpen, setMenuOpen] = useState(false)
+  const [editing, setEditing] = useState<string | null>(null)
+  const [draft, setDraft] = useState('')
   const wt = s.activeWorktreeId
+
+  const commitRename = (id: string): void => {
+    store.renameSession(id, draft)
+    setEditing(null)
+  }
 
   return (
     <div id="tabbar">
@@ -24,32 +31,53 @@ export function TabBar(): JSX.Element {
         </svg>
       </button>
       <div id="tabs">
-        {sessions.map((sess) => (
-          <button
-            key={sess.id}
-            className={
-              'tab' +
-              (sess.id === s.focusedSessionId ? ' active' : '') +
-              (s.pending.has(sess.id) ? ' attention' : '')
-            }
-            onClick={() => store.focusSession(sess.id)}
-          >
-            <span className={`dot dot-${sess.state}`} />
-            <span className="tab-title">
-              {sess.icon ? sess.icon + ' ' : ''}
-              {sess.title}
-            </span>
+        {sessions.map((sess) =>
+          editing === sess.id ? (
+            <div key={sess.id} className="tab active">
+              <input
+                className="tab-rename"
+                autoFocus
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onBlur={() => commitRename(sess.id)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') commitRename(sess.id)
+                  else if (e.key === 'Escape') setEditing(null)
+                }}
+              />
+            </div>
+          ) : (
             <button
-              className="tab-x"
-              onClick={(e) => {
-                e.stopPropagation()
-                store.closeSession(sess.id)
+              key={sess.id}
+              className={
+                'tab' +
+                (sess.id === s.focusedSessionId ? ' active' : '') +
+                (s.pending.has(sess.id) ? ' attention' : '')
+              }
+              title="Double-click to rename"
+              onClick={() => store.focusSession(sess.id)}
+              onDoubleClick={() => {
+                setEditing(sess.id)
+                setDraft(sess.title)
               }}
             >
-              ×
+              <span className={`dot dot-${sess.state}`} />
+              <span className="tab-title">
+                {sess.icon ? sess.icon + ' ' : ''}
+                {sess.title}
+              </span>
+              <button
+                className="tab-x"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  store.closeSession(sess.id)
+                }}
+              >
+                ×
+              </button>
             </button>
-          </button>
-        ))}
+          )
+        )}
       </div>
       <div id="toolbar">
         {agents.length === 1 && (

@@ -41,4 +41,13 @@ describe('LayoutStore — session layout (persisted)', () => {
     expect(store.load()).toHaveLength(1)
     expect(store.load()[0].repoRoot).toBe('/b')
   })
+
+  it('round-trips the optional icon (used to restore the agent + a renamed title)', () => {
+    const store = new LayoutStore(file)
+    const withIcon: SessionDescriptor[] = [
+      { repoRoot: '/a', worktreePath: '/a', kind: 'agent', title: 'my codex', icon: '◆' }
+    ]
+    store.save(withIcon)
+    expect(store.load()).toEqual(withIcon)
+  })
 })

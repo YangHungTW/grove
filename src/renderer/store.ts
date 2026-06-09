@@ -163,7 +163,13 @@ class Store {
     for (const project of this.projects.values())
       for (const wt of project.worktrees.values())
         for (const s of this.sessionsOf(wt.id))
-          out.push({ repoRoot: project.repoRoot, worktreePath: wt.path, kind: s.kind, title: s.title })
+          out.push({
+            repoRoot: project.repoRoot,
+            worktreePath: wt.path,
+            kind: s.kind,
+            title: s.title,
+            icon: s.icon
+          })
     return out
   }
   private persistLayout(): void {
@@ -181,7 +187,12 @@ class Store {
     this.restoring = true
     for (const d of toRestore) {
       const wt = [...project.worktrees.values()].find((w) => w.path === d.worktreePath)
-      if (wt) await this.addSession(wt.id, d.kind)
+      if (!wt) continue
+      // Recover which agent this was from its icon so codex/gemini restore as
+      // themselves (not the default), and keep the saved/renamed title.
+      const agentDef =
+        d.kind === 'agent' ? this.availableAgents.find((a) => a.icon === d.icon) : undefined
+      await this.addSession(wt.id, d.kind, agentDef, d.title)
     }
     this.restoring = false
     this.persistLayout()
@@ -318,7 +329,12 @@ class Store {
   }
 
   // --- sessions ----------------------------------------------------------
-  async addSession(worktreeId: string, kind: SessionKind, agentDef?: AgentDef): Promise<void> {
+  async addSession(
+    worktreeId: string,
+    kind: SessionKind,
+    agentDef?: AgentDef,
+    titleOverride?: string
+  ): Promise<void> {
     const wt = this.activeProject()?.worktrees.get(worktreeId)
     if (!wt) return
     const isAgent = kind === 'agent'
@@ -327,7 +343,7 @@ class Store {
     const command = isAgent ? (agentDef?.command ?? 'claude') : 'shell'
     const detect = isAgent ? (agentDef?.id ?? 'claude') : undefined
     const n = this.sessionsOf(worktreeId).filter((x) => x.icon === icon).length
-    const title = n === 0 ? baseName : `${baseName} ${n + 1}`
+    const title = titleOverride ?? (n === 0 ? baseName : `${baseName} ${n + 1}`)
     // Estimate columns so the shell's first prompt renders at ~the right width
     // (avoids reflow garbage). Rows are left to FitAddon to avoid over-counting
     // and clipping the bottom line.
@@ -351,6 +367,14 @@ class Store {
     } catch (err) {
       this.toast(errMsg(err))
     }
+    this.notify()
+  }
+  renameSession(id: string, title: string): void {
+    const s = this.sessions.get(id)
+    const next = title.trim()
+    if (!s || !next || s.title === next) return
+    this.sessions.set(id, { ...s, title: next })
+    this.persistLayout()
     this.notify()
   }
   closeSession(id: string, quiet = false): void {

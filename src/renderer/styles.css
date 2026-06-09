@@ -506,6 +506,17 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.tab-rename {
+  width: 110px;
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  color: var(--fg);
+  font-size: 12px;
+  font-family: inherit;
+  padding: 2px 5px;
+  outline: none;
+}
 .tab-x {
   border: 0;
   background: transparent;

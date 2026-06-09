@@ -8,6 +8,8 @@ export interface SessionDescriptor {
   worktreePath: string
   kind: SessionKind
   title: string
+  /** Tab icon — also used on restore to recover which agent it was. */
+  icon?: string
 }
 
 /**
