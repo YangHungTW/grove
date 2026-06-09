@@ -76,6 +76,8 @@ export interface WorktreeRemoveRequest {
   repoRoot: string
   path: string
   force?: boolean
+  /** Branch to delete after removing the worktree (omit to keep the branch). */
+  deleteBranch?: string
 }
 
 /**

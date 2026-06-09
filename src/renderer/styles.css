@@ -100,34 +100,58 @@ button {
 
 /* ---------- flat worktree cards (cmux-style) ---------- */
 .project-group {
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 }
-.group-label {
+/* Project = top level: repo icon + bold name + actions, with a subtle divider. */
+.project-header {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 6px 4px;
+  gap: 7px;
+  padding: 5px 8px 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  margin-bottom: 6px;
 }
-.group-name {
-  flex: 1;
-  font-size: 11px;
-  font-weight: 600;
+.repo-icon {
   color: var(--muted);
+  flex: 0 0 auto;
+}
+.project-name {
+  flex: 1;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--fg);
+  letter-spacing: 0.01em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.group-add {
+.project-count {
+  font-size: 10px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 9px;
+  padding: 1px 6px;
+}
+.proj-btn {
   border: 0;
   background: transparent;
   color: var(--muted);
   cursor: pointer;
-  font-size: 14px;
-  padding: 0 6px;
+  font-size: 13px;
+  padding: 0 4px;
   line-height: 1;
 }
-.group-add:hover {
+.proj-btn:hover {
   color: var(--fg);
+}
+/* Worktrees nested under the project, with a left rail showing containment. */
+.worktrees {
+  margin-left: 9px;
+  padding-left: 9px;
+  border-left: 1.5px solid rgba(255, 255, 255, 0.07);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .card {
@@ -625,11 +649,21 @@ button {
 .settings-panel {
   width: 420px;
   max-width: 90vw;
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
   background: var(--panel);
   border: 1px solid #000;
   border-radius: 10px;
   padding: 16px;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+.settings-header {
+  position: sticky;
+  top: -16px;
+  background: var(--panel);
+  padding-top: 4px;
+  margin: -4px 0 8px;
+  z-index: 1;
 }
 .settings-header {
   display: flex;
@@ -859,4 +893,104 @@ button {
     opacity: 0;
     transform: translateY(8px);
   }
+}
+
+/* ---------- modal dialogs (close project / create + remove worktree) ---------- */
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 60;
+}
+.dialog {
+  width: 380px;
+  max-width: 90vw;
+  background: var(--panel);
+  border: 1px solid #000;
+  border-radius: 12px;
+  padding: 18px 18px 16px;
+  box-shadow: 0 16px 50px rgba(0, 0, 0, 0.55);
+  animation: toast-in 0.13s ease-out;
+}
+.dialog-title {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 700;
+}
+.dialog-body {
+  margin: 0 0 14px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.dialog-body b {
+  color: var(--fg);
+}
+.dialog-body code {
+  font-family: 'MesloLGS NF', Menlo, monospace;
+  font-size: 11px;
+  background: var(--bg);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.dialog-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 16px;
+  font-size: 12px;
+}
+.dialog-field input {
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: 7px;
+  color: var(--fg);
+  padding: 9px 10px;
+  font-size: 13px;
+  font-family: 'MesloLGS NF', Menlo, monospace;
+  outline: none;
+}
+.dialog-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 16px;
+  font-size: 12px;
+  color: var(--fg);
+  cursor: pointer;
+}
+.dialog-check em {
+  color: var(--muted);
+  font-style: normal;
+}
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.dialog-actions button {
+  border: 0;
+  border-radius: 7px;
+  padding: 7px 14px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.dialog-actions button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.btn-ghost {
+  background: var(--panel-2);
+  color: var(--fg);
+}
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+}
+.btn-danger {
+  background: var(--danger);
+  color: #fff;
 }

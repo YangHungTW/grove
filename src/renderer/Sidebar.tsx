@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { useStore } from './useStore'
 import { store, type ProjectView, type WorktreeView } from './store'
 
@@ -17,63 +16,54 @@ export function Sidebar(): JSX.Element {
   )
 }
 
+const RepoIcon = (): JSX.Element => (
+  <svg className="repo-icon" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+    <path d="M4 1.5A1.5 1.5 0 0 0 2.5 3v10A1.5 1.5 0 0 0 4 14.5h9a.5.5 0 0 0 .5-.5V2.5A.5.5 0 0 0 13 2H4a.5.5 0 0 1 0-1h9A1.5 1.5 0 0 1 14.5 2.5v11a1.5 1.5 0 0 1-1.5 1.5H4A2.5 2.5 0 0 1 1.5 13V3A2.5 2.5 0 0 1 4 .5h.5v1H4Z" />
+  </svg>
+)
+
 function ProjectGroup({ project }: { project: ProjectView }): JSX.Element {
   const s = useStore()
-  const [adding, setAdding] = useState(false)
-  const [closing, setClosing] = useState(false)
-
   return (
     <div className="project-group">
-      <div className="group-label">
-        <span className="group-name">{project.name}</span>
-        <button className="group-add" title="New worktree" onClick={() => setAdding(true)}>
+      <div className="project-header">
+        <RepoIcon />
+        <span className="project-name">{project.name}</span>
+        <span className="project-count">{project.worktrees.size}</span>
+        <button
+          className="proj-btn"
+          title="New worktree"
+          onClick={() =>
+            store.openDialog({
+              kind: 'createWorktree',
+              repoRoot: project.repoRoot,
+              projectName: project.name
+            })
+          }
+        >
           +
         </button>
         <button
-          className="row-x"
-          title="Close project (keeps the repo on disk)"
-          onClick={() => setClosing(true)}
+          className="proj-btn"
+          title="Close project (keeps the repo)"
+          onClick={() =>
+            store.openDialog({ kind: 'closeProject', repoRoot: project.repoRoot, name: project.name })
+          }
         >
-          ×
+          ✕
         </button>
       </div>
 
-      {closing && (
-        <div className="card-confirm" onClick={(e) => e.stopPropagation()}>
-          <span>Close project? (repo kept)</span>
-          <button
-            className="confirm-yes"
-            onClick={() => {
-              setClosing(false)
-              void store.removeProject(project.repoRoot)
-            }}
-          >
-            Close
-          </button>
-          <button className="confirm-no" onClick={() => setClosing(false)}>
-            Cancel
-          </button>
-        </div>
-      )}
-
-      {[...project.worktrees.values()].map((wt) => (
-        <WorktreeCard key={wt.id} project={project} wt={wt} active={wt.id === s.activeWorktreeId} />
-      ))}
-
-      {adding && (
-        <input
-          className="wt-input"
-          placeholder="new branch name, Enter to create"
-          autoFocus
-          onKeyDown={(e) => {
-            const v = (e.target as HTMLInputElement).value.trim()
-            if (e.key === 'Enter' && v) {
-              void store.createWorktree(project, v)
-              setAdding(false)
-            } else if (e.key === 'Escape') setAdding(false)
-          }}
-        />
-      )}
+      <div className="worktrees">
+        {[...project.worktrees.values()].map((wt) => (
+          <WorktreeCard
+            key={wt.id}
+            project={project}
+            wt={wt}
+            active={wt.id === s.activeWorktreeId}
+          />
+        ))}
+      </div>
     </div>
   )
 }
@@ -88,7 +78,6 @@ function WorktreeCard({
   active: boolean
 }): JSX.Element {
   const s = useStore()
-  const [confirming, setConfirming] = useState(false)
   const st = s.wtStatus.get(wt.id)
   const line = s.worktreeLastLine(wt.id)
   const cnt = s.sessionsOf(wt.id).length
@@ -113,13 +102,19 @@ function WorktreeCard({
         {statusParts.length > 0 && (
           <span className={'wt-status' + (st?.dirty ? ' dirty' : '')}>{statusParts.join(' ')}</span>
         )}
-        {!wt.primary && !confirming && (
+        {!wt.primary && (
           <button
             className="row-x"
             title="Remove worktree"
             onClick={(e) => {
               e.stopPropagation()
-              setConfirming(true)
+              store.openDialog({
+                kind: 'removeWorktree',
+                repoRoot: project.repoRoot,
+                wtId: wt.id,
+                branch: wt.branch,
+                folder
+              })
             }}
           >
             ×
@@ -128,24 +123,6 @@ function WorktreeCard({
       </div>
       <div className="card-path">{folder}</div>
       {line && <div className="card-sub">{line}</div>}
-
-      {confirming && (
-        <div className="card-confirm" onClick={(e) => e.stopPropagation()}>
-          <span>Remove this worktree?</span>
-          <button
-            className="confirm-yes"
-            onClick={() => {
-              setConfirming(false)
-              void store.removeWorktree(project, wt.id)
-            }}
-          >
-            Remove
-          </button>
-          <button className="confirm-no" onClick={() => setConfirming(false)}>
-            Cancel
-          </button>
-        </div>
-      )}
     </div>
   )
 }

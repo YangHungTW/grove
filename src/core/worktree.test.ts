@@ -77,4 +77,19 @@ describe('worktree git operations', () => {
     removeWorktree(repo, wtPath, { force: true })
     expect(listWorktrees(repo).some((w) => w.branch === 'to-remove')).toBe(false)
   })
+
+  it('removeWorktree keeps the branch by default but deletes it when asked', () => {
+    const branches = (): string => git(['branch', '--list'])
+    // kept by default
+    const p1 = join(repo, '..', `wt-keep-${Date.now()}`)
+    createWorktree(repo, { path: p1, branch: 'keep-branch', newBranch: true })
+    removeWorktree(repo, p1, { force: true })
+    expect(branches()).toContain('keep-branch')
+
+    // deleted when requested
+    const p2 = join(repo, '..', `wt-del-${Date.now()}`)
+    createWorktree(repo, { path: p2, branch: 'del-branch', newBranch: true })
+    removeWorktree(repo, p2, { force: true, deleteBranch: 'del-branch' })
+    expect(branches()).not.toContain('del-branch')
+  })
 })

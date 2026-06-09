@@ -272,7 +272,7 @@ function registerIpc(): void {
       CCM_WORKTREE_PATH: req.path,
       CCM_REPO: req.repoRoot
     })
-    removeWorktree(req.repoRoot, req.path, { force: req.force })
+    removeWorktree(req.repoRoot, req.path, { force: req.force, deleteBranch: req.deleteBranch })
   })
 
   ipcMain.handle(Channels.sessionCreate, (_e: IpcMainInvokeEvent, req: CreateSessionRequest) =>

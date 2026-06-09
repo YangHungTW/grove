@@ -29,6 +29,11 @@ export interface WtStatus {
   ahead: number
   behind: number
 }
+/** A modal the sidebar wants to show. */
+export type DialogState =
+  | { kind: 'closeProject'; repoRoot: string; name: string }
+  | { kind: 'createWorktree'; repoRoot: string; projectName: string }
+  | { kind: 'removeWorktree'; repoRoot: string; wtId: string; branch: string; folder: string }
 interface PaneRef {
   term: Terminal
   fit: FitAddon
@@ -67,6 +72,7 @@ class Store {
   settings: AppSettings = { ...DEFAULT_SETTINGS }
   settingsOpen = false
   availableAgents: ResolvedAgent[] = []
+  dialog: DialogState | null = null
 
   private savedLayout: SessionDescriptor[] = []
   private restoredProjects = new Set<string>()
@@ -300,12 +306,17 @@ class Store {
     }
     this.notify()
   }
-  async removeWorktree(project: ProjectView, wtId: string): Promise<void> {
+  async removeWorktree(project: ProjectView, wtId: string, deleteBranch = false): Promise<void> {
     const wt = project.worktrees.get(wtId)
     if (!wt || wt.primary) return
     for (const s of this.sessionsOf(wtId)) this.closeSession(s.id, true)
     try {
-      await window.api.worktreeRemove({ repoRoot: project.repoRoot, path: wt.path, force: true })
+      await window.api.worktreeRemove({
+        repoRoot: project.repoRoot,
+        path: wt.path,
+        force: true,
+        deleteBranch: deleteBranch ? wt.branch : undefined
+      })
     } catch (err) {
       this.toast(errMsg(err))
     }
@@ -458,6 +469,16 @@ class Store {
           this.activeWorktreeId = wt.id
         }
     this.focusSession(id)
+  }
+
+  // --- dialogs -----------------------------------------------------------
+  openDialog(d: DialogState): void {
+    this.dialog = d
+    this.notify()
+  }
+  closeDialog(): void {
+    this.dialog = null
+    this.notify()
   }
 
   // --- settings / appearance ---------------------------------------------

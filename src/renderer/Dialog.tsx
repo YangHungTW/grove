@@ -1,0 +1,143 @@
+import { useState } from 'react'
+import { useStore } from './useStore'
+import { store, type ProjectView } from './store'
+
+export function Dialog(): JSX.Element | null {
+  const s = useStore()
+  const d = s.dialog
+  if (!d) return null
+
+  const project = (): ProjectView | undefined => store.projects.get(d.repoRoot)
+  const close = (): void => store.closeDialog()
+
+  return (
+    <div className="dialog-overlay" onClick={close}>
+      <div className="dialog" onClick={(e) => e.stopPropagation()}>
+        {d.kind === 'closeProject' && <CloseProject name={d.name} repoRoot={d.repoRoot} />}
+        {d.kind === 'createWorktree' && (
+          <CreateWorktree projectName={d.projectName} getProject={project} />
+        )}
+        {d.kind === 'removeWorktree' && (
+          <RemoveWorktree branch={d.branch} folder={d.folder} wtId={d.wtId} getProject={project} />
+        )}
+      </div>
+    </div>
+  )
+}
+
+function CloseProject({ name, repoRoot }: { name: string; repoRoot: string }): JSX.Element {
+  return (
+    <>
+      <h3 className="dialog-title">Close project</h3>
+      <p className="dialog-body">
+        Remove <b>{name}</b> from the sidebar. The repository stays on disk — nothing is deleted, and
+        you can re-open it any time. Its open sessions will be closed.
+      </p>
+      <div className="dialog-actions">
+        <button className="btn-ghost" onClick={() => store.closeDialog()}>
+          Cancel
+        </button>
+        <button
+          className="btn-primary"
+          onClick={() => {
+            store.closeDialog()
+            void store.removeProject(repoRoot)
+          }}
+        >
+          Close project
+        </button>
+      </div>
+    </>
+  )
+}
+
+function CreateWorktree({
+  projectName,
+  getProject
+}: {
+  projectName: string
+  getProject: () => import('./store').ProjectView | undefined
+}): JSX.Element {
+  const [branch, setBranch] = useState('')
+  const submit = (): void => {
+    const v = branch.trim()
+    const p = getProject()
+    if (!v || !p) return
+    store.closeDialog()
+    void store.createWorktree(p, v)
+  }
+  return (
+    <>
+      <h3 className="dialog-title">New worktree</h3>
+      <p className="dialog-body">
+        Creates a new branch and a linked git worktree in <b>{projectName}</b>, then opens it.
+      </p>
+      <label className="dialog-field">
+        <span>Branch name</span>
+        <input
+          autoFocus
+          value={branch}
+          placeholder="e.g. feature/login"
+          spellCheck={false}
+          onChange={(e) => setBranch(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') submit()
+            else if (e.key === 'Escape') store.closeDialog()
+          }}
+        />
+      </label>
+      <div className="dialog-actions">
+        <button className="btn-ghost" onClick={() => store.closeDialog()}>
+          Cancel
+        </button>
+        <button className="btn-primary" disabled={!branch.trim()} onClick={submit}>
+          Create worktree
+        </button>
+      </div>
+    </>
+  )
+}
+
+function RemoveWorktree({
+  branch,
+  folder,
+  wtId,
+  getProject
+}: {
+  branch: string
+  folder: string
+  wtId: string
+  getProject: () => import('./store').ProjectView | undefined
+}): JSX.Element {
+  const [delBranch, setDelBranch] = useState(false)
+  return (
+    <>
+      <h3 className="dialog-title">Remove worktree</h3>
+      <p className="dialog-body">
+        Removes the worktree folder <code>{folder}</code> and its open sessions. By default the
+        branch <b>{branch}</b> is <b>kept</b> — your commits are safe.
+      </p>
+      <label className="dialog-check">
+        <input type="checkbox" checked={delBranch} onChange={(e) => setDelBranch(e.target.checked)} />
+        <span>
+          Also delete branch <b>{branch}</b> <em>(git branch -D — unmerged commits are lost)</em>
+        </span>
+      </label>
+      <div className="dialog-actions">
+        <button className="btn-ghost" onClick={() => store.closeDialog()}>
+          Cancel
+        </button>
+        <button
+          className="btn-danger"
+          onClick={() => {
+            const p = getProject()
+            store.closeDialog()
+            if (p) void store.removeWorktree(p, wtId, delBranch)
+          }}
+        >
+          {delBranch ? 'Remove + delete branch' : 'Remove worktree'}
+        </button>
+      </div>
+    </>
+  )
+}

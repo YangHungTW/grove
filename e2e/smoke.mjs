@@ -69,9 +69,9 @@ try {
   assert.ok(fontLoaded, 'bundled MesloLGS NF font should be loaded')
 
   // 1) MULTI-PROJECT — both the seeded repo and the launched repo are listed.
-  const projectCount = await win.locator('.group-name').count()
+  const projectCount = await win.locator('.project-name').count()
   assert.ok(projectCount >= 2, `expected >= 2 projects listed, got ${projectCount}`)
-  const titles = await win.locator('.group-name').allInnerTexts()
+  const titles = await win.locator('.project-name').allInnerTexts()
   assert.ok(titles.some((t) => t.includes(basename(repoA))), 'launched project A should be listed')
   assert.ok(titles.some((t) => t.includes(basename(repoB))), 'seeded project B should be listed')
 
@@ -143,10 +143,11 @@ try {
   }
   assert.ok(roundTrip, 'round-trip: marker file should appear under project A')
 
-  // 5) PER-PROJECT WORKTREE — create a real git worktree under A (group "+").
-  await groupA.locator('.group-add').click()
-  await groupA.locator('.wt-input').fill('feat')
-  await groupA.locator('.wt-input').press('Enter')
+  // 5) PER-PROJECT WORKTREE — create a real git worktree under A via the dialog.
+  await groupA.locator('.proj-btn').first().click() // "+" new worktree
+  await win.waitForSelector('.dialog-field input', { timeout: 5000 })
+  await win.locator('.dialog-field input').fill('feat')
+  await win.getByRole('button', { name: 'Create worktree' }).click()
   await win.waitForFunction(
     () => [...document.querySelectorAll('.card-title')].some((t) => t.textContent?.includes('feat')),
     { timeout: 10000 }

@@ -125,10 +125,12 @@ export function listWorktrees(repoRoot: string): WorktreeInfo[] {
 export function removeWorktree(
   repoRoot: string,
   worktreePath: string,
-  opts: { force?: boolean } = {}
+  opts: { force?: boolean; deleteBranch?: string } = {}
 ): void {
   const args = ['worktree', 'remove']
   if (opts.force) args.push('--force')
   args.push(worktreePath)
   git(repoRoot, args)
+  // `git worktree remove` keeps the branch; delete it only when asked.
+  if (opts.deleteBranch) git(repoRoot, ['branch', '-D', opts.deleteBranch])
 }

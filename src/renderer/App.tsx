@@ -3,6 +3,7 @@ import { Sidebar } from './Sidebar'
 import { TabBar } from './TabBar'
 import { PaneGrid } from './PaneGrid'
 import { SettingsPanel } from './SettingsPanel'
+import { Dialog } from './Dialog'
 import { useStore } from './useStore'
 import { store } from './store'
 import { matchesAccel } from './keymatch'
@@ -76,6 +77,7 @@ export function App(): JSX.Element {
         <PaneGrid />
       </main>
       <SettingsPanel />
+      <Dialog />
     </div>
   )
 }
