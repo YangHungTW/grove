@@ -11,6 +11,9 @@ export interface AgentDef {
   icon: string
 }
 
+/** An AgentDef plus whether its command is currently on PATH. */
+export type ResolvedAgent = AgentDef & { installed: boolean }
+
 /** Actions that can be bound to a keyboard shortcut. */
 export type KeybindAction =
   | 'splitToggle'

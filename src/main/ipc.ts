@@ -2,7 +2,8 @@ import type { SessionKind, SessionState } from '../core/types'
 import type { WorktreeInfo, CreateWorktreeOptions, WorktreeStatus } from '../core/worktree'
 import type { ProjectEntry } from '../core/projectStore'
 import type { SessionDescriptor } from '../core/layoutStore'
-import type { AppSettings, AgentDef } from '../core/settingsStore'
+import type { AppSettings } from '../core/settingsStore'
+import type { ResolvedAgent } from '../core/settings'
 
 /** Channel names. Request/response (invoke) and event (send) are split. */
 export const Channels = {
@@ -96,8 +97,8 @@ export interface RendererApi {
   layoutLoad(): Promise<SessionDescriptor[]>
   settingsLoad(): Promise<AppSettings>
   settingsSave(patch: Partial<AppSettings>): Promise<AppSettings>
-  /** Configured agents that are actually installed (on PATH). */
-  agentsAvailable(): Promise<AgentDef[]>
+  /** All configured agents tagged with whether their command is installed. */
+  agentsAvailable(): Promise<ResolvedAgent[]>
   worktreeCreate(repoRoot: string, opts: CreateWorktreeOptions): Promise<WorktreeInfo>
   worktreeList(repoRoot: string): Promise<WorktreeInfo[]>
   worktreeStatus(worktreePath: string): Promise<WorktreeStatus>

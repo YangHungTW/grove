@@ -3,7 +3,13 @@ import type { FitAddon } from '@xterm/addon-fit'
 import type { SessionKind, SessionState } from '../core/types'
 import type { SessionSnapshot } from '../main/ipc'
 import type { SessionDescriptor } from '../core/layoutStore'
-import { DEFAULT_SETTINGS, SHELL_ICON, type AppSettings, type AgentDef } from '../core/settings'
+import {
+  DEFAULT_SETTINGS,
+  SHELL_ICON,
+  type AppSettings,
+  type AgentDef,
+  type ResolvedAgent
+} from '../core/settings'
 
 export interface WorktreeView {
   id: string // = path
@@ -60,7 +66,7 @@ class Store {
   rowFr: number[] = []
   settings: AppSettings = { ...DEFAULT_SETTINGS }
   settingsOpen = false
-  availableAgents: AgentDef[] = []
+  availableAgents: ResolvedAgent[] = []
 
   private savedLayout: SessionDescriptor[] = []
   private restoredProjects = new Set<string>()
@@ -458,6 +464,15 @@ class Store {
   openSettings(open: boolean): void {
     this.settingsOpen = open
     this.notify()
+    // Re-check which agent commands are installed when opening/closing settings
+    // (cheap: commandExists is cached per command in main).
+    void window.api
+      .agentsAvailable()
+      .then((a) => {
+        this.availableAgents = a
+        this.notify()
+      })
+      .catch(() => {})
   }
   toggleSidebar(): void {
     void this.updateSettings({ sidebarCollapsed: !this.settings.sidebarCollapsed })

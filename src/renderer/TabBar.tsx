@@ -7,7 +7,9 @@ export function TabBar(): JSX.Element {
   const sessions = s.activeWorktreeId ? s.sessionsOf(s.activeWorktreeId) : []
   const split = s.isSplit()
   // Installed agents the user hasn't turned off.
-  const agents = s.availableAgents.filter((a) => !s.settings.disabledAgents.includes(a.id))
+  const agents = s.availableAgents.filter(
+    (a) => a.installed && !s.settings.disabledAgents.includes(a.id)
+  )
   const [menuOpen, setMenuOpen] = useState(false)
   const [editing, setEditing] = useState<string | null>(null)
   const [draft, setDraft] = useState('')

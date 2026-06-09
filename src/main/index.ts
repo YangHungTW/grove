@@ -7,7 +7,7 @@ import { createWorktree, listWorktrees, removeWorktree, isGitRepo, worktreeStatu
 import { ProjectStore, type ProjectEntry } from '../core/projectStore'
 import { LayoutStore, type SessionDescriptor } from '../core/layoutStore'
 import { SettingsStore, type AppSettings } from '../core/settingsStore'
-import { AGENT_PRESETS, type AgentDef } from '../core/settings'
+import type { ResolvedAgent } from '../core/settings'
 import { execFileSync } from 'node:child_process'
 import { detectState } from '../core/stateDetection'
 import type { CreateWorktreeOptions } from '../core/worktree'
@@ -71,9 +71,11 @@ function commandExists(cmd: string): boolean {
   return ok
 }
 
-/** Configured agents that are actually installed. */
-function availableAgents(): AgentDef[] {
-  return AGENT_PRESETS.filter((a) => commandExists(a.command))
+/** All configured agents, each tagged with whether its command is on PATH. */
+function resolveAgents(): ResolvedAgent[] {
+  return settings()
+    .load()
+    .agents.map((a) => ({ ...a, installed: commandExists(a.command) }))
 }
 
 /** Resolve a new worktree path from the settings template (relative to repo). */
@@ -238,7 +240,7 @@ function registerIpc(): void {
   ipcMain.on(Channels.layoutSave, (_e, descriptors: SessionDescriptor[]) =>
     layout().save(descriptors)
   )
-  ipcMain.handle(Channels.agentsAvailable, () => availableAgents())
+  ipcMain.handle(Channels.agentsAvailable, () => resolveAgents())
   ipcMain.handle(Channels.settingsLoad, () => settings().load())
   ipcMain.handle(Channels.settingsSave, (_e: IpcMainInvokeEvent, patch: Partial<AppSettings>) => {
     const next = settings().save(patch)
