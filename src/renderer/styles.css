@@ -534,6 +534,14 @@ button {
   outline: none !important;
   border: 0 !important;
 }
+/* The canvas renderer's layers must overlap at the top-left. Without this they
+   default to position:static and stack vertically, pushing content down ~20px
+   and shoving the cursor layer off-screen. */
+.pane .xterm-screen canvas {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+}
 
 .gutter {
   position: absolute;
