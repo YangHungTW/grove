@@ -151,6 +151,10 @@ function Pane({
       if (el.clientHeight < 2 || el.clientWidth < 2) return
       try {
         fit.fit()
+        // Reserve one row so an agent's bottom line (claude's status / auto-mode
+        // row) isn't flush against the pane edge. The canvas sits at top:0, so a
+        // shorter terminal just leaves a clean margin at the bottom.
+        if (term.rows > 4) term.resize(term.cols, term.rows - 1)
         window.api.sessionResize(session.id, term.cols, term.rows)
         term.refresh(0, term.rows - 1) // force a full repaint (new/reshown pane)
       } catch {
