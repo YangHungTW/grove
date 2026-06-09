@@ -144,6 +144,7 @@ export function TabBar(): JSX.Element {
         <button
           id="split-toggle"
           className={'icon-btn' + (split ? ' active' : '')}
+          aria-label="Toggle split"
           title="Toggle split (⌘D)"
           onClick={() => store.toggleSplit()}
         >
@@ -152,13 +153,19 @@ export function TabBar(): JSX.Element {
         <button
           id="notif-btn"
           className={'icon-btn' + (s.pending.size > 0 ? ' active' : '')}
+          aria-label="Notifications"
           title="Notifications (⌘⇧U)"
           onClick={() => store.jumpToPending()}
         >
           <BellIcon size={15} />
           {s.pending.size > 0 && <span id="notif-count">{s.pending.size}</span>}
         </button>
-        <button className="icon-btn" title="Settings" onClick={() => store.openSettings(true)}>
+        <button
+          className="icon-btn"
+          aria-label="Settings"
+          title="Settings"
+          onClick={() => store.openSettings(true)}
+        >
           <GearIcon size={15} />
         </button>
       </div>

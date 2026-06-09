@@ -51,9 +51,30 @@ export const KEYBIND_LABELS: { action: KeybindAction; label: string }[] = [
   { action: 'toggleSidebar', label: 'Toggle sidebar' }
 ]
 
-export interface AppSettings {
-  /** Chrome/background base color (hex). */
+/** A coordinated colour theme (terminal + chrome). */
+export interface Theme {
+  id: string
+  name: string
   background: string
+  foreground: string
+}
+
+/** Built-in dark themes for the appearance picker. */
+export const THEMES: Theme[] = [
+  { id: 'dark', name: 'Default Dark', background: '#1b1b1f', foreground: '#dcdce4' },
+  { id: 'ink', name: 'Ink', background: '#0d0d12', foreground: '#cdd0e0' },
+  { id: 'carbon', name: 'Carbon', background: '#161821', foreground: '#c6c8d1' },
+  { id: 'dracula', name: 'Dracula', background: '#282a36', foreground: '#f8f8f2' },
+  { id: 'nord', name: 'Nord', background: '#2e3440', foreground: '#d8dee9' },
+  { id: 'gruvbox', name: 'Gruvbox', background: '#282828', foreground: '#ebdbb2' },
+  { id: 'solarized', name: 'Solarized', background: '#002b36', foreground: '#93a1a1' }
+]
+
+export interface AppSettings {
+  /** Chrome/terminal background color (hex). */
+  background: string
+  /** Foreground/text color (hex). */
+  foreground: string
   /** Background opacity 0..1 (used when transparent is on). */
   opacity: number
   /** Enable window vibrancy / transparent background. */
@@ -82,6 +103,7 @@ export const SHELL_ICON = '❯'
 
 export const DEFAULT_SETTINGS: AppSettings = {
   background: '#1b1b1f',
+  foreground: '#dcdce4',
   opacity: 1,
   transparent: false,
   sidebarCollapsed: false,

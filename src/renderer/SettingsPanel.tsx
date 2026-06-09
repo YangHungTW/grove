@@ -1,7 +1,7 @@
 import type { AgentDef } from '../core/settings'
 import { useStore } from './useStore'
 import { store } from './store'
-import { KEYBIND_LABELS, AGENT_PRESETS } from '../core/settings'
+import { KEYBIND_LABELS, AGENT_PRESETS, THEMES } from '../core/settings'
 
 export function SettingsPanel(): JSX.Element | null {
   const s = useStore()
@@ -29,16 +29,43 @@ export function SettingsPanel(): JSX.Element | null {
           </button>
         </div>
 
-        <div className="settings-section">Appearance</div>
-
-        <label className="settings-row">
-          <span>Background colour</span>
-          <input
-            type="color"
-            value={cfg.background}
-            onChange={(e) => void store.updateSettings({ background: e.target.value })}
-          />
-        </label>
+        <div className="settings-section">Theme</div>
+        <div className="theme-grid">
+          {THEMES.map((t) => {
+            const active = cfg.background.toLowerCase() === t.background.toLowerCase()
+            return (
+              <button
+                key={t.id}
+                className={'theme-swatch' + (active ? ' active' : '')}
+                style={{ background: t.background, color: t.foreground }}
+                title={t.name}
+                onClick={() =>
+                  void store.updateSettings({ background: t.background, foreground: t.foreground })
+                }
+              >
+                <span className="theme-sample">Aa</span>
+                <span className="theme-name">{t.name}</span>
+              </button>
+            )
+          })}
+        </div>
+        <div className="settings-row">
+          <span>Custom colours</span>
+          <span className="theme-customs">
+            <input
+              type="color"
+              title="Background"
+              value={cfg.background}
+              onChange={(e) => void store.updateSettings({ background: e.target.value })}
+            />
+            <input
+              type="color"
+              title="Text"
+              value={cfg.foreground}
+              onChange={(e) => void store.updateSettings({ foreground: e.target.value })}
+            />
+          </span>
+        </div>
 
         <label className="settings-row">
           <span>Transparent window</span>

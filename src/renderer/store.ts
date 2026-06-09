@@ -531,16 +531,35 @@ class Store {
     const s = this.settings
     const root = document.documentElement
     root.style.setProperty('--bg', s.background)
+    root.style.setProperty('--fg', s.foreground)
+    const termBg = s.transparent ? hexToRgba(s.background, s.opacity) : s.background
     if (s.transparent) {
       document.body.style.background = 'transparent'
-      root.style.setProperty('--pane-bg', hexToRgba(s.background, s.opacity))
+      root.style.setProperty('--pane-bg', termBg)
       root.style.setProperty('--panel', hexToRgba(s.background, Math.min(1, s.opacity + 0.12)))
       root.style.setProperty('--panel-2', hexToRgba(s.background, Math.min(1, s.opacity + 0.2)))
     } else {
       document.body.style.background = s.background
       root.style.setProperty('--pane-bg', s.background)
-      root.style.setProperty('--panel', '#232329')
-      root.style.setProperty('--panel-2', '#2c2c33')
+      root.style.setProperty('--panel', mix(s.background, '#ffffff', 0.06))
+      root.style.setProperty('--panel-2', mix(s.background, '#ffffff', 0.11))
+    }
+    // Apply the theme to live terminals too (background + foreground).
+    for (const { term } of this.panes.values()) {
+      try {
+        term.options.allowTransparency = s.transparent
+        term.options.theme = { background: termBg, foreground: s.foreground }
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  /** Terminal background to pass to a freshly created Terminal. */
+  terminalTheme(): { background: string; foreground: string } {
+    const s = this.settings
+    return {
+      background: s.transparent ? hexToRgba(s.background, s.opacity) : s.background,
+      foreground: s.foreground
     }
   }
 
@@ -616,6 +635,18 @@ function hexToRgba(hex: string, alpha: number): string {
   if (!m) return hex
   const [r, g, b] = [m[1], m[2], m[3]].map((h) => parseInt(h, 16))
   return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+function parseHex(hex: string): [number, number, number] | null {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex.trim())
+  return m ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)] : null
+}
+/** Blend `a` toward `b` by `t` (0..1); used to derive panel shades from the bg. */
+function mix(a: string, b: string, t: number): string {
+  const ca = parseHex(a)
+  const cb = parseHex(b)
+  if (!ca || !cb) return a
+  const c = ca.map((v, i) => Math.round(v + (cb[i] - v) * t))
+  return `rgb(${c[0]}, ${c[1]}, ${c[2]})`
 }
 
 function errMsg(err: unknown): string {

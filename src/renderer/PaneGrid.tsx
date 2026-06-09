@@ -124,11 +124,10 @@ function Pane({
       fontSize: 13,
       fontFamily: '"MesloLGS NF", "MesloLGS Nerd Font", Menlo, Monaco, "Courier New", monospace',
       cursorBlink: true,
-      // Transparent terminal background: the pane's --pane-bg provides the colour
-      // (so we never override claude's foreground/ANSI colours or touch live
-      // terminals on a settings change). claude's own bg escapes still render.
-      allowTransparency: true,
-      theme: { background: 'rgba(0,0,0,0)' }
+      // Solid theme background + foreground so agents that don't paint a full
+      // background (e.g. agy/antigravity) show the theme colour, not a flat fill.
+      allowTransparency: store.settings.transparent,
+      theme: store.terminalTheme()
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
