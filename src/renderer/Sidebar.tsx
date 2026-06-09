@@ -69,11 +69,13 @@ function WorktreeCard({
   active: boolean
 }): JSX.Element {
   const s = useStore()
+  const [confirming, setConfirming] = useState(false)
   const st = s.wtStatus.get(wt.id)
   const line = s.worktreeLastLine(wt.id)
   const cnt = s.sessionsOf(wt.id).length
   const stateDot = s.worktreeState(wt.id)
   const attention = s.worktreePending(wt.id)
+  const folder = wt.path.split('/').filter(Boolean).pop() ?? ''
 
   const statusParts: string[] = []
   if (st?.dirty) statusParts.push(`●${st.dirty}`)
@@ -87,28 +89,44 @@ function WorktreeCard({
     >
       <div className="card-top">
         {stateDot !== 'none' && <span className={`dot dot-${stateDot}`} />}
-        <span className="card-title">
-          {wt.branch || '(detached)'}
-          {wt.primary ? ' ·main' : ''}
-        </span>
+        <span className="card-title">{wt.branch || '(detached)'}</span>
         {cnt > 0 && <span className="card-count">{cnt}</span>}
         {statusParts.length > 0 && (
           <span className={'wt-status' + (st?.dirty ? ' dirty' : '')}>{statusParts.join(' ')}</span>
         )}
-        {!wt.primary && (
+        {!wt.primary && !confirming && (
           <button
             className="row-x"
             title="Remove worktree"
             onClick={(e) => {
               e.stopPropagation()
-              void store.removeWorktree(project, wt.id)
+              setConfirming(true)
             }}
           >
             ×
           </button>
         )}
       </div>
+      <div className="card-path">{folder}</div>
       {line && <div className="card-sub">{line}</div>}
+
+      {confirming && (
+        <div className="card-confirm" onClick={(e) => e.stopPropagation()}>
+          <span>Remove this worktree?</span>
+          <button
+            className="confirm-yes"
+            onClick={() => {
+              setConfirming(false)
+              void store.removeWorktree(project, wt.id)
+            }}
+          >
+            Remove
+          </button>
+          <button className="confirm-no" onClick={() => setConfirming(false)}>
+            Cancel
+          </button>
+        </div>
+      )}
     </div>
   )
 }

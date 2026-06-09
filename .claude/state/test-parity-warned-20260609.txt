@@ -1,2 +1,3 @@
 src/renderer/PaneGrid.tsx
 src/core/session.ts
+src/renderer/Sidebar.tsx
