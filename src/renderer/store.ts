@@ -266,9 +266,9 @@ class Store {
 
   // --- worktrees ---------------------------------------------------------
   async createWorktree(project: ProjectView, branch: string): Promise<void> {
-    const path = `${project.repoRoot}-wt-${branch.replace(/[^\w.-]/g, '_')}`
     try {
-      const info = await window.api.worktreeCreate(project.repoRoot, { path, branch, newBranch: true })
+      // Path is computed by main from the worktreeFolder setting (+ runs hooks).
+      const info = await window.api.worktreeCreate(project.repoRoot, { branch, newBranch: true })
       project.worktrees.set(info.path, {
         id: info.path,
         path: info.path,

@@ -49,9 +49,41 @@ export function SettingsPanel(): JSX.Element | null {
           />
         </label>
 
-        <p className="settings-note">
-          More settings (agents, worktree folder, hooks, keyboard shortcuts) are coming next.
-        </p>
+        <div className="settings-section">Worktree</div>
+
+        <label className="settings-col">
+          <span>Folder template (relative to project)</span>
+          <input
+            type="text"
+            value={cfg.worktreeFolder}
+            placeholder="../{repo}-wt-{branch}"
+            onChange={(e) => void store.updateSettings({ worktreeFolder: e.target.value })}
+          />
+          <small>Placeholders: {'{repo}'}, {'{branch}'}</small>
+        </label>
+
+        <label className="settings-col">
+          <span>On create — run command</span>
+          <input
+            type="text"
+            value={cfg.hookCreate}
+            placeholder="e.g. cp .env {worktree}"
+            onChange={(e) => void store.updateSettings({ hookCreate: e.target.value })}
+          />
+        </label>
+
+        <label className="settings-col">
+          <span>On remove — run command</span>
+          <input
+            type="text"
+            value={cfg.hookRemove}
+            onChange={(e) => void store.updateSettings({ hookRemove: e.target.value })}
+          />
+        </label>
+        <small className="settings-note">
+          Hooks run in a login shell with $CCM_WORKTREE_PATH, $CCM_BRANCH, $CCM_REPO.
+          Keyboard-shortcut settings are coming next.
+        </small>
       </div>
     </div>
   )

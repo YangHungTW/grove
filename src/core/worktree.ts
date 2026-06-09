@@ -10,7 +10,8 @@ export interface WorktreeInfo {
 }
 
 export interface CreateWorktreeOptions {
-  path: string
+  /** Target path. Optional over IPC — the main process fills it from settings. */
+  path?: string
   branch: string
   /** Ref to branch from (defaults to current HEAD). */
   base?: string
@@ -63,12 +64,14 @@ export function isGitRepo(path: string): boolean {
 
 /** `git worktree add` — returns the resulting worktree's parsed info. */
 export function createWorktree(repoRoot: string, opts: CreateWorktreeOptions): WorktreeInfo {
+  const path = opts.path
+  if (!path) throw new Error('createWorktree: path is required')
   const args = ['worktree', 'add']
   if (opts.newBranch) {
-    args.push('-b', opts.branch, opts.path)
+    args.push('-b', opts.branch, path)
     if (opts.base) args.push(opts.base)
   } else {
-    args.push(opts.path, opts.branch)
+    args.push(path, opts.branch)
   }
   git(repoRoot, args)
 
@@ -76,7 +79,7 @@ export function createWorktree(repoRoot: string, opts: CreateWorktreeOptions): W
   const match = list.find((w) => w.branch === opts.branch)
   if (match) return match
   // Fallback: synthesize from inputs if parsing missed it.
-  return { path: opts.path, branch: opts.branch }
+  return { path, branch: opts.branch }
 }
 
 /** `git worktree list --porcelain` parsed into structured records. */

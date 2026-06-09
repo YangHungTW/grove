@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from 'electron'
-import { join } from 'node:path'
+import { join, resolve, basename } from 'node:path'
+import { execFile } from 'node:child_process'
 import { SessionRegistry } from '../core/sessionRegistry'
 import { PtySession } from '../core/session'
 import { createWorktree, listWorktrees, removeWorktree, isGitRepo, worktreeStatus } from '../core/worktree'
@@ -73,6 +74,25 @@ function commandExists(cmd: string): boolean {
 /** Configured agents that are actually installed. */
 function availableAgents(): AgentDef[] {
   return AGENT_PRESETS.filter((a) => commandExists(a.command))
+}
+
+/** Resolve a new worktree path from the settings template (relative to repo). */
+function resolveWorktreePath(repoRoot: string, branch: string): string {
+  const tmpl = settings().load().worktreeFolder || '../{repo}-wt-{branch}'
+  const safeBranch = branch.replace(/[^\w.-]/g, '_')
+  const sub = tmpl.replace(/\{repo\}/g, basename(repoRoot)).replace(/\{branch\}/g, safeBranch)
+  return resolve(repoRoot, sub)
+}
+
+/** Run a user hook command (fire-and-forget) in a login shell. */
+function runHook(cmd: string, cwd: string, extraEnv: Record<string, string>): void {
+  if (!cmd || !cmd.trim()) return
+  const shell = process.env.SHELL || '/bin/zsh'
+  try {
+    execFile(shell, ['-lc', cmd], { cwd, env: { ...process.env, ...extraEnv } }, () => {})
+  } catch {
+    /* ignore hook errors */
+  }
 }
 
 /** Apply appearance settings (vibrancy/background) to the window. */
@@ -228,8 +248,16 @@ function registerIpc(): void {
 
   ipcMain.handle(
     Channels.worktreeCreate,
-    (_e: IpcMainInvokeEvent, repoRoot: string, opts: CreateWorktreeOptions) =>
-      createWorktree(repoRoot, opts)
+    (_e: IpcMainInvokeEvent, repoRoot: string, opts: CreateWorktreeOptions) => {
+      const path = opts.path ?? resolveWorktreePath(repoRoot, opts.branch)
+      const info = createWorktree(repoRoot, { ...opts, path })
+      runHook(settings().load().hookCreate, info.path, {
+        CCM_WORKTREE_PATH: info.path,
+        CCM_BRANCH: info.branch,
+        CCM_REPO: repoRoot
+      })
+      return info
+    }
   )
   ipcMain.handle(Channels.worktreeList, (_e: IpcMainInvokeEvent, repoRoot: string) =>
     listWorktrees(repoRoot)
@@ -237,9 +265,13 @@ function registerIpc(): void {
   ipcMain.handle(Channels.worktreeStatus, (_e: IpcMainInvokeEvent, worktreePath: string) =>
     worktreeStatus(worktreePath)
   )
-  ipcMain.handle(Channels.worktreeRemove, (_e: IpcMainInvokeEvent, req: WorktreeRemoveRequest) =>
+  ipcMain.handle(Channels.worktreeRemove, (_e: IpcMainInvokeEvent, req: WorktreeRemoveRequest) => {
+    runHook(settings().load().hookRemove, req.path, {
+      CCM_WORKTREE_PATH: req.path,
+      CCM_REPO: req.repoRoot
+    })
     removeWorktree(req.repoRoot, req.path, { force: req.force })
-  )
+  })
 
   ipcMain.handle(Channels.sessionCreate, (_e: IpcMainInvokeEvent, req: CreateSessionRequest) =>
     createSession(req)

@@ -644,6 +644,27 @@ button {
   margin: 14px 0 0;
   font-size: 11px;
   color: var(--muted);
+  display: block;
+}
+.settings-col {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 0;
+  font-size: 13px;
+}
+.settings-col input[type='text'] {
+  background: var(--bg);
+  border: 1px solid #000;
+  border-radius: 6px;
+  color: var(--fg);
+  padding: 7px 9px;
+  font-size: 12px;
+  font-family: 'MesloLGS NF', Menlo, monospace;
+}
+.settings-col small {
+  font-size: 10px;
+  color: var(--muted);
 }
 #split-toggle.active {
   background: var(--accent);
