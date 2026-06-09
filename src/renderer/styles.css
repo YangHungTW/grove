@@ -764,6 +764,19 @@ button {
   font-size: 11px;
   color: var(--muted);
   display: block;
+  line-height: 1.6;
+}
+.settings-note code {
+  font-family: 'MesloLGS NF', Menlo, monospace;
+  font-size: 10px;
+  background: var(--bg);
+  padding: 1px 4px;
+  border-radius: 4px;
+  color: var(--fg);
+}
+.settings-note b {
+  color: var(--fg);
+  font-weight: 600;
 }
 .settings-col {
   display: flex;

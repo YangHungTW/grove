@@ -86,12 +86,21 @@ function resolveWorktreePath(repoRoot: string, branch: string): string {
   return resolve(repoRoot, sub)
 }
 
-/** Run a user hook command (fire-and-forget) in a login shell. */
+/**
+ * Run a user hook (fire-and-forget) in a login shell. The command can be any
+ * shell command, a script path, or an agent invocation (e.g. `agy -p "/setup"`).
+ * {worktree}/{branch}/{repo} placeholders are expanded; the same values are also
+ * exposed as $CCM_WORKTREE_PATH / $CCM_BRANCH / $CCM_REPO.
+ */
 function runHook(cmd: string, cwd: string, extraEnv: Record<string, string>): void {
   if (!cmd || !cmd.trim()) return
+  const expanded = cmd
+    .replace(/\{worktree\}/g, extraEnv.CCM_WORKTREE_PATH ?? '')
+    .replace(/\{branch\}/g, extraEnv.CCM_BRANCH ?? '')
+    .replace(/\{repo\}/g, extraEnv.CCM_REPO ?? '')
   const shell = process.env.SHELL || '/bin/zsh'
   try {
-    execFile(shell, ['-lc', cmd], { cwd, env: { ...process.env, ...extraEnv } }, () => {})
+    execFile(shell, ['-lc', expanded], { cwd, env: { ...process.env, ...extraEnv } }, () => {})
   } catch {
     /* ignore hook errors */
   }
@@ -297,6 +306,11 @@ function createWindow(): void {
     width: 1200,
     height: 800,
     show: false,
+    // Construct with vibrancy + a transparent backing so macOS frosted-glass can
+    // actually show through when the user enables transparency at runtime.
+    vibrancy: 'under-window',
+    visualEffectState: 'active',
+    backgroundColor: '#00000000',
     webPreferences: {
       // electron-vite emits the preload as .mjs under "type":"module".
       preload: join(__dirname, '../preload/index.mjs'),

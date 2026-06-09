@@ -45,7 +45,14 @@ export function SettingsPanel(): JSX.Element | null {
           <input
             type="checkbox"
             checked={cfg.transparent}
-            onChange={(e) => void store.updateSettings({ transparent: e.target.checked })}
+            onChange={(e) =>
+              void store.updateSettings({
+                transparent: e.target.checked,
+                // 100% opacity = fully opaque even when transparent; give an
+                // immediately visible effect when turning it on.
+                opacity: e.target.checked && cfg.opacity >= 1 ? 0.82 : cfg.opacity
+              })
+            }
           />
         </label>
 
@@ -125,25 +132,31 @@ export function SettingsPanel(): JSX.Element | null {
         </label>
 
         <label className="settings-col">
-          <span>On create — run command</span>
+          <span>On create — command / script / agent skill</span>
           <input
             type="text"
             value={cfg.hookCreate}
-            placeholder="e.g. cp .env {worktree}"
+            placeholder="e.g. ./scripts/setup.sh {worktree}  ·  or  agy -p &quot;/onboard&quot;"
+            spellCheck={false}
             onChange={(e) => void store.updateSettings({ hookCreate: e.target.value })}
           />
         </label>
 
         <label className="settings-col">
-          <span>On remove — run command</span>
+          <span>On remove — command / script / agent skill</span>
           <input
             type="text"
             value={cfg.hookRemove}
+            placeholder="e.g. rm -rf {worktree}/node_modules"
+            spellCheck={false}
             onChange={(e) => void store.updateSettings({ hookRemove: e.target.value })}
           />
         </label>
         <small className="settings-note">
-          Hooks run in a login shell with $CCM_WORKTREE_PATH, $CCM_BRANCH, $CCM_REPO.
+          Runs in a login shell — a command, a <b>script path</b>, or an <b>agent</b> (e.g.{' '}
+          <code>agy -p &quot;/setup&quot;</code>). Placeholders: <code>{'{worktree}'}</code>{' '}
+          <code>{'{branch}'}</code> <code>{'{repo}'}</code> (also $CCM_WORKTREE_PATH / $CCM_BRANCH /
+          $CCM_REPO).
         </small>
 
         <div className="settings-section">Keyboard shortcuts</div>
