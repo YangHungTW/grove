@@ -33,6 +33,7 @@
   --accent: #4f9cff;
   --danger: #ff6b6b;
   --radius: 7px;
+  --pane-bg: #1b1b1f;
   color-scheme: dark;
 }
 
@@ -58,6 +59,9 @@ button {
   display: grid;
   grid-template-columns: 248px 1fr;
   height: 100vh;
+}
+#app.sidebar-collapsed {
+  grid-template-columns: 1fr;
 }
 
 /* ---------- sidebar ---------- */
@@ -524,6 +528,77 @@ button {
   margin: 6px 2px;
   background: #000;
 }
+.icon-btn {
+  border: 0;
+  background: transparent !important;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 4px 8px;
+}
+.icon-btn:hover {
+  color: var(--fg);
+}
+
+/* ---------- settings panel ---------- */
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 80px;
+  z-index: 50;
+}
+.settings-panel {
+  width: 420px;
+  max-width: 90vw;
+  background: var(--panel);
+  border: 1px solid #000;
+  border-radius: 10px;
+  padding: 16px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 600;
+  font-size: 15px;
+  margin-bottom: 12px;
+}
+.settings-section {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin: 10px 0 6px;
+}
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  font-size: 13px;
+}
+.settings-row input[type='range'] {
+  flex: 1;
+  max-width: 180px;
+}
+.settings-row input[type='color'] {
+  width: 40px;
+  height: 26px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.settings-note {
+  margin: 14px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+}
 #split-toggle.active {
   background: var(--accent);
   color: #fff;
@@ -547,7 +622,7 @@ button {
   display: grid;
   grid-auto-rows: 1fr;
   gap: 2px;
-  background: #000;
+  background: var(--pane-bg);
   overflow: hidden;
 }
 .pane {
@@ -555,7 +630,7 @@ button {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: #000;
+  background: var(--pane-bg);
   /* No padding/border: FitAddon measures the pane height directly, so any
      box-model inset would make it overcount rows and clip the bottom line.
      The focus ring uses inset box-shadow, which doesn't affect layout. */

@@ -45,6 +45,7 @@ const launchOpts = {
     ...process.env,
     CCM_STORE: storeFile,
     CCM_LAYOUT: layoutFile,
+    CCM_SETTINGS: join(storeDir, 'settings.json'),
     CCM_REPO_ROOT: repoA,
     // Stand in for the real `claude` CLI so the agent-launch path is testable
     // without auth: typing this into the login shell creates a marker file.

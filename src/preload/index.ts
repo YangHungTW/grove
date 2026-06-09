@@ -25,6 +25,8 @@ const api: RendererApi = {
   projectRemove: (repoRoot: string) => ipcRenderer.invoke(Channels.projectRemove, repoRoot),
   layoutSave: (descriptors) => ipcRenderer.send(Channels.layoutSave, descriptors),
   layoutLoad: () => ipcRenderer.invoke(Channels.layoutLoad),
+  settingsLoad: () => ipcRenderer.invoke(Channels.settingsLoad),
+  settingsSave: (patch) => ipcRenderer.invoke(Channels.settingsSave, patch),
   worktreeCreate: (repoRoot: string, opts: CreateWorktreeOptions): Promise<WorktreeInfo> =>
     ipcRenderer.invoke(Channels.worktreeCreate, repoRoot, opts),
   worktreeList: (repoRoot: string): Promise<WorktreeInfo[]> =>

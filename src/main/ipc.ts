@@ -2,6 +2,7 @@ import type { SessionKind, SessionState } from '../core/types'
 import type { WorktreeInfo, CreateWorktreeOptions, WorktreeStatus } from '../core/worktree'
 import type { ProjectEntry } from '../core/projectStore'
 import type { SessionDescriptor } from '../core/layoutStore'
+import type { AppSettings } from '../core/settingsStore'
 
 /** Channel names. Request/response (invoke) and event (send) are split. */
 export const Channels = {
@@ -12,6 +13,8 @@ export const Channels = {
   projectRemove: 'project:remove',
   layoutSave: 'layout:save',
   layoutLoad: 'layout:load',
+  settingsLoad: 'settings:load',
+  settingsSave: 'settings:save',
   worktreeCreate: 'worktree:create',
   worktreeList: 'worktree:list',
   worktreeRemove: 'worktree:remove',
@@ -88,6 +91,8 @@ export interface RendererApi {
   /** Persist the open-session layout for restore on next launch. */
   layoutSave(descriptors: SessionDescriptor[]): void
   layoutLoad(): Promise<SessionDescriptor[]>
+  settingsLoad(): Promise<AppSettings>
+  settingsSave(patch: Partial<AppSettings>): Promise<AppSettings>
   worktreeCreate(repoRoot: string, opts: CreateWorktreeOptions): Promise<WorktreeInfo>
   worktreeList(repoRoot: string): Promise<WorktreeInfo[]>
   worktreeStatus(worktreePath: string): Promise<WorktreeStatus>

@@ -1,3 +1,11 @@
 src/renderer/PaneGrid.tsx
 src/core/session.ts
 src/renderer/Sidebar.tsx
+src/main/ipc.ts
+src/main/index.ts
+src/preload/index.ts
+src/renderer/store.ts
+src/renderer/SettingsPanel.tsx
+src/renderer/TabBar.tsx
+src/renderer/App.tsx
+src/core/settings.ts

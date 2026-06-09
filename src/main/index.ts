@@ -5,6 +5,7 @@ import { PtySession } from '../core/session'
 import { createWorktree, listWorktrees, removeWorktree, isGitRepo, worktreeStatus } from '../core/worktree'
 import { ProjectStore, type ProjectEntry } from '../core/projectStore'
 import { LayoutStore, type SessionDescriptor } from '../core/layoutStore'
+import { SettingsStore, type AppSettings } from '../core/settingsStore'
 import { detectState } from '../core/stateDetection'
 import type { CreateWorktreeOptions } from '../core/worktree'
 import {
@@ -39,6 +40,26 @@ function layout(): LayoutStore {
     layoutStore = new LayoutStore(file)
   }
   return layoutStore
+}
+
+let settingsStore: SettingsStore | null = null
+function settings(): SettingsStore {
+  if (!settingsStore) {
+    const file = process.env.CCM_SETTINGS ?? join(app.getPath('userData'), 'settings.json')
+    settingsStore = new SettingsStore(file)
+  }
+  return settingsStore
+}
+
+/** Apply appearance settings (vibrancy/background) to the window. */
+function applyAppearance(s: AppSettings): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  try {
+    mainWindow.setVibrancy(s.transparent ? 'under-window' : null)
+    mainWindow.setBackgroundColor(s.transparent ? '#00000000' : s.background)
+  } catch {
+    /* vibrancy unsupported on this platform */
+  }
 }
 
 /** Validate + record a project by path. Throws if it is not a git repo. */
@@ -170,6 +191,12 @@ function registerIpc(): void {
   ipcMain.on(Channels.layoutSave, (_e, descriptors: SessionDescriptor[]) =>
     layout().save(descriptors)
   )
+  ipcMain.handle(Channels.settingsLoad, () => settings().load())
+  ipcMain.handle(Channels.settingsSave, (_e: IpcMainInvokeEvent, patch: Partial<AppSettings>) => {
+    const next = settings().save(patch)
+    applyAppearance(next)
+    return next
+  })
 
   ipcMain.handle(
     Channels.worktreeCreate,
@@ -216,7 +243,10 @@ function createWindow(): void {
     }
   })
 
-  mainWindow.on('ready-to-show', () => mainWindow?.show())
+  mainWindow.on('ready-to-show', () => {
+    applyAppearance(settings().load())
+    mainWindow?.show()
+  })
 
   // When the window goes away, stop ptys and drop the ref so late pty data
   // events don't try to post to a destroyed webContents.

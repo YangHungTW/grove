@@ -3,6 +3,7 @@ import type { FitAddon } from '@xterm/addon-fit'
 import type { SessionKind, SessionState } from '../core/types'
 import type { SessionSnapshot } from '../main/ipc'
 import type { SessionDescriptor } from '../core/layoutStore'
+import { DEFAULT_SETTINGS, type AppSettings } from '../core/settings'
 
 export interface WorktreeView {
   id: string // = path
@@ -57,6 +58,8 @@ class Store {
   focusedSessionId: string | null = null
   colFr: number[] = []
   rowFr: number[] = []
+  settings: AppSettings = { ...DEFAULT_SETTINGS }
+  settingsOpen = false
 
   private savedLayout: SessionDescriptor[] = []
   private restoredProjects = new Set<string>()
@@ -406,6 +409,52 @@ class Store {
     this.focusSession(id)
   }
 
+  // --- settings / appearance ---------------------------------------------
+  openSettings(open: boolean): void {
+    this.settingsOpen = open
+    this.notify()
+  }
+  toggleSidebar(): void {
+    void this.updateSettings({ sidebarCollapsed: !this.settings.sidebarCollapsed })
+  }
+  async updateSettings(patch: Partial<AppSettings>): Promise<void> {
+    this.settings = await window.api.settingsSave(patch)
+    this.applyAppearance()
+    this.notify()
+  }
+  /** Apply background colour / transparency to the chrome + all terminals. */
+  applyAppearance(): void {
+    const s = this.settings
+    const root = document.documentElement
+    root.style.setProperty('--bg', s.background)
+    if (s.transparent) {
+      document.body.style.background = 'transparent'
+      root.style.setProperty('--pane-bg', 'transparent')
+      root.style.setProperty('--panel', hexToRgba(s.background, Math.min(1, s.opacity + 0.12)))
+      root.style.setProperty('--panel-2', hexToRgba(s.background, Math.min(1, s.opacity + 0.2)))
+    } else {
+      document.body.style.background = s.background
+      root.style.setProperty('--pane-bg', s.background)
+      root.style.setProperty('--panel', '#232329')
+      root.style.setProperty('--panel-2', '#2c2c33')
+    }
+    const termBg = this.terminalBackground()
+    for (const { term } of this.panes.values()) {
+      try {
+        term.options.allowTransparency = s.transparent
+        term.options.theme = { ...term.options.theme, background: termBg }
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  /** Background to pass to a freshly created Terminal. */
+  terminalBackground(): string {
+    return this.settings.transparent
+      ? hexToRgba(this.settings.background, this.settings.opacity)
+      : this.settings.background
+  }
+
   // --- toast (kept imperative; tiny + transient) -------------------------
   toast(message: string): void {
     const node = document.createElement('div')
@@ -450,6 +499,8 @@ class Store {
   async init(): Promise<void> {
     await document.fonts.load('13px "MesloLGS NF"').catch(() => {})
     await document.fonts.load('700 13px "MesloLGS NF"').catch(() => {})
+    this.settings = await window.api.settingsLoad()
+    this.applyAppearance()
     this.wireEvents()
     this.savedLayout = await window.api.layoutLoad()
     const recent = await window.api.projectListRecent()
@@ -467,6 +518,13 @@ class Store {
     if (first) await this.setActiveProject(first)
     else this.notify()
   }
+}
+
+function hexToRgba(hex: string, alpha: number): string {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex.trim())
+  if (!m) return hex
+  const [r, g, b] = [m[1], m[2], m[3]].map((h) => parseInt(h, 16))
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
 }
 
 function errMsg(err: unknown): string {

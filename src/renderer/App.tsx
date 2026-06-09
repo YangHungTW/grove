@@ -2,9 +2,12 @@ import { useEffect } from 'react'
 import { Sidebar } from './Sidebar'
 import { TabBar } from './TabBar'
 import { PaneGrid } from './PaneGrid'
+import { SettingsPanel } from './SettingsPanel'
+import { useStore } from './useStore'
 import { store } from './store'
 
 export function App(): JSX.Element {
+  const s = useStore()
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (!e.metaKey) return
@@ -12,6 +15,12 @@ export function App(): JSX.Element {
       if (e.shiftKey && k === 'u') {
         e.preventDefault()
         store.jumpToPending()
+      } else if (k === 'b') {
+        e.preventDefault()
+        store.toggleSidebar()
+      } else if (k === ',') {
+        e.preventDefault()
+        store.openSettings(true)
       } else if (k === 'd') {
         e.preventDefault()
         store.toggleSplit()
@@ -33,12 +42,13 @@ export function App(): JSX.Element {
   }, [])
 
   return (
-    <div id="app">
-      <Sidebar />
+    <div id="app" className={s.settings.sidebarCollapsed ? 'sidebar-collapsed' : ''}>
+      {!s.settings.sidebarCollapsed && <Sidebar />}
       <main id="content">
         <TabBar />
         <PaneGrid />
       </main>
+      <SettingsPanel />
     </div>
   )
 }

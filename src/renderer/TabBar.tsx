@@ -38,6 +38,14 @@ export function TabBar(): JSX.Element {
       </div>
       <div id="toolbar">
         <button
+          className="icon-btn"
+          title={s.settings.sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+          onClick={() => store.toggleSidebar()}
+        >
+          {s.settings.sidebarCollapsed ? '»' : '«'}
+        </button>
+        <span className="toolbar-sep" />
+        <button
           className="add-session"
           disabled={!s.activeWorktreeId}
           onClick={() => s.activeWorktreeId && void store.addSession(s.activeWorktreeId, 'agent')}
@@ -67,6 +75,9 @@ export function TabBar(): JSX.Element {
           onClick={() => store.jumpToPending()}
         >
           🔔<span id="notif-count">{s.pending.size > 0 ? s.pending.size : ''}</span>
+        </button>
+        <button className="icon-btn" title="Settings" onClick={() => store.openSettings(true)}>
+          ⚙
         </button>
       </div>
     </div>

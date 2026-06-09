@@ -123,7 +123,9 @@ function Pane({
       convertEol: true,
       fontSize: 13,
       fontFamily: '"MesloLGS NF", "MesloLGS Nerd Font", Menlo, Monaco, "Courier New", monospace',
-      cursorBlink: true
+      cursorBlink: true,
+      allowTransparency: store.settings.transparent,
+      theme: { background: store.terminalBackground() }
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
