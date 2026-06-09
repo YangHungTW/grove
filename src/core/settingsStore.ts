@@ -17,9 +17,15 @@ export class SettingsStore {
     if (!existsSync(this.file)) return { ...DEFAULT_SETTINGS }
     try {
       const parsed = JSON.parse(readFileSync(this.file, 'utf8'))
+      // Migrate the legacy single-Claude default (auto-created before the agent
+      // list was user-editable) up to the current presets.
+      const a = parsed.agents
+      const isLegacyDefault =
+        !Array.isArray(a) || (a.length === 1 && a[0]?.id === 'claude' && a[0]?.command === 'claude')
       return {
         ...DEFAULT_SETTINGS,
         ...parsed,
+        agents: isLegacyDefault ? DEFAULT_SETTINGS.agents : a,
         // Deep-merge keybindings so new actions get defaults on older files.
         keybindings: { ...DEFAULT_SETTINGS.keybindings, ...parsed.keybindings }
       }

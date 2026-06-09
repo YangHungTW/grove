@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { SettingsStore, DEFAULT_SETTINGS } from './settingsStore'
@@ -38,5 +38,16 @@ describe('SettingsStore', () => {
     new SettingsStore(file).save({ opacity: 0.5 })
     rmSync(file)
     expect(new SettingsStore(file).load()).toEqual(DEFAULT_SETTINGS)
+  })
+
+  it('migrates the legacy single-Claude agent list up to the current presets', () => {
+    writeFileSync(file, JSON.stringify({ agents: [{ id: 'claude', name: 'Claude', command: 'claude', icon: '★' }] }))
+    expect(new SettingsStore(file).load().agents).toEqual(DEFAULT_SETTINGS.agents)
+  })
+
+  it('keeps a user-customised agent list as-is (no migration)', () => {
+    const custom = [{ id: 'x', name: 'My', command: 'agy', icon: '✦' }]
+    writeFileSync(file, JSON.stringify({ agents: custom }))
+    expect(new SettingsStore(file).load().agents).toEqual(custom)
   })
 })

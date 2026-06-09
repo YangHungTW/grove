@@ -77,7 +77,7 @@ export interface AppSettings {
 export const AGENT_PRESETS: AgentDef[] = [
   { id: 'claude', name: 'Claude', command: 'claude', icon: '★' },
   { id: 'codex', name: 'Codex', command: 'codex', icon: '◆' },
-  { id: 'gemini', name: 'Gemini', command: 'gemini', icon: '✦' }
+  { id: 'antigravity', name: 'Antigravity', command: 'agy', icon: '✦' }
 ]
 
 /** Icon for plain shell sessions. */
