@@ -72,7 +72,7 @@ export class PtySession {
   start(): void {
     if (this.proc) return
     this.proc = pty.spawn(this.opts.command, this.opts.args ?? [], {
-      name: 'xterm-color',
+      name: 'xterm-256color',
       cols: this.opts.cols ?? 80,
       rows: this.opts.rows ?? 24,
       cwd: this.cwd,
