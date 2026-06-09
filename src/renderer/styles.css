@@ -493,13 +493,27 @@ button {
 }
 .tab.attention {
   color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 .tab.attention::after {
   content: "";
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--accent);
+  animation: attention-pulse 1.3s ease-in-out infinite;
+}
+@keyframes attention-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.75);
+  }
 }
 .tab-title {
   white-space: nowrap;
