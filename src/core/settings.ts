@@ -29,12 +29,22 @@ export interface AppSettings {
   hookRemove: string
 }
 
+/** Built-in agent presets shown in the "+" menu (filtered to installed ones). */
+export const AGENT_PRESETS: AgentDef[] = [
+  { id: 'claude', name: 'Claude', command: 'claude', icon: '★' },
+  { id: 'codex', name: 'Codex', command: 'codex', icon: '◆' },
+  { id: 'gemini', name: 'Gemini', command: 'gemini', icon: '✦' }
+]
+
+/** Icon for plain shell sessions. */
+export const SHELL_ICON = '❯'
+
 export const DEFAULT_SETTINGS: AppSettings = {
   background: '#1b1b1f',
   opacity: 1,
   transparent: false,
   sidebarCollapsed: false,
-  agents: [{ id: 'claude', name: 'Claude', command: 'claude', icon: '★' }],
+  agents: AGENT_PRESETS,
   worktreeFolder: '../{repo}-wt-{branch}',
   hookCreate: '',
   hookRemove: ''

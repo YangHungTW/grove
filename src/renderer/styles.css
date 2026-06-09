@@ -538,6 +538,36 @@ button {
   opacity: 0.4;
   cursor: default;
 }
+.agent-add {
+  position: relative;
+}
+.agent-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 130px;
+  background: var(--panel-2);
+  border: 1px solid #000;
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  padding: 4px;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+}
+.agent-menu button {
+  text-align: left;
+  background: transparent !important;
+  border: 0;
+  color: var(--fg);
+  padding: 6px 10px;
+  border-radius: 5px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.agent-menu button:hover {
+  background: rgba(255, 255, 255, 0.07) !important;
+}
 .toolbar-sep {
   width: 1px;
   align-self: stretch;

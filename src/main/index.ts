@@ -6,6 +6,8 @@ import { createWorktree, listWorktrees, removeWorktree, isGitRepo, worktreeStatu
 import { ProjectStore, type ProjectEntry } from '../core/projectStore'
 import { LayoutStore, type SessionDescriptor } from '../core/layoutStore'
 import { SettingsStore, type AppSettings } from '../core/settingsStore'
+import { AGENT_PRESETS, type AgentDef } from '../core/settings'
+import { execFileSync } from 'node:child_process'
 import { detectState } from '../core/stateDetection'
 import type { CreateWorktreeOptions } from '../core/worktree'
 import {
@@ -51,6 +53,28 @@ function settings(): SettingsStore {
   return settingsStore
 }
 
+const installedCache = new Map<string, boolean>()
+/** Is a command on PATH? Checked via a login shell (GUI apps lack shell PATH). */
+function commandExists(cmd: string): boolean {
+  const first = cmd.trim().split(/\s+/)[0]
+  if (installedCache.has(first)) return installedCache.get(first)!
+  let ok = false
+  try {
+    const shell = process.env.SHELL || '/bin/zsh'
+    execFileSync(shell, ['-lc', `command -v ${first}`], { stdio: 'ignore' })
+    ok = true
+  } catch {
+    ok = false
+  }
+  installedCache.set(first, ok)
+  return ok
+}
+
+/** Configured agents that are actually installed. */
+function availableAgents(): AgentDef[] {
+  return AGENT_PRESETS.filter((a) => commandExists(a.command))
+}
+
 /** Apply appearance settings (vibrancy/background) to the window. */
 function applyAppearance(s: AppSettings): void {
   if (!mainWindow || mainWindow.isDestroyed()) return
@@ -81,6 +105,7 @@ function snapshot(s: Session): SessionSnapshot {
     worktreeId: s.worktreeId,
     kind: s.kind,
     title: s.title,
+    icon: s.icon,
     cwd: s.cwd,
     state: s.state,
     pid: s.pid
@@ -103,9 +128,10 @@ function launchSpecFor(req: CreateSessionRequest): {
   const shell = process.env.SHELL || '/bin/zsh'
   if (req.kind === 'agent') {
     // Login NON-interactive shell: gets PATH from the profile but does NOT load
-    // .zshrc/p10k, so the agent pane shows claude directly with no shell prompt.
-    // (The `claude` alias's args aren't applied here; override via CCM_AGENT_CMD.)
-    const agentCmd = process.env.CCM_AGENT_CMD ?? 'claude'
+    // .zshrc/p10k, so the agent pane shows the CLI directly with no shell prompt.
+    // The agent command comes from the renderer (req.command); CCM_AGENT_CMD
+    // overrides it (used by tests to avoid real auth).
+    const agentCmd = process.env.CCM_AGENT_CMD ?? req.command ?? 'claude'
     return { command: shell, args: ['-lc', agentCmd] }
   }
   // A shell pane is an interactive login shell (p10k prompt expected).
@@ -118,6 +144,7 @@ function createSession(req: CreateSessionRequest): SessionSnapshot {
     worktreeId: req.worktreeId,
     kind: req.kind,
     title: req.title,
+    icon: req.icon,
     cwd: req.cwd
   })
 
@@ -191,6 +218,7 @@ function registerIpc(): void {
   ipcMain.on(Channels.layoutSave, (_e, descriptors: SessionDescriptor[]) =>
     layout().save(descriptors)
   )
+  ipcMain.handle(Channels.agentsAvailable, () => availableAgents())
   ipcMain.handle(Channels.settingsLoad, () => settings().load())
   ipcMain.handle(Channels.settingsSave, (_e: IpcMainInvokeEvent, patch: Partial<AppSettings>) => {
     const next = settings().save(patch)

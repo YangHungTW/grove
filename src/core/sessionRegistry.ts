@@ -20,6 +20,7 @@ export class SessionRegistry {
       worktreeId: input.worktreeId,
       kind: input.kind,
       title: input.title ?? defaultTitle(input.kind),
+      icon: input.icon,
       cwd: input.cwd,
       command: input.command,
       state: input.state ?? 'starting',

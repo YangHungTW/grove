@@ -2,7 +2,7 @@ import type { SessionKind, SessionState } from '../core/types'
 import type { WorktreeInfo, CreateWorktreeOptions, WorktreeStatus } from '../core/worktree'
 import type { ProjectEntry } from '../core/projectStore'
 import type { SessionDescriptor } from '../core/layoutStore'
-import type { AppSettings } from '../core/settingsStore'
+import type { AppSettings, AgentDef } from '../core/settingsStore'
 
 /** Channel names. Request/response (invoke) and event (send) are split. */
 export const Channels = {
@@ -15,6 +15,7 @@ export const Channels = {
   layoutLoad: 'layout:load',
   settingsLoad: 'settings:load',
   settingsSave: 'settings:save',
+  agentsAvailable: 'agents:available',
   worktreeCreate: 'worktree:create',
   worktreeList: 'worktree:list',
   worktreeRemove: 'worktree:remove',
@@ -36,6 +37,7 @@ export interface SessionSnapshot {
   worktreeId: string
   kind: SessionKind
   title: string
+  icon?: string
   cwd?: string
   state: SessionState
   pid?: number
@@ -48,6 +50,7 @@ export interface CreateSessionRequest {
   args?: string[]
   cwd?: string
   title?: string
+  icon?: string
   cols?: number
   rows?: number
   /** Agent id used for state detection (e.g. 'claude'); defaults from kind. */
@@ -93,6 +96,8 @@ export interface RendererApi {
   layoutLoad(): Promise<SessionDescriptor[]>
   settingsLoad(): Promise<AppSettings>
   settingsSave(patch: Partial<AppSettings>): Promise<AppSettings>
+  /** Configured agents that are actually installed (on PATH). */
+  agentsAvailable(): Promise<AgentDef[]>
   worktreeCreate(repoRoot: string, opts: CreateWorktreeOptions): Promise<WorktreeInfo>
   worktreeList(repoRoot: string): Promise<WorktreeInfo[]>
   worktreeStatus(worktreePath: string): Promise<WorktreeStatus>

@@ -3,7 +3,7 @@ import type { FitAddon } from '@xterm/addon-fit'
 import type { SessionKind, SessionState } from '../core/types'
 import type { SessionSnapshot } from '../main/ipc'
 import type { SessionDescriptor } from '../core/layoutStore'
-import { DEFAULT_SETTINGS, type AppSettings } from '../core/settings'
+import { DEFAULT_SETTINGS, SHELL_ICON, type AppSettings, type AgentDef } from '../core/settings'
 
 export interface WorktreeView {
   id: string // = path
@@ -60,6 +60,7 @@ class Store {
   rowFr: number[] = []
   settings: AppSettings = { ...DEFAULT_SETTINGS }
   settingsOpen = false
+  availableAgents: AgentDef[] = []
 
   private savedLayout: SessionDescriptor[] = []
   private restoredProjects = new Set<string>()
@@ -317,12 +318,16 @@ class Store {
   }
 
   // --- sessions ----------------------------------------------------------
-  async addSession(worktreeId: string, kind: SessionKind): Promise<void> {
+  async addSession(worktreeId: string, kind: SessionKind, agentDef?: AgentDef): Promise<void> {
     const wt = this.activeProject()?.worktrees.get(worktreeId)
     if (!wt) return
-    const n = this.sessionsOf(worktreeId).filter((s) => s.kind === kind).length
-    const title = n === 0 ? kind : `${kind} ${n + 1}`
-    const agent = kind === 'agent' ? 'claude' : undefined
+    const isAgent = kind === 'agent'
+    const icon = isAgent ? (agentDef?.icon ?? '★') : SHELL_ICON
+    const baseName = isAgent ? (agentDef?.name?.toLowerCase() ?? 'agent') : 'shell'
+    const command = isAgent ? (agentDef?.command ?? 'claude') : 'shell'
+    const detect = isAgent ? (agentDef?.id ?? 'claude') : undefined
+    const n = this.sessionsOf(worktreeId).filter((x) => x.icon === icon).length
+    const title = n === 0 ? baseName : `${baseName} ${n + 1}`
     // Estimate columns so the shell's first prompt renders at ~the right width
     // (avoids reflow garbage). Rows are left to FitAddon to avoid over-counting
     // and clipping the bottom line.
@@ -332,10 +337,11 @@ class Store {
       const snap = await window.api.sessionCreate({
         worktreeId,
         kind,
-        command: kind,
-        agent,
+        command,
+        agent: detect,
         cwd: wt.path,
         title,
+        icon,
         cols
       })
       this.sessions.set(snap.id, snap)
@@ -490,6 +496,7 @@ class Store {
     await document.fonts.load('700 13px "MesloLGS NF"').catch(() => {})
     this.settings = await window.api.settingsLoad()
     this.applyAppearance()
+    this.availableAgents = await window.api.agentsAvailable().catch(() => [])
     this.wireEvents()
     this.savedLayout = await window.api.layoutLoad()
     const recent = await window.api.projectListRecent()

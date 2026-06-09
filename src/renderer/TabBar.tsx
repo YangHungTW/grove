@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useStore } from './useStore'
 import { store } from './store'
 
@@ -5,6 +6,9 @@ export function TabBar(): JSX.Element {
   const s = useStore()
   const sessions = s.activeWorktreeId ? s.sessionsOf(s.activeWorktreeId) : []
   const split = s.isSplit()
+  const agents = s.availableAgents
+  const [menuOpen, setMenuOpen] = useState(false)
+  const wt = s.activeWorktreeId
 
   return (
     <div id="tabbar">
@@ -32,7 +36,7 @@ export function TabBar(): JSX.Element {
           >
             <span className={`dot dot-${sess.state}`} />
             <span className="tab-title">
-              {sess.kind === 'agent' ? '★ ' : ''}
+              {sess.icon ? sess.icon + ' ' : ''}
               {sess.title}
             </span>
             <button
@@ -48,18 +52,38 @@ export function TabBar(): JSX.Element {
         ))}
       </div>
       <div id="toolbar">
-        <button
-          className="add-session"
-          disabled={!s.activeWorktreeId}
-          onClick={() => s.activeWorktreeId && void store.addSession(s.activeWorktreeId, 'agent')}
-        >
-          + agent
-        </button>
-        <button
-          className="add-session"
-          disabled={!s.activeWorktreeId}
-          onClick={() => s.activeWorktreeId && void store.addSession(s.activeWorktreeId, 'shell')}
-        >
+        {agents.length === 1 && (
+          <button
+            className="add-session"
+            disabled={!wt}
+            onClick={() => wt && void store.addSession(wt, 'agent', agents[0])}
+          >
+            + agent
+          </button>
+        )}
+        {agents.length > 1 && (
+          <div className="agent-add">
+            <button className="add-session" disabled={!wt} onClick={() => setMenuOpen((o) => !o)}>
+              + agent ▾
+            </button>
+            {menuOpen && (
+              <div className="agent-menu" onMouseLeave={() => setMenuOpen(false)}>
+                {agents.map((a) => (
+                  <button
+                    key={a.id}
+                    onClick={() => {
+                      setMenuOpen(false)
+                      if (wt) void store.addSession(wt, 'agent', a)
+                    }}
+                  >
+                    {a.icon} {a.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        <button className="add-session" disabled={!wt} onClick={() => wt && void store.addSession(wt, 'shell')}>
           + shell
         </button>
         <span className="toolbar-sep" />

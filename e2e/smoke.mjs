@@ -172,9 +172,16 @@ try {
   )
   const kbdNav = (await activeCard()).includes('main')
 
-  // 6) AGENT LAUNCH — '+ agent' (toolbar) starts the login shell + bootstraps
-  //    the agent command (here CCM_AGENT_CMD), which creates a marker on disk.
-  await win.getByRole('button', { name: '+ agent' }).click()
+  // Add a Claude agent — '+ agent' is a dropdown when multiple agents are
+  // installed; pick Claude (icon ★). CCM_AGENT_CMD overrides the launch command.
+  const addClaudeAgent = async () => {
+    await win.getByRole('button', { name: '+ agent' }).click()
+    const menu = win.locator('.agent-menu')
+    if (await menu.count()) await menu.getByRole('button', { name: 'Claude' }).click()
+  }
+
+  // 6) AGENT LAUNCH — creates the CCM_AGENT_CMD marker on disk.
+  await addClaudeAgent()
   let agentLaunched = false
   for (let i = 0; i < 60; i++) {
     if (existsSync(agentMarker)) {
@@ -185,8 +192,8 @@ try {
   }
   assert.ok(agentLaunched, 'agent launch: CCM_AGENT_CMD marker should appear on disk')
 
-  // 7) MULTIPLE AGENTS — a second '+ agent' is allowed (two ★ agent tabs).
-  await win.getByRole('button', { name: '+ agent' }).click()
+  // 7) MULTIPLE AGENTS — a second agent is allowed (two ★ agent tabs).
+  await addClaudeAgent()
   await win.waitForFunction(
     () => [...document.querySelectorAll('.tab-title')].filter((l) => l.textContent?.includes('★')).length >= 2,
     { timeout: 5000 }

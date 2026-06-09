@@ -31,6 +31,8 @@ export interface Session {
   worktreeId: string
   kind: SessionKind
   title: string
+  /** Tab/sidebar icon (agent's icon or the shell icon). */
+  icon?: string
   /** Working directory; defaults to the worktree path. */
   cwd?: string
   /** Command + args the session was spawned with, if any. */
@@ -45,6 +47,7 @@ export interface NewSession {
   worktreeId: string
   kind: SessionKind
   title?: string
+  icon?: string
   cwd?: string
   command?: string
   /** Optional explicit id (tests / restore); generated otherwise. */
