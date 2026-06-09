@@ -23,31 +23,34 @@ export type KeybindAction =
   | 'prevSession'
   | 'focusLeft'
   | 'focusRight'
+  | 'moveToOtherGroup'
   | 'toggleSidebar'
 
 export type Keybindings = Record<KeybindAction, string>
 
 /** Accelerator strings use '+': e.g. 'Ctrl+Shift+B', 'Meta+T'. */
 export const DEFAULT_KEYBINDINGS: Keybindings = {
-  splitToggle: 'Ctrl+Shift+B',
+  splitToggle: 'Ctrl+Shift+E',
   newShell: 'Ctrl+Shift+Enter',
-  closeSession: 'Ctrl+Shift+X',
+  closeSession: 'Ctrl+Shift+W',
   nextSession: 'Ctrl+Shift+N',
   prevSession: 'Ctrl+Shift+P',
   focusLeft: 'Ctrl+Shift+H',
   focusRight: 'Ctrl+Shift+L',
+  moveToOtherGroup: 'Ctrl+Shift+M',
   toggleSidebar: 'Ctrl+Shift+S'
 }
 
 /** Human labels for the settings UI, in display order. */
 export const KEYBIND_LABELS: { action: KeybindAction; label: string }[] = [
-  { action: 'splitToggle', label: 'Toggle split' },
+  { action: 'splitToggle', label: 'Split / merge' },
   { action: 'newShell', label: 'New shell' },
-  { action: 'closeSession', label: 'Close session' },
-  { action: 'nextSession', label: 'Next session' },
-  { action: 'prevSession', label: 'Previous session' },
-  { action: 'focusLeft', label: 'Focus previous pane' },
-  { action: 'focusRight', label: 'Focus next pane' },
+  { action: 'closeSession', label: 'Close tab' },
+  { action: 'nextSession', label: 'Next tab' },
+  { action: 'prevSession', label: 'Previous tab' },
+  { action: 'focusLeft', label: 'Focus left group' },
+  { action: 'focusRight', label: 'Focus right group' },
+  { action: 'moveToOtherGroup', label: 'Move tab to other group' },
   { action: 'toggleSidebar', label: 'Toggle sidebar' }
 ]
 

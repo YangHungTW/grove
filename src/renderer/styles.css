@@ -500,12 +500,35 @@ button {
   color: var(--fg);
   background: rgba(255, 255, 255, 0.04);
 }
-#tabs {
-  display: flex;
+#topbar-spacer {
   flex: 1;
-  overflow-x: auto;
 }
-#tabs::-webkit-scrollbar {
+
+/* Per-group tab strips, aligned to the pane columns (VS Code editor groups). */
+#grouptabs {
+  display: grid;
+  height: 34px;
+  background: var(--panel);
+  border-bottom: 1px solid #000;
+  flex: 0 0 auto;
+}
+.group-strip {
+  display: flex;
+  min-width: 0;
+  overflow-x: auto;
+  border-right: 1px solid #000;
+}
+.group-strip:last-child {
+  border-right: 0;
+}
+/* The focused group's strip is subtly lifted + gets an accent underline. */
+.group-strip.focused {
+  background: var(--bg);
+}
+#grouptabs:not(.single) .group-strip.focused {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.group-strip::-webkit-scrollbar {
   height: 0;
 }
 
@@ -898,29 +921,23 @@ button {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-auto-rows: 1fr;
+  grid-template-rows: 1fr;
   gap: 2px;
   background: var(--pane-bg);
   overflow: hidden;
 }
 .pane {
   position: relative;
+  grid-row: 1;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
   background: var(--pane-bg);
   /* No padding/border: FitAddon measures the pane height directly, so any
-     box-model inset would make it overcount rows and clip the bottom line.
-     The focus ring uses inset box-shadow, which doesn't affect layout. */
+     box-model inset would make it overcount rows and clip the bottom line. */
 }
-.pane.focused {
-  box-shadow: inset 0 0 0 2px var(--accent);
-}
-/* No focus ring when there's only one pane — it's only useful to distinguish
-   panes in a split. */
-#panes.single .pane.focused {
-  box-shadow: none;
-}
+/* Focus is shown on the group's tab strip (VS Code style), not as a pane ring —
+   a full inset ring read as jarring. */
 /* Keep xterm's hidden input invisible (it can otherwise show an outline/box at
    the cursor position when focused). */
 .pane .xterm-helper-textarea {
@@ -958,12 +975,6 @@ button {
   bottom: 0;
   width: 6px;
   cursor: col-resize;
-}
-.gutter-row {
-  left: 0;
-  right: 0;
-  height: 6px;
-  cursor: row-resize;
 }
 
 /* ---------- toast ---------- */

@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { Sidebar } from './Sidebar'
 import { TabBar } from './TabBar'
+import { GroupTabs } from './GroupTabs'
 import { PaneGrid } from './PaneGrid'
 import { SettingsPanel } from './SettingsPanel'
 import { Dialog } from './Dialog'
@@ -15,8 +16,9 @@ const KEYBIND_ACTIONS: Record<KeybindAction, () => void> = {
   closeSession: () => store.closeFocused(),
   nextSession: () => store.cycleSession(1),
   prevSession: () => store.cycleSession(-1),
-  focusLeft: () => store.cycleSession(-1),
-  focusRight: () => store.cycleSession(1),
+  focusLeft: () => store.focusGroup(0),
+  focusRight: () => store.focusGroup(1),
+  moveToOtherGroup: () => store.moveFocusedToGroup(store.focusedGroup(store.activeWorktreeId ?? '') === 0 ? 1 : 0),
   toggleSidebar: () => store.toggleSidebar()
 }
 
@@ -74,6 +76,7 @@ export function App(): JSX.Element {
       {!s.settings.sidebarCollapsed && <Sidebar />}
       <main id="content">
         <TabBar />
+        <GroupTabs />
         <PaneGrid />
       </main>
       <SettingsPanel />

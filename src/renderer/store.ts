@@ -64,7 +64,10 @@ class Store {
   sessions = new Map<string, SessionSnapshot>()
   panes = new Map<string, PaneRef>()
   pending = new Set<string>()
-  splitMode = new Map<string, boolean>()
+  // VS Code-style editor groups, per worktree. 1 group = single; 2 = left|right.
+  // Each group is an ordered list of session ids + its active id.
+  groupsByWt = new Map<string, { ids: string[]; active: string }[]>()
+  focusedGroupByWt = new Map<string, number>()
   lastLine = new Map<string, string>()
   wtStatus = new Map<string, WtStatus>()
   activeProjectId: string | null = null
@@ -120,23 +123,48 @@ class Store {
     if (ss.some((s) => s.state === 'idle')) return 'idle'
     return ss.length ? ss[0].state : 'none'
   }
-  /** Sessions whose panes are shown: all (split) or just the focused one. */
-  visibleSessions(): string[] {
-    if (!this.activeWorktreeId) return []
-    const all = this.sessionsOf(this.activeWorktreeId).map((s) => s.id)
-    if (this.splitMode.get(this.activeWorktreeId)) return all
-    if (this.focusedSessionId && all.includes(this.focusedSessionId)) return [this.focusedSessionId]
-    return all.slice(0, 1)
+  /** Editor groups for a worktree, reconciled with its live sessions. */
+  groupsOf(wtId: string): { ids: string[]; active: string }[] {
+    const all = this.sessionsOf(wtId).map((s) => s.id)
+    let groups = this.groupsByWt.get(wtId)
+    if (!groups || groups.length === 0) {
+      groups = [{ ids: [...all], active: all[0] ?? '' }]
+    } else {
+      // Add brand-new sessions to group 0; drop dead ids; fix actives.
+      const known = new Set(groups.flatMap((g) => g.ids))
+      for (const id of all) if (!known.has(id)) groups[0].ids.push(id)
+      for (const g of groups) g.ids = g.ids.filter((id) => all.includes(id))
+      // Collapse an emptied second group; if group 0 emptied, pull the other up.
+      groups = groups.filter((g, i) => i === 0 || g.ids.length > 0)
+      if (groups.length > 1 && groups[0].ids.length === 0) groups = [groups[1]]
+      for (const g of groups) if (!g.ids.includes(g.active)) g.active = g.ids[g.ids.length - 1] ?? ''
+    }
+    this.groupsByWt.set(wtId, groups)
+    return groups
   }
-  /** Ensure colFr/rowFr match the grid shape; returns {cols, rows, visible}. */
-  computeGrid(): { cols: number; rows: number; visible: string[] } {
+  focusedGroup(wtId: string): number {
+    const n = this.groupsOf(wtId).length
+    return Math.min(this.focusedGroupByWt.get(wtId) ?? 0, n - 1)
+  }
+  /** The visible panes (active session of each group), in column order. */
+  visiblePanes(): { id: string; group: number }[] {
+    if (!this.activeWorktreeId) return []
+    return this.groupsOf(this.activeWorktreeId)
+      .map((g, i) => ({ id: g.active, group: i }))
+      .filter((p) => p.id)
+  }
+  visibleSessions(): string[] {
+    return this.visiblePanes().map((p) => p.id)
+  }
+  isSplit(): boolean {
+    return this.activeWorktreeId ? this.groupsOf(this.activeWorktreeId).length > 1 : false
+  }
+  /** Ensure colFr matches the group count; returns {cols, visible}. */
+  computeGrid(): { cols: number; visible: string[] } {
     const visible = this.visibleSessions()
-    const n = Math.max(visible.length, 1)
-    const cols = Math.ceil(Math.sqrt(n))
-    const rows = Math.ceil(n / cols)
+    const cols = Math.max(this.activeWorktreeId ? this.groupsOf(this.activeWorktreeId).length : 1, 1)
     if (this.colFr.length !== cols) this.colFr = Array(cols).fill(1)
-    if (this.rowFr.length !== rows) this.rowFr = Array(rows).fill(1)
-    return { cols, rows, visible }
+    return { cols, visible }
   }
 
   // --- terminal registration (called by <Pane>) --------------------------
@@ -398,6 +426,14 @@ class Store {
       })
       this.sessions.set(snap.id, snap)
       this.activeWorktreeId = worktreeId
+      // Place the new session in the currently-focused group.
+      const groups = this.groupsOf(worktreeId) // reconciles: adds snap.id to group 0
+      const gi = this.focusedGroup(worktreeId)
+      if (gi !== 0) {
+        groups[0].ids = groups[0].ids.filter((x) => x !== snap.id)
+        groups[gi].ids.push(snap.id)
+      }
+      groups[gi].active = snap.id
       this.focusedSessionId = snap.id
       this.persistLayout()
     } catch (err) {
@@ -419,9 +455,13 @@ class Store {
     this.sessions.delete(id)
     this.pending.delete(id)
     this.lastLine.delete(id)
-    // If the closed session was focused, move focus to a sibling in its worktree.
-    if (this.focusedSessionId === id) {
-      this.focusedSessionId = wtId ? (this.sessionsOf(wtId)[0]?.id ?? null) : null
+    // Reconcile groups (drops the id, collapses an emptied split) and re-focus.
+    if (wtId) {
+      const groups = this.groupsOf(wtId)
+      if (this.focusedSessionId === id) {
+        const gi = this.focusedGroup(wtId)
+        this.focusedSessionId = groups[gi]?.active ?? groups[0]?.active ?? null
+      }
     }
     if (!quiet) {
       this.persistLayout()
@@ -429,19 +469,35 @@ class Store {
     }
   }
   focusSession(id: string): void {
+    const s = this.sessions.get(id)
+    if (s) {
+      const groups = this.groupsOf(s.worktreeId)
+      const gi = groups.findIndex((g) => g.ids.includes(id))
+      if (gi >= 0) {
+        groups[gi].active = id
+        this.focusedGroupByWt.set(s.worktreeId, gi)
+      }
+    }
     this.focusedSessionId = id
     this.pending.delete(id)
     this.notify()
     this.panes.get(id)?.term.focus()
   }
-  /** Cycle focus among the active worktree's sessions (delta +1 / -1). */
+  /** Cycle focus among the focused group's tabs (delta +1 / -1). */
   cycleSession(delta: number): void {
     if (!this.activeWorktreeId) return
-    const list = this.sessionsOf(this.activeWorktreeId)
-    if (list.length < 2) return
-    const i = list.findIndex((s) => s.id === this.focusedSessionId)
-    const next = list[(((i < 0 ? 0 : i) + delta) % list.length + list.length) % list.length]
-    if (next) this.focusSession(next.id)
+    const groups = this.groupsOf(this.activeWorktreeId)
+    const ids = groups[this.focusedGroup(this.activeWorktreeId)]?.ids ?? []
+    if (ids.length < 2) return
+    const i = ids.indexOf(this.focusedSessionId ?? '')
+    const next = ids[(((i < 0 ? 0 : i) + delta) % ids.length + ids.length) % ids.length]
+    if (next) this.focusSession(next)
+  }
+  /** Focus the active session of a group (0 = left, 1 = right). */
+  focusGroup(index: number): void {
+    if (!this.activeWorktreeId) return
+    const g = this.groupsOf(this.activeWorktreeId)[index]
+    if (g?.active) this.focusSession(g.active)
   }
   closeFocused(): void {
     if (this.focusedSessionId) this.closeSession(this.focusedSessionId)
@@ -457,14 +513,53 @@ class Store {
     if (!this.focusedSessionId && visible.size) this.focusedSessionId = [...visible][0]
   }
 
-  // --- split / notifications --------------------------------------------
+  // --- split (VS Code editor groups) / notifications --------------------
   toggleSplit(): void {
-    if (!this.activeWorktreeId) return
-    this.splitMode.set(this.activeWorktreeId, !this.splitMode.get(this.activeWorktreeId))
-    this.notify()
+    const wt = this.activeWorktreeId
+    if (!wt) return
+    const groups = this.groupsOf(wt)
+    if (groups.length > 1) {
+      // Merge back to a single group (keep order, keep focus).
+      const merged = groups.flatMap((g) => g.ids)
+      this.groupsByWt.set(wt, [{ ids: merged, active: this.focusedSessionId ?? merged[0] ?? '' }])
+      this.focusedGroupByWt.set(wt, 0)
+      this.notify()
+      return
+    }
+    const g0 = groups[0]
+    if (g0.ids.length >= 2) {
+      // Move the focused session into a new right group.
+      const fid = g0.ids.includes(this.focusedSessionId ?? '') ? this.focusedSessionId! : g0.active
+      g0.ids = g0.ids.filter((x) => x !== fid)
+      g0.active = g0.ids[g0.ids.length - 1] ?? ''
+      groups.push({ ids: [fid], active: fid })
+      this.focusedGroupByWt.set(wt, 1)
+      this.focusedSessionId = fid
+      this.notify()
+    } else {
+      // Only one session — open a fresh shell in a new right group.
+      groups.push({ ids: [], active: '' })
+      this.focusedGroupByWt.set(wt, 1)
+      void this.addSession(wt, 'shell')
+    }
   }
-  isSplit(): boolean {
-    return this.activeWorktreeId ? !!this.splitMode.get(this.activeWorktreeId) : false
+  /** Move the focused session to the other group (creating one if needed). */
+  moveFocusedToGroup(target: number): void {
+    const wt = this.activeWorktreeId
+    const fid = this.focusedSessionId
+    if (!wt || !fid) return
+    const groups = this.groupsOf(wt)
+    const from = groups.findIndex((g) => g.ids.includes(fid))
+    if (from < 0) return
+    if (target >= groups.length) groups.push({ ids: [], active: '' })
+    if (from === target) return
+    groups[from].ids = groups[from].ids.filter((x) => x !== fid)
+    groups[from].active = groups[from].ids[groups[from].ids.length - 1] ?? ''
+    groups[target].ids.push(fid)
+    groups[target].active = fid
+    this.focusedGroupByWt.set(wt, target)
+    this.groupsOf(wt) // reconcile (drops an emptied source group)
+    this.notify()
   }
   setFractions(col: number[], row: number[]): void {
     this.colFr = col

@@ -8,12 +8,12 @@ import type { SessionSnapshot } from '../main/ipc'
 
 export function PaneGrid(): JSX.Element {
   const s = useStore()
-  const { cols, rows, visible } = s.computeGrid()
+  const { cols } = s.computeGrid()
+  const panes = s.visiblePanes() // [{ id, group }] — one active pane per column
+  const colOf = new Map(panes.map((p) => [p.id, p.group + 1]))
   const ref = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ w: 0, h: 0 })
 
-  // Track the grid container size so gutters can be positioned. Per-pane
-  // ResizeObservers (in <Pane>) handle fitting — robust to display/grid changes.
   useEffect(() => {
     const el = ref.current
     if (!el) return
@@ -23,24 +23,22 @@ export function PaneGrid(): JSX.Element {
     return () => ro.disconnect()
   }, [])
 
-  function startDrag(e: MouseEvent, axis: 'col' | 'row', i: number): void {
+  function startDrag(e: MouseEvent, i: number): void {
     e.preventDefault()
-    const isCol = axis === 'col'
-    const fr = (isCol ? store.colFr : store.rowFr).slice()
+    const fr = store.colFr.slice()
     const rect = ref.current!.getBoundingClientRect()
-    const px = (isCol ? rect.width : rect.height) / fr.reduce((a, b) => a + b, 0)
-    const start = isCol ? e.clientX : e.clientY
+    const px = rect.width / fr.reduce((a, b) => a + b, 0)
+    const start = e.clientX
     const a0 = fr[i]
     const b0 = fr[i + 1]
-    const min = 0.15
+    const min = 0.18
     const onMove = (ev: globalThis.MouseEvent): void => {
-      let d = ((isCol ? ev.clientX : ev.clientY) - start) / px
+      let d = (ev.clientX - start) / px
       d = Math.max(-(a0 - min), Math.min(b0 - min, d))
       const next = fr.slice()
       next[i] = a0 + d
       next[i + 1] = b0 - d
-      if (isCol) store.setFractions(next, store.rowFr)
-      else store.setFractions(store.colFr, next)
+      store.setFractions(next, store.rowFr)
     }
     const onUp = (): void => {
       document.removeEventListener('mousemove', onMove)
@@ -51,7 +49,7 @@ export function PaneGrid(): JSX.Element {
   }
 
   const gutters: JSX.Element[] = []
-  const ctot = s.colFr.reduce((a, b) => a + b, 0)
+  const ctot = s.colFr.reduce((a, b) => a + b, 0) || 1
   let acc = 0
   for (let i = 0; i < cols - 1; i++) {
     acc += s.colFr[i]
@@ -60,36 +58,23 @@ export function PaneGrid(): JSX.Element {
         key={'c' + i}
         className="gutter gutter-col"
         style={{ left: (size.w * acc) / ctot - 3 }}
-        onMouseDown={(e) => startDrag(e, 'col', i)}
-      />
-    )
-  }
-  const rtot = s.rowFr.reduce((a, b) => a + b, 0)
-  acc = 0
-  for (let i = 0; i < rows - 1; i++) {
-    acc += s.rowFr[i]
-    gutters.push(
-      <div
-        key={'r' + i}
-        className="gutter gutter-row"
-        style={{ top: (size.h * acc) / rtot - 3 }}
-        onMouseDown={(e) => startDrag(e, 'row', i)}
+        onMouseDown={(e) => startDrag(e, i)}
       />
     )
   }
 
   const style: CSSProperties = {
-    gridTemplateColumns: s.colFr.map((f) => `${f}fr`).join(' '),
-    gridTemplateRows: s.rowFr.map((f) => `${f}fr`).join(' ')
+    gridTemplateColumns: s.colFr.map((f) => `${f}fr`).join(' ')
   }
 
   return (
-    <div id="panes" ref={ref} style={style} className={visible.length <= 1 ? 'single' : ''}>
+    <div id="panes" ref={ref} style={style} className={cols <= 1 ? 'single' : ''}>
       {[...s.sessions.values()].map((sess) => (
         <Pane
           key={sess.id}
           session={sess}
-          visible={visible.includes(sess.id)}
+          visible={colOf.has(sess.id)}
+          column={colOf.get(sess.id) ?? 1}
           focused={sess.id === s.focusedSessionId}
         />
       ))}
@@ -101,10 +86,12 @@ export function PaneGrid(): JSX.Element {
 function Pane({
   session,
   visible,
+  column,
   focused
 }: {
   session: SessionSnapshot
   visible: boolean
+  column: number
   focused: boolean
 }): JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
@@ -183,7 +170,7 @@ function Pane({
     <div
       className={'pane' + (focused ? ' focused' : '')}
       data-session-id={session.id}
-      style={{ display: visible ? 'block' : 'none' }}
+      style={visible ? { display: 'block', gridColumn: column } : { display: 'none' }}
       ref={ref}
       onMouseDown={() => store.focusSession(session.id)}
     />

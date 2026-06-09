@@ -8,32 +8,25 @@ import {
   PlusIcon,
   SplitIcon,
   SingleIcon,
-  ChevronDownIcon,
-  XIcon
+  ChevronDownIcon
 } from './Icons'
 
+/** The top bar: sidebar toggle on the left, global actions on the right.
+ * Per-group session tabs live in <GroupTabs> (the row below). */
 export function TabBar(): JSX.Element {
   const s = useStore()
-  const sessions = s.activeWorktreeId ? s.sessionsOf(s.activeWorktreeId) : []
   const split = s.isSplit()
-  // Installed agents the user hasn't turned off.
   const agents = s.availableAgents.filter(
     (a) => a.installed && !s.settings.disabledAgents.includes(a.id)
   )
   const [menuOpen, setMenuOpen] = useState(false)
-  const [editing, setEditing] = useState<string | null>(null)
-  const [draft, setDraft] = useState('')
   const wt = s.activeWorktreeId
-
-  const commitRename = (id: string): void => {
-    store.renameSession(id, draft)
-    setEditing(null)
-  }
 
   return (
     <div id="tabbar">
       <button
         id="sidebar-toggle"
+        aria-label="Toggle sidebar"
         title={(s.settings.sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar') + ' (⌘B)'}
         onClick={() => store.toggleSidebar()}
       >
@@ -43,57 +36,7 @@ export function TabBar(): JSX.Element {
           <rect x="1.5" y="2.5" width="4.5" height="11" rx="1.6" fill="currentColor" opacity="0.5" stroke="none" />
         </svg>
       </button>
-      <div id="tabs">
-        {sessions.map((sess) =>
-          editing === sess.id ? (
-            <div key={sess.id} className="tab active">
-              <input
-                className="tab-rename"
-                autoFocus
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onBlur={() => commitRename(sess.id)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') commitRename(sess.id)
-                  else if (e.key === 'Escape') setEditing(null)
-                }}
-              />
-            </div>
-          ) : (
-            <button
-              key={sess.id}
-              data-kind={sess.kind}
-              data-icon={sess.icon}
-              className={
-                'tab' +
-                (sess.id === s.focusedSessionId ? ' active' : '') +
-                (s.pending.has(sess.id) ? ' attention' : '')
-              }
-              title="Double-click to rename"
-              onClick={() => store.focusSession(sess.id)}
-              onDoubleClick={() => {
-                setEditing(sess.id)
-                setDraft(sess.title)
-              }}
-            >
-              <span className={`dot dot-${sess.state}`} />
-              <span className="tab-icon">
-                <AgentTabIcon icon={sess.icon} />
-              </span>
-              <span className="tab-title">{sess.title}</span>
-              <button
-                className="tab-x"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  store.closeSession(sess.id)
-                }}
-              >
-                <XIcon size={11} />
-              </button>
-            </button>
-          )
-        )}
-      </div>
+      <div id="topbar-spacer" />
       <div id="toolbar">
         {agents.length === 1 && (
           <button
@@ -145,7 +88,7 @@ export function TabBar(): JSX.Element {
           id="split-toggle"
           className={'icon-btn' + (split ? ' active' : '')}
           aria-label="Toggle split"
-          title="Toggle split (⌘D)"
+          title={split ? 'Merge groups' : 'Split right'}
           onClick={() => store.toggleSplit()}
         >
           {split ? <SingleIcon size={15} /> : <SplitIcon size={15} />}
