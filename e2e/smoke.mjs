@@ -88,9 +88,9 @@ try {
 
   // 3) TABS + ON-DEMAND SPLIT — two shells become two tabs; single by default,
   //    both visible after toggling split. '+ shell' lives in the top toolbar.
-  await win.getByRole('button', { name: '+ shell' }).click()
+  await win.getByRole('button', { name: 'New shell' }).click()
   await win.waitForSelector('.xterm', { timeout: 10000 })
-  await win.getByRole('button', { name: '+ shell' }).click()
+  await win.getByRole('button', { name: 'New shell' }).click()
   await win.waitForFunction(() => document.querySelectorAll('.tab').length >= 2, { timeout: 10000 })
   const tabs = await win.locator('.tab').count()
   assert.ok(tabs >= 2, `tabs: expected >= 2 tabs, got ${tabs}`)
@@ -176,7 +176,7 @@ try {
   // Add a Claude agent — '+ agent' is a dropdown when multiple agents are
   // installed; pick Claude (icon ★). CCM_AGENT_CMD overrides the launch command.
   const addClaudeAgent = async () => {
-    await win.getByRole('button', { name: '+ agent' }).click()
+    await win.getByRole('button', { name: 'New agent' }).click()
     const menu = win.locator('.agent-menu')
     if (await menu.count()) await menu.getByRole('button', { name: 'Claude' }).click()
   }
@@ -193,13 +193,13 @@ try {
   }
   assert.ok(agentLaunched, 'agent launch: CCM_AGENT_CMD marker should appear on disk')
 
-  // 7) MULTIPLE AGENTS — a second agent is allowed (two ★ agent tabs).
+  // 7) MULTIPLE AGENTS — a second agent is allowed (two agent tabs).
   await addClaudeAgent()
   await win.waitForFunction(
-    () => [...document.querySelectorAll('.tab-title')].filter((l) => l.textContent?.includes('★')).length >= 2,
+    () => document.querySelectorAll('.tab[data-kind="agent"]').length >= 2,
     { timeout: 5000 }
   )
-  const agentRows = await win.locator('.tab-title', { hasText: '★' }).count()
+  const agentRows = await win.locator('.tab[data-kind="agent"]').count()
   assert.equal(agentRows, 2, `multi-agent: expected 2 agent tabs, got ${agentRows}`)
 
   // 7b) WORKTREE SWITCH preserves sessions — select B's card then back to A's.
@@ -207,8 +207,8 @@ try {
   await win.waitForTimeout(300)
   await groupA.locator('.card', { hasText: 'main' }).first().click()
   await win.waitForTimeout(300)
-  const agentAfterSwitch = await win.locator('.tab-title', { hasText: '★' }).count()
-  assert.equal(agentAfterSwitch, 2, `worktree switch lost agents (★=${agentAfterSwitch})`)
+  const agentAfterSwitch = await win.locator('.tab[data-kind="agent"]').count()
+  assert.equal(agentAfterSwitch, 2, `worktree switch lost agents (count=${agentAfterSwitch})`)
 
   await win.screenshot({ path: join(process.cwd(), 'e2e', 'smoke.png') })
 

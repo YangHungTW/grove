@@ -1,6 +1,16 @@
 import { useState } from 'react'
 import { useStore } from './useStore'
 import { store } from './store'
+import {
+  AgentTabIcon,
+  BellIcon,
+  GearIcon,
+  PlusIcon,
+  SplitIcon,
+  SingleIcon,
+  ChevronDownIcon,
+  XIcon
+} from './Icons'
 
 export function TabBar(): JSX.Element {
   const s = useStore()
@@ -52,6 +62,8 @@ export function TabBar(): JSX.Element {
           ) : (
             <button
               key={sess.id}
+              data-kind={sess.kind}
+              data-icon={sess.icon}
               className={
                 'tab' +
                 (sess.id === s.focusedSessionId ? ' active' : '') +
@@ -65,10 +77,10 @@ export function TabBar(): JSX.Element {
               }}
             >
               <span className={`dot dot-${sess.state}`} />
-              <span className="tab-title">
-                {sess.icon ? sess.icon + ' ' : ''}
-                {sess.title}
+              <span className="tab-icon">
+                <AgentTabIcon icon={sess.icon} />
               </span>
+              <span className="tab-title">{sess.title}</span>
               <button
                 className="tab-x"
                 onClick={(e) => {
@@ -76,7 +88,7 @@ export function TabBar(): JSX.Element {
                   store.closeSession(sess.id)
                 }}
               >
-                ×
+                <XIcon size={11} />
               </button>
             </button>
           )
@@ -86,16 +98,22 @@ export function TabBar(): JSX.Element {
         {agents.length === 1 && (
           <button
             className="add-session"
+            aria-label="New agent"
             disabled={!wt}
             onClick={() => wt && void store.addSession(wt, 'agent', agents[0])}
           >
-            + agent
+            <PlusIcon size={12} /> agent
           </button>
         )}
         {agents.length > 1 && (
           <div className="agent-add">
-            <button className="add-session" disabled={!wt} onClick={() => setMenuOpen((o) => !o)}>
-              + agent ▾
+            <button
+              className="add-session"
+              aria-label="New agent"
+              disabled={!wt}
+              onClick={() => setMenuOpen((o) => !o)}
+            >
+              <PlusIcon size={12} /> agent <ChevronDownIcon size={12} />
             </button>
             {menuOpen && (
               <div className="agent-menu" onMouseLeave={() => setMenuOpen(false)}>
@@ -107,35 +125,41 @@ export function TabBar(): JSX.Element {
                       if (wt) void store.addSession(wt, 'agent', a)
                     }}
                   >
-                    {a.icon} {a.name}
+                    <AgentTabIcon icon={a.icon} size={14} /> {a.name}
                   </button>
                 ))}
               </div>
             )}
           </div>
         )}
-        <button className="add-session" disabled={!wt} onClick={() => wt && void store.addSession(wt, 'shell')}>
-          + shell
+        <button
+          className="add-session"
+          aria-label="New shell"
+          disabled={!wt}
+          onClick={() => wt && void store.addSession(wt, 'shell')}
+        >
+          <PlusIcon size={12} /> shell
         </button>
         <span className="toolbar-sep" />
         <button
           id="split-toggle"
-          className={split ? 'active' : ''}
+          className={'icon-btn' + (split ? ' active' : '')}
           title="Toggle split (⌘D)"
           onClick={() => store.toggleSplit()}
         >
-          {split ? '◳ single' : '⊟ split'}
+          {split ? <SingleIcon size={15} /> : <SplitIcon size={15} />}
         </button>
         <button
           id="notif-btn"
-          className={s.pending.size > 0 ? 'active' : ''}
+          className={'icon-btn' + (s.pending.size > 0 ? ' active' : '')}
           title="Notifications (⌘⇧U)"
           onClick={() => store.jumpToPending()}
         >
-          🔔<span id="notif-count">{s.pending.size > 0 ? s.pending.size : ''}</span>
+          <BellIcon size={15} />
+          {s.pending.size > 0 && <span id="notif-count">{s.pending.size}</span>}
         </button>
         <button className="icon-btn" title="Settings" onClick={() => store.openSettings(true)}>
-          ⚙
+          <GearIcon size={15} />
         </button>
       </div>
     </div>

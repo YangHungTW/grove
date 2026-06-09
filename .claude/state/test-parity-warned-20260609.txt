@@ -15,3 +15,4 @@ src/core/worktree.ts
 src/core/layoutStore.ts
 src/renderer/keymatch.ts
 src/renderer/Dialog.tsx
+src/renderer/Icons.tsx
