@@ -38,13 +38,7 @@ function GroupStrip({
   focused: boolean
 }): JSX.Element {
   const s = useStore()
-  const [editing, setEditing] = useState<string | null>(null)
-  const [draft, setDraft] = useState('')
   const [dropOver, setDropOver] = useState(false)
-  const commit = (id: string): void => {
-    store.renameSession(id, draft)
-    setEditing(null)
-  }
   const allowDrop = (e: DragEvent): void => {
     if (dragId) {
       e.preventDefault()
@@ -70,21 +64,7 @@ function GroupStrip({
       {ids.map((id) => {
         const sess = s.sessions.get(id)
         if (!sess) return null
-        return editing === id ? (
-          <div key={id} className="tab active">
-            <input
-              className="tab-rename"
-              autoFocus
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onBlur={() => commit(id)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') commit(id)
-                else if (e.key === 'Escape') setEditing(null)
-              }}
-            />
-          </div>
-        ) : (
+        return (
           <button
             key={id}
             draggable
@@ -95,10 +75,7 @@ function GroupStrip({
             }
             title="Drag to move · double-click to rename"
             onClick={() => store.focusSession(id)}
-            onDoubleClick={() => {
-              setEditing(id)
-              setDraft(sess.title)
-            }}
+            onDoubleClick={() => store.promptRename(id)}
             onDragStart={(e) => {
               dragId = id
               e.dataTransfer.effectAllowed = 'move'

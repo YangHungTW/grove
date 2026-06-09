@@ -37,6 +37,7 @@ export type DialogState =
   | { kind: 'createWorktree'; repoRoot: string; projectName: string }
   | { kind: 'removeWorktree'; repoRoot: string; wtId: string; branch: string; folder: string }
   | { kind: 'projectSettings'; repoRoot: string; name: string }
+  | { kind: 'renameSession'; id: string; title: string }
 interface PaneRef {
   term: Terminal
   fit: FitAddon
@@ -448,6 +449,14 @@ class Store {
     this.sessions.set(id, { ...s, title: next })
     this.persistLayout()
     this.notify()
+  }
+  /** Open the rename popup for a session (double-click a tab or the shortcut). */
+  promptRename(id: string | null): void {
+    const s = id ? this.sessions.get(id) : undefined
+    if (s) this.openDialog({ kind: 'renameSession', id: s.id, title: s.title })
+  }
+  renameFocused(): void {
+    this.promptRename(this.focusedSessionId)
   }
   closeSession(id: string, quiet = false): void {
     window.api.sessionKill(id)

@@ -19,6 +19,7 @@ const KEYBIND_ACTIONS: Record<KeybindAction, () => void> = {
   focusLeft: () => store.focusGroup(0),
   focusRight: () => store.focusGroup(1),
   moveToOtherGroup: () => store.moveFocusedToGroup(store.focusedGroup(store.activeWorktreeId ?? '') === 0 ? 1 : 0),
+  renameTab: () => store.renameFocused(),
   toggleSidebar: () => store.toggleSidebar()
 }
 

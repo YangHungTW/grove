@@ -24,6 +24,7 @@ export type KeybindAction =
   | 'focusLeft'
   | 'focusRight'
   | 'moveToOtherGroup'
+  | 'renameTab'
   | 'toggleSidebar'
 
 export type Keybindings = Record<KeybindAction, string>
@@ -38,6 +39,7 @@ export const DEFAULT_KEYBINDINGS: Keybindings = {
   focusLeft: 'Ctrl+Shift+H',
   focusRight: 'Ctrl+Shift+L',
   moveToOtherGroup: 'Ctrl+Shift+M',
+  renameTab: 'Ctrl+Shift+R',
   toggleSidebar: 'Ctrl+Shift+S'
 }
 
@@ -51,6 +53,7 @@ export const KEYBIND_LABELS: { action: KeybindAction; label: string }[] = [
   { action: 'focusLeft', label: 'Focus left group' },
   { action: 'focusRight', label: 'Focus right group' },
   { action: 'moveToOtherGroup', label: 'Move tab to other group' },
+  { action: 'renameTab', label: 'Rename tab' },
   { action: 'toggleSidebar', label: 'Toggle sidebar' }
 ]
 

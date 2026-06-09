@@ -7,7 +7,8 @@ export function Dialog(): JSX.Element | null {
   const d = s.dialog
   if (!d) return null
 
-  const project = (): ProjectView | undefined => store.projects.get(d.repoRoot)
+  const project = (): ProjectView | undefined =>
+    'repoRoot' in d ? store.projects.get(d.repoRoot) : undefined
   const close = (): void => store.closeDialog()
 
   return (
@@ -21,8 +22,44 @@ export function Dialog(): JSX.Element | null {
           <RemoveWorktree branch={d.branch} folder={d.folder} wtId={d.wtId} getProject={project} />
         )}
         {d.kind === 'projectSettings' && <ProjectSettings name={d.name} repoRoot={d.repoRoot} />}
+        {d.kind === 'renameSession' && <RenameSession id={d.id} title={d.title} />}
       </div>
     </div>
+  )
+}
+
+function RenameSession({ id, title }: { id: string; title: string }): JSX.Element {
+  const [value, setValue] = useState(title)
+  const submit = (): void => {
+    store.renameSession(id, value)
+    store.closeDialog()
+  }
+  return (
+    <>
+      <h3 className="dialog-title">Rename tab</h3>
+      <label className="dialog-field">
+        <span>Name</span>
+        <input
+          autoFocus
+          value={value}
+          spellCheck={false}
+          onFocus={(e) => e.currentTarget.select()}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') submit()
+            else if (e.key === 'Escape') store.closeDialog()
+          }}
+        />
+      </label>
+      <div className="dialog-actions">
+        <button className="btn-ghost" onClick={() => store.closeDialog()}>
+          Cancel
+        </button>
+        <button className="btn-primary" disabled={!value.trim()} onClick={submit}>
+          Rename
+        </button>
+      </div>
+    </>
   )
 }
 
