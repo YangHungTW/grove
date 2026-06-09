@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type MouseEvent } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
-import { WebglAddon } from '@xterm/addon-webgl'
+import { CanvasAddon } from '@xterm/addon-canvas'
 import { useStore } from './useStore'
 import { store } from './store'
 import type { SessionSnapshot } from '../main/ipc'
@@ -128,13 +128,11 @@ function Pane({
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(el)
-    // GPU renderer: the DOM renderer mis-draws box-drawing glyphs (claude's
-    // ─/│ frame lines showed as garbage). WebGL renders them correctly. Fall
-    // back silently to the DOM renderer if the GL context is unavailable/lost.
+    // Canvas renderer: the DOM renderer mis-draws box-drawing glyphs (claude's
+    // ─/│ frame lines showed as garbage). The canvas addon draws them correctly
+    // (customGlyphs) and — unlike WebGL — repaints reliably on a fresh pane.
     try {
-      const webgl = new WebglAddon()
-      webgl.onContextLoss(() => webgl.dispose())
-      term.loadAddon(webgl)
+      term.loadAddon(new CanvasAddon())
     } catch {
       /* keep DOM renderer */
     }
@@ -150,6 +148,7 @@ function Pane({
       try {
         fit.fit()
         window.api.sessionResize(session.id, term.cols, term.rows)
+        term.refresh(0, term.rows - 1) // force a full repaint (new/reshown pane)
       } catch {
         /* ignore transient measure errors */
       }
