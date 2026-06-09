@@ -13,3 +13,4 @@ src/core/types.ts
 src/core/sessionRegistry.ts
 src/core/worktree.ts
 src/core/layoutStore.ts
+src/renderer/keymatch.ts

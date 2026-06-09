@@ -398,6 +398,21 @@ class Store {
     this.notify()
     this.panes.get(id)?.term.focus()
   }
+  /** Cycle focus among the active worktree's sessions (delta +1 / -1). */
+  cycleSession(delta: number): void {
+    if (!this.activeWorktreeId) return
+    const list = this.sessionsOf(this.activeWorktreeId)
+    if (list.length < 2) return
+    const i = list.findIndex((s) => s.id === this.focusedSessionId)
+    const next = list[(((i < 0 ? 0 : i) + delta) % list.length + list.length) % list.length]
+    if (next) this.focusSession(next.id)
+  }
+  closeFocused(): void {
+    if (this.focusedSessionId) this.closeSession(this.focusedSessionId)
+  }
+  newShellInActive(): void {
+    if (this.activeWorktreeId) void this.addSession(this.activeWorktreeId, 'shell')
+  }
   private syncFocus(): void {
     const visible = new Set(
       this.activeWorktreeId ? this.sessionsOf(this.activeWorktreeId).map((s) => s.id) : []

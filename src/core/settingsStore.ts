@@ -17,7 +17,12 @@ export class SettingsStore {
     if (!existsSync(this.file)) return { ...DEFAULT_SETTINGS }
     try {
       const parsed = JSON.parse(readFileSync(this.file, 'utf8'))
-      return { ...DEFAULT_SETTINGS, ...parsed }
+      return {
+        ...DEFAULT_SETTINGS,
+        ...parsed,
+        // Deep-merge keybindings so new actions get defaults on older files.
+        keybindings: { ...DEFAULT_SETTINGS.keybindings, ...parsed.keybindings }
+      }
     } catch {
       return { ...DEFAULT_SETTINGS }
     }

@@ -1,5 +1,6 @@
 import { useStore } from './useStore'
 import { store } from './store'
+import { KEYBIND_LABELS } from '../core/settings'
 
 export function SettingsPanel(): JSX.Element | null {
   const s = useStore()
@@ -82,7 +83,27 @@ export function SettingsPanel(): JSX.Element | null {
         </label>
         <small className="settings-note">
           Hooks run in a login shell with $CCM_WORKTREE_PATH, $CCM_BRANCH, $CCM_REPO.
-          Keyboard-shortcut settings are coming next.
+        </small>
+
+        <div className="settings-section">Keyboard shortcuts</div>
+        {KEYBIND_LABELS.map(({ action, label }) => (
+          <label className="settings-row" key={action}>
+            <span>{label}</span>
+            <input
+              type="text"
+              className="key-input"
+              value={cfg.keybindings[action]}
+              spellCheck={false}
+              onChange={(e) =>
+                void store.updateSettings({
+                  keybindings: { ...cfg.keybindings, [action]: e.target.value }
+                })
+              }
+            />
+          </label>
+        ))}
+        <small className="settings-note">
+          Format: modifiers + key, e.g. Ctrl+Shift+B or Cmd+T. Defaults match kitty (⌃⇧).
         </small>
       </div>
     </div>

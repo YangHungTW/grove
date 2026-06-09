@@ -5,11 +5,38 @@ import { PaneGrid } from './PaneGrid'
 import { SettingsPanel } from './SettingsPanel'
 import { useStore } from './useStore'
 import { store } from './store'
+import { matchesAccel } from './keymatch'
+import type { KeybindAction } from '../core/settings'
+
+const KEYBIND_ACTIONS: Record<KeybindAction, () => void> = {
+  splitToggle: () => store.toggleSplit(),
+  newShell: () => store.newShellInActive(),
+  closeSession: () => store.closeFocused(),
+  nextSession: () => store.cycleSession(1),
+  prevSession: () => store.cycleSession(-1),
+  focusLeft: () => store.cycleSession(-1),
+  focusRight: () => store.cycleSession(1),
+  toggleSidebar: () => store.toggleSidebar()
+}
 
 export function App(): JSX.Element {
   const s = useStore()
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
+      // Never hijack typing in our own inputs (settings, tab rename). The xterm
+      // terminal uses a <textarea>, so terminal-focused shortcuts still work.
+      if (e.target instanceof HTMLInputElement) return
+
+      // Configurable shortcuts (default ⌃⇧, kitty-style) take priority.
+      for (const [action, accel] of Object.entries(store.settings.keybindings)) {
+        if (matchesAccel(e, accel)) {
+          e.preventDefault()
+          e.stopPropagation()
+          KEYBIND_ACTIONS[action as KeybindAction]()
+          return
+        }
+      }
+
       if (!e.metaKey) return
       const k = e.key.toLowerCase()
       if (e.shiftKey && k === 'u') {
@@ -37,8 +64,8 @@ export function App(): JSX.Element {
         else store.switchWorktree(idx)
       }
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('keydown', onKey, { capture: true })
+    return () => window.removeEventListener('keydown', onKey, { capture: true })
   }, [])
 
   return (
