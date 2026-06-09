@@ -444,6 +444,22 @@ button {
   background: var(--panel);
   border-bottom: 1px solid #000;
 }
+#sidebar-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  flex: 0 0 auto;
+  border: 0;
+  border-right: 1px solid #000;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+#sidebar-toggle:hover {
+  color: var(--fg);
+  background: rgba(255, 255, 255, 0.04);
+}
 #tabs {
   display: flex;
   flex: 1;

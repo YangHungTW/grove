@@ -8,6 +8,17 @@ export function TabBar(): JSX.Element {
 
   return (
     <div id="tabbar">
+      <button
+        id="sidebar-toggle"
+        title={(s.settings.sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar') + ' (⌘B)'}
+        onClick={() => store.toggleSidebar()}
+      >
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+          <rect x="1.5" y="2.5" width="13" height="11" rx="1.6" />
+          <line x1="6" y1="2.5" x2="6" y2="13.5" />
+          <rect x="1.5" y="2.5" width="4.5" height="11" rx="1.6" fill="currentColor" opacity="0.5" stroke="none" />
+        </svg>
+      </button>
       <div id="tabs">
         {sessions.map((sess) => (
           <button
@@ -37,14 +48,6 @@ export function TabBar(): JSX.Element {
         ))}
       </div>
       <div id="toolbar">
-        <button
-          className="icon-btn"
-          title={s.settings.sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
-          onClick={() => store.toggleSidebar()}
-        >
-          {s.settings.sidebarCollapsed ? '»' : '«'}
-        </button>
-        <span className="toolbar-sep" />
         <button
           className="add-session"
           disabled={!s.activeWorktreeId}

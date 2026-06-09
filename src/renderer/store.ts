@@ -422,14 +422,18 @@ class Store {
     this.applyAppearance()
     this.notify()
   }
-  /** Apply background colour / transparency to the chrome + all terminals. */
+  /**
+   * Apply background colour / transparency. Only sets CSS variables — terminals
+   * are transparent and sit on the pane background, so we never touch live
+   * Terminal instances (which could blank the canvas renderer).
+   */
   applyAppearance(): void {
     const s = this.settings
     const root = document.documentElement
     root.style.setProperty('--bg', s.background)
     if (s.transparent) {
       document.body.style.background = 'transparent'
-      root.style.setProperty('--pane-bg', 'transparent')
+      root.style.setProperty('--pane-bg', hexToRgba(s.background, s.opacity))
       root.style.setProperty('--panel', hexToRgba(s.background, Math.min(1, s.opacity + 0.12)))
       root.style.setProperty('--panel-2', hexToRgba(s.background, Math.min(1, s.opacity + 0.2)))
     } else {
@@ -438,21 +442,6 @@ class Store {
       root.style.setProperty('--panel', '#232329')
       root.style.setProperty('--panel-2', '#2c2c33')
     }
-    const termBg = this.terminalBackground()
-    for (const { term } of this.panes.values()) {
-      try {
-        term.options.allowTransparency = s.transparent
-        term.options.theme = { ...term.options.theme, background: termBg }
-      } catch {
-        /* ignore */
-      }
-    }
-  }
-  /** Background to pass to a freshly created Terminal. */
-  terminalBackground(): string {
-    return this.settings.transparent
-      ? hexToRgba(this.settings.background, this.settings.opacity)
-      : this.settings.background
   }
 
   // --- toast (kept imperative; tiny + transient) -------------------------
