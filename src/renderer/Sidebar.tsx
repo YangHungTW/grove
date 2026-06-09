@@ -1,11 +1,16 @@
 import { useStore } from './useStore'
 import { store, type ProjectView, type WorktreeView } from './store'
 import { RepoIcon, PlusIcon, GearIcon, XIcon } from './Icons'
+import groveLogo from './assets/grove-logo.svg'
 
 export function Sidebar(): JSX.Element {
   const s = useStore()
   return (
     <aside id="sidebar">
+      <div className="brand">
+        <img className="brand-logo" src={groveLogo} alt="Grove" width={24} height={24} />
+        <span className="brand-name">Grove</span>
+      </div>
       <button className="new-project" onClick={() => void store.openProject()}>
         + Open project…
       </button>

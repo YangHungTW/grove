@@ -1,7 +1,8 @@
 {
-  "name": "ccmanager-gui",
+  "name": "grove",
+  "productName": "Grove",
   "version": "0.1.0",
-  "description": "Electron GUI for managing multiple PTY sessions per git worktree (ccmanager-gui)",
+  "description": "Grove — a desktop control room for running multiple coding-agent sessions per git worktree across projects",
   "main": "out/main/index.js",
   "type": "module",
   "scripts": {
@@ -17,7 +18,8 @@
     "electron",
     "pty",
     "worktree",
-    "ccmanager"
+    "coding-agent",
+    "terminal"
   ],
   "license": "MIT",
   "dependencies": {

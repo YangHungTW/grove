@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from 'electron'
-import { join, resolve, basename } from 'node:path'
+import { join, resolve, basename, dirname } from 'node:path'
 import { execFile } from 'node:child_process'
+import { existsSync, copyFileSync } from 'node:fs'
 import { SessionRegistry } from '../core/sessionRegistry'
 import { PtySession } from '../core/session'
 import { createWorktree, listWorktrees, removeWorktree, isGitRepo, worktreeStatus } from '../core/worktree'
@@ -304,11 +305,29 @@ function registerIpc(): void {
   })
 }
 
+/** One-time: carry settings/projects/layout over from the old app-name folder
+ * (Electron's userData path changed when the app was renamed to Grove). */
+function migrateUserData(): void {
+  try {
+    const dir = app.getPath('userData')
+    const old = join(dirname(dir), 'ccmanager-gui')
+    if (old === dir || !existsSync(old)) return
+    for (const f of ['settings.json', 'projects.json', 'layout.json']) {
+      const dst = join(dir, f)
+      const src = join(old, f)
+      if (existsSync(src) && !existsSync(dst)) copyFileSync(src, dst)
+    }
+  } catch {
+    /* best-effort */
+  }
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
     show: false,
+    title: 'Grove',
     // Construct with vibrancy + a transparent backing so macOS frosted-glass can
     // actually show through when the user enables transparency at runtime.
     vibrancy: 'under-window',
@@ -343,6 +362,7 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  migrateUserData()
   registerIpc()
   createWindow()
   app.on('activate', () => {
