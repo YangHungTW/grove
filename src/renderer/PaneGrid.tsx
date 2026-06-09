@@ -147,6 +147,9 @@ function Pane({
       if (el.clientHeight < 2 || el.clientWidth < 2) return
       try {
         fit.fit()
+        // Reserve one row of margin so the last line (e.g. claude's bottom
+        // status/auto-mode line) is never flush against the pane edge / clipped.
+        if (term.rows > 3) term.resize(term.cols, term.rows - 1)
         window.api.sessionResize(session.id, term.cols, term.rows)
         term.refresh(0, term.rows - 1) // force a full repaint (new/reshown pane)
       } catch {
