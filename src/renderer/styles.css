@@ -528,8 +528,15 @@ button {
 #grouptabs:not(.single) .group-strip.focused {
   box-shadow: inset 0 -2px 0 var(--accent);
 }
+.group-strip.drop-over {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
 .group-strip::-webkit-scrollbar {
   height: 0;
+}
+.tab[draggable='true'] {
+  -webkit-user-drag: element;
 }
 
 .tab {

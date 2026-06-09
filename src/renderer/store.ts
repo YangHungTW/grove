@@ -543,6 +543,26 @@ class Store {
       void this.addSession(wt, 'shell')
     }
   }
+  /** Drag-and-drop: move session `id` into `targetGroup` before `beforeId`
+   * (or to the end), reordering within a group or moving between groups. */
+  reorderSession(id: string, targetGroup: number, beforeId?: string): void {
+    const wt = this.sessions.get(id)?.worktreeId
+    if (!wt || wt !== this.activeWorktreeId) return
+    const groups = this.groupsOf(wt)
+    if (targetGroup < 0 || targetGroup >= groups.length) return
+    const from = groups.findIndex((g) => g.ids.includes(id))
+    if (from < 0) return
+    groups[from].ids = groups[from].ids.filter((x) => x !== id)
+    const dest = groups[targetGroup].ids
+    const at = beforeId && beforeId !== id ? dest.indexOf(beforeId) : -1
+    dest.splice(at < 0 ? dest.length : at, 0, id)
+    groups[targetGroup].active = id
+    if (from !== targetGroup) groups[from].active = groups[from].ids[groups[from].ids.length - 1] ?? ''
+    this.focusedGroupByWt.set(wt, targetGroup)
+    this.focusedSessionId = id
+    this.groupsOf(wt) // reconcile (collapse an emptied source group)
+    this.notify()
+  }
   /** Move the focused session to the other group (creating one if needed). */
   moveFocusedToGroup(target: number): void {
     const wt = this.activeWorktreeId
