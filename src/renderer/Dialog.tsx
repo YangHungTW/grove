@@ -20,8 +20,57 @@ export function Dialog(): JSX.Element | null {
         {d.kind === 'removeWorktree' && (
           <RemoveWorktree branch={d.branch} folder={d.folder} wtId={d.wtId} getProject={project} />
         )}
+        {d.kind === 'projectSettings' && <ProjectSettings name={d.name} repoRoot={d.repoRoot} />}
       </div>
     </div>
+  )
+}
+
+function ProjectSettings({ name, repoRoot }: { name: string; repoRoot: string }): JSX.Element {
+  const p = store.projects.get(repoRoot)
+  const [create, setCreate] = useState(p?.hookCreate ?? '')
+  const [remove, setRemove] = useState(p?.hookRemove ?? '')
+  return (
+    <>
+      <h3 className="dialog-title">{name} — settings</h3>
+      <p className="dialog-body">
+        Per-project hooks. Run in a login shell when a worktree is created/removed — a command, a
+        script path, or an agent (e.g. <code>agy -p &quot;/setup&quot;</code>). Placeholders:{' '}
+        <code>{'{worktree}'}</code> <code>{'{branch}'}</code> <code>{'{repo}'}</code>.
+      </p>
+      <label className="dialog-field">
+        <span>On create worktree</span>
+        <input
+          value={create}
+          placeholder='./scripts/setup.sh {worktree}'
+          spellCheck={false}
+          onChange={(e) => setCreate(e.target.value)}
+        />
+      </label>
+      <label className="dialog-field">
+        <span>On remove worktree</span>
+        <input
+          value={remove}
+          placeholder='rm -rf {worktree}/node_modules'
+          spellCheck={false}
+          onChange={(e) => setRemove(e.target.value)}
+        />
+      </label>
+      <div className="dialog-actions">
+        <button className="btn-ghost" onClick={() => store.closeDialog()}>
+          Cancel
+        </button>
+        <button
+          className="btn-primary"
+          onClick={() => {
+            store.updateProjectHooks(repoRoot, { hookCreate: create, hookRemove: remove })
+            store.closeDialog()
+          }}
+        >
+          Save
+        </button>
+      </div>
+    </>
   )
 }
 

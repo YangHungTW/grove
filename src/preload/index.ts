@@ -23,6 +23,7 @@ const api: RendererApi = {
   projectAdd: (repoRoot: string) => ipcRenderer.invoke(Channels.projectAdd, repoRoot),
   projectListRecent: () => ipcRenderer.invoke(Channels.projectListRecent),
   projectRemove: (repoRoot: string) => ipcRenderer.invoke(Channels.projectRemove, repoRoot),
+  projectUpdate: (repoRoot, patch) => ipcRenderer.send(Channels.projectUpdate, repoRoot, patch),
   layoutSave: (descriptors) => ipcRenderer.send(Channels.layoutSave, descriptors),
   layoutLoad: () => ipcRenderer.invoke(Channels.layoutLoad),
   settingsLoad: () => ipcRenderer.invoke(Channels.settingsLoad),

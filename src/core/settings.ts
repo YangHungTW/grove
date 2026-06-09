@@ -64,9 +64,6 @@ export interface AppSettings {
   agents: AgentDef[]
   /** Worktree folder template, relative to the project (supports {branch}, {repo}). */
   worktreeFolder: string
-  /** Shell command to run on worktree create/remove (cwd = worktree/repo). */
-  hookCreate: string
-  hookRemove: string
   /** Customisable keyboard shortcuts (action -> accelerator). */
   keybindings: Keybindings
   /** Agent ids the user has turned off (hidden from the "+" menu even if installed). */
@@ -90,8 +87,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   sidebarCollapsed: false,
   agents: AGENT_PRESETS,
   worktreeFolder: '../{repo}-wt-{branch}',
-  hookCreate: '',
-  hookRemove: '',
   keybindings: DEFAULT_KEYBINDINGS,
   disabledAgents: []
 }

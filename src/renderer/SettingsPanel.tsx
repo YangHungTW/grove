@@ -130,33 +130,9 @@ export function SettingsPanel(): JSX.Element | null {
           />
           <small>Placeholders: {'{repo}'}, {'{branch}'}</small>
         </label>
-
-        <label className="settings-col">
-          <span>On create — command / script / agent skill</span>
-          <input
-            type="text"
-            value={cfg.hookCreate}
-            placeholder="e.g. ./scripts/setup.sh {worktree}  ·  or  agy -p &quot;/onboard&quot;"
-            spellCheck={false}
-            onChange={(e) => void store.updateSettings({ hookCreate: e.target.value })}
-          />
-        </label>
-
-        <label className="settings-col">
-          <span>On remove — command / script / agent skill</span>
-          <input
-            type="text"
-            value={cfg.hookRemove}
-            placeholder="e.g. rm -rf {worktree}/node_modules"
-            spellCheck={false}
-            onChange={(e) => void store.updateSettings({ hookRemove: e.target.value })}
-          />
-        </label>
         <small className="settings-note">
-          Runs in a login shell — a command, a <b>script path</b>, or an <b>agent</b> (e.g.{' '}
-          <code>agy -p &quot;/setup&quot;</code>). Placeholders: <code>{'{worktree}'}</code>{' '}
-          <code>{'{branch}'}</code> <code>{'{repo}'}</code> (also $CCM_WORKTREE_PATH / $CCM_BRANCH /
-          $CCM_REPO).
+          Create/remove <b>hooks are per-project</b> — set them from the ⚙ on each project in the
+          sidebar.
         </small>
 
         <div className="settings-section">Keyboard shortcuts</div>

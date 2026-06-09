@@ -23,6 +23,8 @@ export interface ProjectView {
   expanded: boolean
   loaded: boolean
   worktrees: Map<string, WorktreeView>
+  hookCreate?: string
+  hookRemove?: string
 }
 export interface WtStatus {
   dirty: number
@@ -34,6 +36,7 @@ export type DialogState =
   | { kind: 'closeProject'; repoRoot: string; name: string }
   | { kind: 'createWorktree'; repoRoot: string; projectName: string }
   | { kind: 'removeWorktree'; repoRoot: string; wtId: string; branch: string; folder: string }
+  | { kind: 'projectSettings'; repoRoot: string; name: string }
 interface PaneRef {
   term: Terminal
   fit: FitAddon
@@ -237,13 +240,29 @@ class Store {
         .catch(() => {})
     }
   }
-  private upsertProject(repoRoot: string, name: string): ProjectView {
+  private upsertProject(
+    repoRoot: string,
+    name: string,
+    hooks?: { hookCreate?: string; hookRemove?: string }
+  ): ProjectView {
     let p = this.projects.get(repoRoot)
     if (!p) {
       p = { repoRoot, name, expanded: false, loaded: false, worktrees: new Map() }
       this.projects.set(repoRoot, p)
     }
+    if (hooks) {
+      p.hookCreate = hooks.hookCreate
+      p.hookRemove = hooks.hookRemove
+    }
     return p
+  }
+  updateProjectHooks(repoRoot: string, patch: { hookCreate?: string; hookRemove?: string }): void {
+    const p = this.projects.get(repoRoot)
+    if (!p) return
+    if (patch.hookCreate !== undefined) p.hookCreate = patch.hookCreate
+    if (patch.hookRemove !== undefined) p.hookRemove = patch.hookRemove
+    window.api.projectUpdate(repoRoot, patch)
+    this.notify()
   }
   async openProject(): Promise<void> {
     try {
@@ -575,7 +594,8 @@ class Store {
     this.wireEvents()
     this.savedLayout = await window.api.layoutLoad()
     const recent = await window.api.projectListRecent()
-    for (const p of recent) this.upsertProject(p.repoRoot, p.name)
+    for (const p of recent)
+      this.upsertProject(p.repoRoot, p.name, { hookCreate: p.hookCreate, hookRemove: p.hookRemove })
     this.repoRoot = await window.api.repoRoot()
     try {
       const entry = await window.api.projectAdd(this.repoRoot)

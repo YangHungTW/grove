@@ -4,7 +4,7 @@ import { execFile } from 'node:child_process'
 import { SessionRegistry } from '../core/sessionRegistry'
 import { PtySession } from '../core/session'
 import { createWorktree, listWorktrees, removeWorktree, isGitRepo, worktreeStatus } from '../core/worktree'
-import { ProjectStore, type ProjectEntry } from '../core/projectStore'
+import { ProjectStore, type ProjectEntry, type ProjectPatch } from '../core/projectStore'
 import { LayoutStore, type SessionDescriptor } from '../core/layoutStore'
 import { SettingsStore, type AppSettings } from '../core/settingsStore'
 import type { ResolvedAgent } from '../core/settings'
@@ -245,6 +245,9 @@ function registerIpc(): void {
   ipcMain.handle(Channels.projectRemove, (_e: IpcMainInvokeEvent, repoRoot: string) =>
     store().remove(repoRoot)
   )
+  ipcMain.on(Channels.projectUpdate, (_e, repoRoot: string, patch: ProjectPatch) =>
+    store().update(repoRoot, patch)
+  )
   ipcMain.handle(Channels.layoutLoad, () => layout().load())
   ipcMain.on(Channels.layoutSave, (_e, descriptors: SessionDescriptor[]) =>
     layout().save(descriptors)
@@ -262,7 +265,7 @@ function registerIpc(): void {
     (_e: IpcMainInvokeEvent, repoRoot: string, opts: CreateWorktreeOptions) => {
       const path = opts.path ?? resolveWorktreePath(repoRoot, opts.branch)
       const info = createWorktree(repoRoot, { ...opts, path })
-      runHook(settings().load().hookCreate, info.path, {
+      runHook(store().get(repoRoot)?.hookCreate ?? '', info.path, {
         CCM_WORKTREE_PATH: info.path,
         CCM_BRANCH: info.branch,
         CCM_REPO: repoRoot
@@ -277,7 +280,7 @@ function registerIpc(): void {
     worktreeStatus(worktreePath)
   )
   ipcMain.handle(Channels.worktreeRemove, (_e: IpcMainInvokeEvent, req: WorktreeRemoveRequest) => {
-    runHook(settings().load().hookRemove, req.path, {
+    runHook(store().get(req.repoRoot)?.hookRemove ?? '', req.path, {
       CCM_WORKTREE_PATH: req.path,
       CCM_REPO: req.repoRoot
     })

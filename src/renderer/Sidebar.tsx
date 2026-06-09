@@ -45,6 +45,19 @@ function ProjectGroup({ project }: { project: ProjectView }): JSX.Element {
         </button>
         <button
           className="proj-btn"
+          title="Project settings (hooks)"
+          onClick={() =>
+            store.openDialog({
+              kind: 'projectSettings',
+              repoRoot: project.repoRoot,
+              name: project.name
+            })
+          }
+        >
+          ⚙
+        </button>
+        <button
+          className="proj-btn"
           title="Close project (keeps the repo)"
           onClick={() =>
             store.openDialog({ kind: 'closeProject', repoRoot: project.repoRoot, name: project.name })

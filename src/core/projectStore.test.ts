@@ -55,4 +55,21 @@ describe('ProjectStore — recent projects (persisted)', () => {
   it('returns an empty list when the file does not exist yet', () => {
     expect(new ProjectStore(join(dir, 'nope.json')).list()).toEqual([])
   })
+
+  it('update merges per-project config (hooks) and persists it', () => {
+    const store = new ProjectStore(file)
+    store.add('/a/alpha')
+    store.update('/a/alpha', { hookCreate: 'npm install', hookRemove: 'echo bye' })
+    const reloaded = new ProjectStore(file).list().find((p) => p.repoRoot === '/a/alpha')
+    expect(reloaded?.hookCreate).toBe('npm install')
+    expect(reloaded?.hookRemove).toBe('echo bye')
+    expect(reloaded?.name).toBe('alpha')
+  })
+
+  it('update is a no-op for an unknown project', () => {
+    const store = new ProjectStore(file)
+    store.add('/a/alpha')
+    store.update('/zzz/none', { hookCreate: 'x' })
+    expect(store.list()).toHaveLength(1)
+  })
 })

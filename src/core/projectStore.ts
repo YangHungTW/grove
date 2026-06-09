@@ -6,7 +6,14 @@ export interface ProjectEntry {
   repoRoot: string
   /** Display name (path basename). */
   name: string
+  /** Per-project hook: command/script/agent run on worktree create. */
+  hookCreate?: string
+  /** Per-project hook: command/script/agent run on worktree remove. */
+  hookRemove?: string
 }
+
+/** Fields of a project that can be updated in place. */
+export type ProjectPatch = Partial<Pick<ProjectEntry, 'hookCreate' | 'hookRemove'>>
 
 /**
  * Persisted list of recently-opened projects (most-recent first). Pure Node
@@ -38,6 +45,21 @@ export class ProjectStore {
     this.write()
   }
 
+  /** Merge per-project config into an existing entry (no-op if unknown). */
+  update(repoRoot: string, patch: ProjectPatch): void {
+    let changed = false
+    this.entries = this.entries.map((e) => {
+      if (e.repoRoot !== repoRoot) return e
+      changed = true
+      return { ...e, ...patch }
+    })
+    if (changed) this.write()
+  }
+
+  get(repoRoot: string): ProjectEntry | undefined {
+    return this.entries.find((e) => e.repoRoot === repoRoot)
+  }
+
   private read(): ProjectEntry[] {
     if (!existsSync(this.file)) return []
     try {
@@ -45,7 +67,12 @@ export class ProjectStore {
       if (!Array.isArray(parsed)) return []
       return parsed
         .filter((e): e is ProjectEntry => typeof e?.repoRoot === 'string')
-        .map((e) => ({ repoRoot: e.repoRoot, name: e.name ?? basename(e.repoRoot) }))
+        .map((e) => ({
+          repoRoot: e.repoRoot,
+          name: e.name ?? basename(e.repoRoot),
+          hookCreate: e.hookCreate,
+          hookRemove: e.hookRemove
+        }))
     } catch {
       return []
     }

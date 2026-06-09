@@ -1,6 +1,6 @@
 import type { SessionKind, SessionState } from '../core/types'
 import type { WorktreeInfo, CreateWorktreeOptions, WorktreeStatus } from '../core/worktree'
-import type { ProjectEntry } from '../core/projectStore'
+import type { ProjectEntry, ProjectPatch } from '../core/projectStore'
 import type { SessionDescriptor } from '../core/layoutStore'
 import type { AppSettings } from '../core/settingsStore'
 import type { ResolvedAgent } from '../core/settings'
@@ -12,6 +12,7 @@ export const Channels = {
   projectAdd: 'project:add',
   projectListRecent: 'project:list-recent',
   projectRemove: 'project:remove',
+  projectUpdate: 'project:update',
   layoutSave: 'layout:save',
   layoutLoad: 'layout:load',
   settingsLoad: 'settings:load',
@@ -94,6 +95,7 @@ export interface RendererApi {
   /** Recently-opened projects, most-recent first. */
   projectListRecent(): Promise<ProjectEntry[]>
   projectRemove(repoRoot: string): Promise<void>
+  projectUpdate(repoRoot: string, patch: ProjectPatch): void
   /** Persist the open-session layout for restore on next launch. */
   layoutSave(descriptors: SessionDescriptor[]): void
   layoutLoad(): Promise<SessionDescriptor[]>
