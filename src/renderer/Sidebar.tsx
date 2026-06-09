@@ -20,6 +20,7 @@ export function Sidebar(): JSX.Element {
 function ProjectGroup({ project }: { project: ProjectView }): JSX.Element {
   const s = useStore()
   const [adding, setAdding] = useState(false)
+  const [closing, setClosing] = useState(false)
 
   return (
     <div className="project-group">
@@ -30,12 +31,30 @@ function ProjectGroup({ project }: { project: ProjectView }): JSX.Element {
         </button>
         <button
           className="row-x"
-          title="Remove from recent"
-          onClick={() => void store.removeProject(project.repoRoot)}
+          title="Close project (keeps the repo on disk)"
+          onClick={() => setClosing(true)}
         >
           ×
         </button>
       </div>
+
+      {closing && (
+        <div className="card-confirm" onClick={(e) => e.stopPropagation()}>
+          <span>Close project? (repo kept)</span>
+          <button
+            className="confirm-yes"
+            onClick={() => {
+              setClosing(false)
+              void store.removeProject(project.repoRoot)
+            }}
+          >
+            Close
+          </button>
+          <button className="confirm-no" onClick={() => setClosing(false)}>
+            Cancel
+          </button>
+        </div>
+      )}
 
       {[...project.worktrees.values()].map((wt) => (
         <WorktreeCard key={wt.id} project={project} wt={wt} active={wt.id === s.activeWorktreeId} />
