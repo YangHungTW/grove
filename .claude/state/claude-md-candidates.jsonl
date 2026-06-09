@@ -1,5 +1,5 @@
 {"ts":"2026-06-09T04:55:31Z","dir":"src/preload","signals":["edit-touch","recent-activity","depth>=2","not-in-ancestor"],"score":0.667,"status":"pending"}
 {"ts":"2026-06-09T04:58:50Z","dir":"e2e","signals":["edit-touch","recent-activity","not-in-ancestor"],"score":0.611,"status":"pending"}
 {"ts":"2026-06-09T05:08:18Z","dir":"src/main","signals":["edit-touch","recent-activity","depth>=2","not-in-ancestor"],"score":0.667,"status":"pending"}
-{"ts":"2026-06-09T05:16:41Z","dir":"src/core","signals":["size>=4","edit-touch","recent-activity","bounded-context-name","depth>=2","not-in-ancestor"],"score":1.000,"status":"pending"}
-{"ts":"2026-06-09T05:22:00Z","dir":"src/renderer","signals":["size>=4","edit-touch","recent-activity","depth>=2","not-in-ancestor"],"score":0.889,"status":"pending"}
+{"ts":"2026-06-09T13:08:08Z","dir":"src/core","signals":["size>=4","edit-touch","recent-activity","bounded-context-name","depth>=2","not-in-ancestor"],"score":1.000,"status":"pending"}
+{"ts":"2026-06-09T13:08:36Z","dir":"src/renderer","signals":["size>=4","edit-touch","recent-activity","depth>=2","not-in-ancestor"],"score":0.889,"status":"pending"}

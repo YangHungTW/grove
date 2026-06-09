@@ -1,11 +1,18 @@
 import { useStore } from './useStore'
 import { store } from './store'
-import { KEYBIND_LABELS } from '../core/settings'
+import { KEYBIND_LABELS, AGENT_PRESETS } from '../core/settings'
 
 export function SettingsPanel(): JSX.Element | null {
   const s = useStore()
   if (!s.settingsOpen) return null
   const cfg = s.settings
+  const installed = new Set(s.availableAgents.map((a) => a.id))
+  const toggleAgent = (id: string, enabled: boolean): void => {
+    const next = enabled
+      ? cfg.disabledAgents.filter((x) => x !== id)
+      : [...new Set([...cfg.disabledAgents, id])]
+    void store.updateSettings({ disabledAgents: next })
+  }
 
   return (
     <div className="settings-overlay" onClick={() => store.openSettings(false)}>
@@ -49,6 +56,26 @@ export function SettingsPanel(): JSX.Element | null {
             onChange={(e) => void store.updateSettings({ opacity: Number(e.target.value) })}
           />
         </label>
+
+        <div className="settings-section">Agents</div>
+        {AGENT_PRESETS.map((a) => {
+          const isInstalled = installed.has(a.id)
+          return (
+            <label className="settings-row" key={a.id}>
+              <span>
+                {a.icon} {a.name}
+                {!isInstalled && <em className="agent-missing"> — not installed</em>}
+              </span>
+              <input
+                type="checkbox"
+                disabled={!isInstalled}
+                checked={isInstalled && !cfg.disabledAgents.includes(a.id)}
+                onChange={(e) => toggleAgent(a.id, e.target.checked)}
+              />
+            </label>
+          )
+        })}
+        <small className="settings-note">Only installed, enabled agents appear in the + menu.</small>
 
         <div className="settings-section">Worktree</div>
 

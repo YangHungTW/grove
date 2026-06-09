@@ -66,6 +66,8 @@ export interface AppSettings {
   hookRemove: string
   /** Customisable keyboard shortcuts (action -> accelerator). */
   keybindings: Keybindings
+  /** Agent ids the user has turned off (hidden from the "+" menu even if installed). */
+  disabledAgents: string[]
 }
 
 /** Built-in agent presets shown in the "+" menu (filtered to installed ones). */
@@ -87,5 +89,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   worktreeFolder: '../{repo}-wt-{branch}',
   hookCreate: '',
   hookRemove: '',
-  keybindings: DEFAULT_KEYBINDINGS
+  keybindings: DEFAULT_KEYBINDINGS,
+  disabledAgents: []
 }

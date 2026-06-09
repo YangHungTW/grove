@@ -665,6 +665,11 @@ button {
   background: transparent;
   cursor: pointer;
 }
+.agent-missing {
+  color: var(--muted);
+  font-style: italic;
+  font-size: 11px;
+}
 .key-input {
   width: 150px;
   background: var(--bg);
