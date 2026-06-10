@@ -351,6 +351,7 @@ button {
 .project-header:hover .row-x,
 .wt-header:hover .row-x,
 .session-row:hover .row-x,
+.card:hover .row-x,
 .tab:hover .tab-x {
   color: var(--muted);
 }
