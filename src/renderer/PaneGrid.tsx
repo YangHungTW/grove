@@ -125,6 +125,19 @@ function Pane({
     term.loadAddon(fit)
     term.open(el)
     term.onData((d) => window.api.sessionInput(session.id, d))
+    // Shift+Enter inserts a newline instead of submitting. xterm sends plain CR
+    // (\r = submit) for both Enter and Shift+Enter; send LF (\x0a) instead, which
+    // is exactly what agents like claude treat as "newline" (its chat:newline is
+    // Ctrl+J = LF). Returning false stops xterm from also sending the CR.
+    if (session.kind === 'agent') {
+      term.attachCustomKeyEventHandler((e) => {
+        if (e.key === 'Enter' && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+          if (e.type === 'keydown') window.api.sessionInput(session.id, '\x0a')
+          return false
+        }
+        return true
+      })
+    }
     termRef.current = term
     store.registerPane(session.id, term, fit)
 
