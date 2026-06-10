@@ -1,7 +1,7 @@
 {
   "name": "grove",
   "productName": "Grove",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Grove — a desktop control room for running multiple coding-agent sessions per git worktree across projects",
   "main": "out/main/index.js",
   "type": "module",
