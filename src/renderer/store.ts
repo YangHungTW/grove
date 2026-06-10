@@ -5,6 +5,7 @@ import type { SessionSnapshot } from '../main/ipc'
 import type { SessionDescriptor } from '../core/layoutStore'
 import type { ClosedAgent } from '../core/closedAgentsStore'
 import { buildAgentLaunch } from '../core/resume'
+import { wrapIndex } from '../core/cycle'
 import {
   DEFAULT_SETTINGS,
   SHELL_ICON,
@@ -403,6 +404,24 @@ class Store {
     const p = [...this.projects.values()][index]
     if (p) await this.setActiveProject(p.repoRoot)
   }
+  /** Cycle the active worktree within the active project (delta +1 / -1, wraps). */
+  cycleWorktree(delta: number): void {
+    const p = this.activeProject()
+    if (!p) return
+    const wts = [...p.worktrees.values()]
+    if (wts.length < 2) return
+    const i = wts.findIndex((w) => w.id === this.activeWorktreeId)
+    const next = wts[wrapIndex(i, delta, wts.length)]
+    if (next) void this.selectWorktree(p.repoRoot, next.id)
+  }
+  /** Cycle the active project (delta +1 / -1, wraps). */
+  cycleProject(delta: number): void {
+    const ids = [...this.projects.keys()]
+    if (ids.length < 2) return
+    const i = ids.indexOf(this.activeProjectId ?? '')
+    const next = ids[wrapIndex(i, delta, ids.length)]
+    if (next) void this.setActiveProject(next)
+  }
 
   // --- sessions ----------------------------------------------------------
   async addSession(
@@ -573,7 +592,7 @@ class Store {
     const ids = groups[this.focusedGroup(this.activeWorktreeId)]?.ids ?? []
     if (ids.length < 2) return
     const i = ids.indexOf(this.focusedSessionId ?? '')
-    const next = ids[(((i < 0 ? 0 : i) + delta) % ids.length + ids.length) % ids.length]
+    const next = ids[wrapIndex(i, delta, ids.length)]
     if (next) this.focusSession(next)
   }
   /** Focus the active session of a group (0 = left, 1 = right). */

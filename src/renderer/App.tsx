@@ -47,14 +47,30 @@ export function App(): JSX.Element {
         e.preventDefault()
         store.jumpToPending()
       } else if (e.shiftKey && e.code === 'BracketRight') {
-        // ⌘⇧] — next tab. Match on e.code: with Shift the bracket keys report
-        // e.key '}'/'{', and e.code is layout-independent.
+        // ⌘⇧] — next tab. Match on e.code: with modifiers the bracket keys
+        // report e.key '}'/'{' (and option-glyphs on macOS); e.code is stable.
         e.preventDefault()
         store.cycleSession(1)
       } else if (e.shiftKey && e.code === 'BracketLeft') {
         // ⌘⇧[ — previous tab.
         e.preventDefault()
         store.cycleSession(-1)
+      } else if (e.shiftKey && (k === 'arrowdown' || k === 'j')) {
+        // ⌘⇧↓ / ⌘⇧J — next worktree (vim down; worktrees stack vertically).
+        e.preventDefault()
+        store.cycleWorktree(1)
+      } else if (e.shiftKey && (k === 'arrowup' || k === 'k')) {
+        // ⌘⇧↑ / ⌘⇧K — previous worktree (vim up).
+        e.preventDefault()
+        store.cycleWorktree(-1)
+      } else if (e.shiftKey && (k === 'arrowright' || k === 'l')) {
+        // ⌘⇧→ / ⌘⇧L — next project (vim right).
+        e.preventDefault()
+        store.cycleProject(1)
+      } else if (e.shiftKey && (k === 'arrowleft' || k === 'h')) {
+        // ⌘⇧← / ⌘⇧H — previous project (vim left).
+        e.preventDefault()
+        store.cycleProject(-1)
       } else if (k === 'b') {
         e.preventDefault()
         store.toggleSidebar()
