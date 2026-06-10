@@ -43,6 +43,17 @@ export const PlusIcon = ({ size = 16, className }: P): JSX.Element =>
 export const ChevronDownIcon = ({ size = 16, className }: P): JSX.Element =>
   svg(size, className, <path d="M3.5 6 8 10.5 12.5 6l-1-1L8 8.5 4.5 5l-1 1Z" />)
 
+/** Counter-clockwise arrow around a clock — "recently closed / resume". */
+export const HistoryIcon = ({ size = 16, className }: P): JSX.Element =>
+  svg(
+    size,
+    className,
+    <>
+      <path d="M8 2.4a5.6 5.6 0 1 1-5.27 7.5l1.5-.54A4 4 0 1 0 8 4v1.9L5.2 3.7 8 1.5V2.4Z" />
+      <path d="M7.25 5.5h1.3v2.9l2 1.18-.66 1.12-2.64-1.56V5.5Z" />
+    </>
+  )
+
 export const XIcon = ({ size = 16, className }: P): JSX.Element =>
   svg(
     size,

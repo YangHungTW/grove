@@ -507,6 +507,7 @@ button {
 /* Per-group tab strips, aligned to the pane columns (VS Code editor groups). */
 #grouptabs {
   display: grid;
+  position: relative;
   height: 34px;
   background: var(--panel);
   border-bottom: 1px solid #000;
@@ -615,6 +616,123 @@ button {
   color: transparent;
   cursor: pointer;
   padding: 0 1px;
+}
+
+/* Recently-closed agents: trailing button + resume dropdown (top-right of the
+   tab row, absolutely positioned so it never disturbs the group grid columns). */
+.recent-closed {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  padding-right: 6px;
+}
+.recent-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.1s, color 0.1s;
+}
+.recent-btn:hover,
+.recent-btn.open {
+  background: color-mix(in srgb, var(--fg) 13%, transparent);
+  color: var(--fg);
+}
+.recent-count {
+  font-variant-numeric: tabular-nums;
+}
+.recent-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+.recent-menu {
+  position: absolute;
+  top: 30px;
+  right: 6px;
+  z-index: 41;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  min-width: 240px;
+  max-width: 340px;
+  max-height: 60vh;
+  overflow-y: auto;
+  background: var(--panel-2);
+  border: 1px solid #000;
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+.recent-head {
+  padding: 4px 8px 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.recent-item {
+  display: flex;
+  align-items: center;
+}
+.recent-resume {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+  text-align: left;
+}
+.recent-resume:hover {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.recent-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  opacity: 0.95;
+}
+.recent-title {
+  flex: 1 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.recent-time {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.recent-forget {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+}
+.recent-forget:hover {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
 }
 
 #toolbar {

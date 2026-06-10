@@ -2,6 +2,7 @@ import type { SessionKind, SessionState } from '../core/types'
 import type { WorktreeInfo, CreateWorktreeOptions, WorktreeStatus } from '../core/worktree'
 import type { ProjectEntry, ProjectPatch } from '../core/projectStore'
 import type { SessionDescriptor } from '../core/layoutStore'
+import type { ClosedAgent } from '../core/closedAgentsStore'
 import type { AppSettings } from '../core/settingsStore'
 import type { ResolvedAgent } from '../core/settings'
 
@@ -15,6 +16,8 @@ export const Channels = {
   projectUpdate: 'project:update',
   layoutSave: 'layout:save',
   layoutLoad: 'layout:load',
+  closedAgentsLoad: 'closed-agents:load',
+  closedAgentsSave: 'closed-agents:save',
   settingsLoad: 'settings:load',
   settingsSave: 'settings:save',
   agentsAvailable: 'agents:available',
@@ -99,6 +102,9 @@ export interface RendererApi {
   /** Persist the open-session layout for restore on next launch. */
   layoutSave(descriptors: SessionDescriptor[]): void
   layoutLoad(): Promise<SessionDescriptor[]>
+  /** Recently-closed resumable agents, persisted for one-click resume. */
+  closedAgentsLoad(): Promise<ClosedAgent[]>
+  closedAgentsSave(list: ClosedAgent[]): void
   settingsLoad(): Promise<AppSettings>
   settingsSave(patch: Partial<AppSettings>): Promise<AppSettings>
   /** All configured agents tagged with whether their command is installed. */

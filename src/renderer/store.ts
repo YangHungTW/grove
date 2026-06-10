@@ -3,6 +3,8 @@ import type { FitAddon } from '@xterm/addon-fit'
 import type { SessionKind, SessionState } from '../core/types'
 import type { SessionSnapshot } from '../main/ipc'
 import type { SessionDescriptor } from '../core/layoutStore'
+import type { ClosedAgent } from '../core/closedAgentsStore'
+import { buildAgentLaunch } from '../core/resume'
 import {
   DEFAULT_SETTINGS,
   SHELL_ICON,
@@ -80,7 +82,12 @@ class Store {
   settingsOpen = false
   availableAgents: ResolvedAgent[] = []
   dialog: DialogState | null = null
+  /** Recently-closed resumable agents (most-recent-first), persisted to disk. */
+  closedAgents: ClosedAgent[] = []
 
+  // Live agents that own a pinned resume id, keyed by session id. On close the
+  // entry becomes a ClosedAgent so the agent can be resumed later.
+  private resumeMeta = new Map<string, { resumeId: string; baseCommand: string }>()
   private savedLayout: SessionDescriptor[] = []
   private restoredProjects = new Set<string>()
   private restoring = false
@@ -326,6 +333,8 @@ class Store {
     await window.api.projectRemove(repoRoot)
     this.projects.delete(repoRoot)
     this.savedLayout = this.savedLayout.filter((d) => d.repoRoot !== repoRoot)
+    this.closedAgents = this.closedAgents.filter((c) => c.repoRoot !== repoRoot)
+    this.persistClosedAgents()
     this.restoredProjects.add(repoRoot)
     if (this.activeProjectId === repoRoot) {
       this.activeProjectId = this.projects.keys().next().value ?? null
@@ -369,6 +378,8 @@ class Store {
       this.toast(errMsg(err))
     }
     project.worktrees.delete(wtId)
+    this.closedAgents = this.closedAgents.filter((c) => c.worktreePath !== wtId)
+    this.persistClosedAgents()
     if (this.activeWorktreeId === wtId)
       this.activeWorktreeId = project.worktrees.keys().next().value ?? null
     this.persistLayout()
@@ -398,15 +409,23 @@ class Store {
     worktreeId: string,
     kind: SessionKind,
     agentDef?: AgentDef,
-    titleOverride?: string
+    titleOverride?: string,
+    resumeId?: string
   ): Promise<void> {
     const wt = this.activeProject()?.worktrees.get(worktreeId)
     if (!wt) return
     const isAgent = kind === 'agent'
     const icon = isAgent ? (agentDef?.icon ?? '★') : SHELL_ICON
     const baseName = isAgent ? (agentDef?.name?.toLowerCase() ?? 'agent') : 'shell'
-    const command = isAgent ? (agentDef?.command ?? 'claude') : 'shell'
+    const baseCommand = isAgent ? (agentDef?.command ?? 'claude') : 'shell'
     const detect = isAgent ? (agentDef?.id ?? 'claude') : undefined
+    // Pin a resume id for claude-family agents so we can resume them after close.
+    // Grove owns the id (claude doesn't print it): `--session-id` for a fresh
+    // session, `--resume` to reopen the one a closed agent left behind.
+    const launch = isAgent
+      ? buildAgentLaunch(baseCommand, () => crypto.randomUUID(), resumeId)
+      : { command: baseCommand }
+    const command = launch.command
     const n = this.sessionsOf(worktreeId).filter((x) => x.icon === icon).length
     const title = titleOverride ?? (n === 0 ? baseName : `${baseName} ${n + 1}`)
     // Estimate columns so the shell's first prompt renders at ~the right width
@@ -426,6 +445,7 @@ class Store {
         cols
       })
       this.sessions.set(snap.id, snap)
+      if (launch.resumeId) this.resumeMeta.set(snap.id, { resumeId: launch.resumeId, baseCommand })
       this.activeWorktreeId = worktreeId
       // Place the new session in the currently-focused group.
       const groups = this.groupsOf(worktreeId) // reconciles: adds snap.id to group 0
@@ -460,7 +480,13 @@ class Store {
   }
   closeSession(id: string, quiet = false): void {
     window.api.sessionKill(id)
-    const wtId = this.sessions.get(id)?.worktreeId
+    const sess = this.sessions.get(id)
+    const wtId = sess?.worktreeId
+    // A resumable agent closed by the user (not torn down in bulk) goes to the
+    // recently-closed list so it can be relaunched with `claude --resume <id>`.
+    const meta = this.resumeMeta.get(id)
+    if (!quiet && meta && sess) this.recordClosedAgent(sess, meta)
+    this.resumeMeta.delete(id)
     this.sessions.delete(id)
     this.pending.delete(id)
     this.lastLine.delete(id)
@@ -476,6 +502,54 @@ class Store {
       this.persistLayout()
       this.notify()
     }
+  }
+
+  // --- recently-closed agents (resume) -----------------------------------
+  /** repoRoot that owns a worktree id (= path), for keying closed-agent entries. */
+  private repoRootOf(wtId: string): string | undefined {
+    for (const p of this.projects.values()) if (p.worktrees.has(wtId)) return p.repoRoot
+  }
+  private recordClosedAgent(
+    sess: SessionSnapshot,
+    meta: { resumeId: string; baseCommand: string }
+  ): void {
+    const entry: ClosedAgent = {
+      repoRoot: this.repoRootOf(sess.worktreeId) ?? '',
+      worktreePath: sess.worktreeId,
+      resumeId: meta.resumeId,
+      baseCommand: meta.baseCommand,
+      title: sess.title,
+      icon: sess.icon,
+      closedAt: Date.now()
+    }
+    // Dedupe by resume id (resuming then re-closing the same session), newest first.
+    this.closedAgents = [entry, ...this.closedAgents.filter((c) => c.resumeId !== entry.resumeId)]
+    this.persistClosedAgents()
+  }
+  /** Recently-closed resumable agents for a worktree (= path), most-recent-first. */
+  closedAgentsOf(wtId: string): ClosedAgent[] {
+    return this.closedAgents.filter((c) => c.worktreePath === wtId)
+  }
+  /** Relaunch a closed agent with `--resume`, reusing its pinned session id. */
+  resumeClosedAgent(c: ClosedAgent): void {
+    this.closedAgents = this.closedAgents.filter((x) => x.resumeId !== c.resumeId)
+    this.persistClosedAgents()
+    const agentDef: AgentDef = {
+      id: 'claude',
+      name: c.title,
+      command: c.baseCommand,
+      icon: c.icon ?? '★'
+    }
+    void this.addSession(c.worktreePath, 'agent', agentDef, c.title, c.resumeId)
+  }
+  /** Drop a closed agent from the list without resuming it. */
+  forgetClosedAgent(c: ClosedAgent): void {
+    this.closedAgents = this.closedAgents.filter((x) => x.resumeId !== c.resumeId)
+    this.persistClosedAgents()
+    this.notify()
+  }
+  private persistClosedAgents(): void {
+    window.api.closedAgentsSave(this.closedAgents)
   }
   focusSession(id: string): void {
     const s = this.sessions.get(id)
@@ -736,6 +810,7 @@ class Store {
     this.availableAgents = await window.api.agentsAvailable().catch(() => [])
     this.wireEvents()
     this.savedLayout = await window.api.layoutLoad()
+    this.closedAgents = await window.api.closedAgentsLoad().catch(() => [])
     const recent = await window.api.projectListRecent()
     for (const p of recent)
       this.upsertProject(p.repoRoot, p.name, { hookCreate: p.hookCreate, hookRemove: p.hookRemove })

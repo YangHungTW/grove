@@ -1,7 +1,19 @@
 import { useState, type CSSProperties, type DragEvent } from 'react'
 import { useStore } from './useStore'
 import { store } from './store'
-import { AgentTabIcon, XIcon } from './Icons'
+import type { ClosedAgent } from '../core/closedAgentsStore'
+import { AgentTabIcon, XIcon, HistoryIcon } from './Icons'
+
+/** Compact "x ago" label for a closed-agent timestamp. */
+function timeAgo(ms: number): string {
+  const s = Math.max(0, Math.round((Date.now() - ms) / 1000))
+  if (s < 60) return 'just now'
+  const m = Math.round(s / 60)
+  if (m < 60) return `${m}m ago`
+  const h = Math.round(m / 60)
+  if (h < 24) return `${h}h ago`
+  return `${Math.round(h / 24)}d ago`
+}
 
 // The session id currently being dragged (transient; not store state).
 let dragId: string | null = null
@@ -22,6 +34,64 @@ export function GroupTabs(): JSX.Element | null {
       {groups.map((g, gi) => (
         <GroupStrip key={gi} gi={gi} ids={g.ids} active={g.active} focused={gi === focusedG} />
       ))}
+      <RecentlyClosed wt={wt} />
+    </div>
+  )
+}
+
+/** Trailing control: lists this worktree's recently-closed agents; click one to
+ * relaunch it with `claude --resume <id>`. Hidden when there are none. */
+function RecentlyClosed({ wt }: { wt: string }): JSX.Element | null {
+  const s = useStore()
+  const [open, setOpen] = useState(false)
+  const closed = s.closedAgentsOf(wt)
+  if (closed.length === 0) return null
+  return (
+    <div className="recent-closed">
+      <button
+        className={'recent-btn' + (open ? ' open' : '')}
+        title="Recently closed agents — click to resume"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <HistoryIcon size={13} />
+        <span className="recent-count">{closed.length}</span>
+      </button>
+      {open && (
+        <>
+          <div className="recent-backdrop" onClick={() => setOpen(false)} />
+          <ul className="recent-menu">
+            <li className="recent-head">Recently closed — resume</li>
+            {closed.map((c: ClosedAgent) => (
+              <li key={c.resumeId} className="recent-item">
+                <button
+                  className="recent-resume"
+                  title={`Resume ${c.title} (claude --resume ${c.resumeId})`}
+                  onClick={() => {
+                    setOpen(false)
+                    store.resumeClosedAgent(c)
+                  }}
+                >
+                  <span className="recent-icon">
+                    <AgentTabIcon icon={c.icon} />
+                  </span>
+                  <span className="recent-title">{c.title}</span>
+                  <span className="recent-time">{timeAgo(c.closedAt)}</span>
+                </button>
+                <button
+                  className="recent-forget"
+                  title="Remove from list"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    store.forgetClosedAgent(c)
+                  }}
+                >
+                  <XIcon size={11} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
     </div>
   )
 }

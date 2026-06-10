@@ -7,6 +7,7 @@ import { PtySession } from '../core/session'
 import { createWorktree, listWorktrees, removeWorktree, isGitRepo, worktreeStatus } from '../core/worktree'
 import { ProjectStore, type ProjectEntry, type ProjectPatch } from '../core/projectStore'
 import { LayoutStore, type SessionDescriptor } from '../core/layoutStore'
+import { ClosedAgentsStore, type ClosedAgent } from '../core/closedAgentsStore'
 import { SettingsStore, type AppSettings } from '../core/settingsStore'
 import type { ResolvedAgent } from '../core/settings'
 import { execFileSync } from 'node:child_process'
@@ -44,6 +45,17 @@ function layout(): LayoutStore {
     layoutStore = new LayoutStore(file)
   }
   return layoutStore
+}
+
+let closedAgentsStore: ClosedAgentsStore | null = null
+/** Recently-closed agents store path: CCM_CLOSED_AGENTS override or userData. */
+function closedAgents(): ClosedAgentsStore {
+  if (!closedAgentsStore) {
+    const file =
+      process.env.CCM_CLOSED_AGENTS ?? join(app.getPath('userData'), 'closed-agents.json')
+    closedAgentsStore = new ClosedAgentsStore(file)
+  }
+  return closedAgentsStore
 }
 
 let settingsStore: SettingsStore | null = null
@@ -253,6 +265,8 @@ function registerIpc(): void {
   ipcMain.on(Channels.layoutSave, (_e, descriptors: SessionDescriptor[]) =>
     layout().save(descriptors)
   )
+  ipcMain.handle(Channels.closedAgentsLoad, () => closedAgents().load())
+  ipcMain.on(Channels.closedAgentsSave, (_e, list: ClosedAgent[]) => closedAgents().save(list))
   ipcMain.handle(Channels.agentsAvailable, () => resolveAgents())
   ipcMain.handle(Channels.settingsLoad, () => settings().load())
   ipcMain.handle(Channels.settingsSave, (_e: IpcMainInvokeEvent, patch: Partial<AppSettings>) => {
