@@ -46,6 +46,15 @@ export function App(): JSX.Element {
       if (e.shiftKey && k === 'u') {
         e.preventDefault()
         store.jumpToPending()
+      } else if (e.shiftKey && e.code === 'BracketRight') {
+        // ⌘⇧] — next tab. Match on e.code: with Shift the bracket keys report
+        // e.key '}'/'{', and e.code is layout-independent.
+        e.preventDefault()
+        store.cycleSession(1)
+      } else if (e.shiftKey && e.code === 'BracketLeft') {
+        // ⌘⇧[ — previous tab.
+        e.preventDefault()
+        store.cycleSession(-1)
       } else if (k === 'b') {
         e.preventDefault()
         store.toggleSidebar()
