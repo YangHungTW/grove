@@ -415,3 +415,6 @@
 {"ts":"2026-06-10T08:40:49Z","tool":"Bash","params":{"command":"cd /Users/yanghungtw/Tools/grove; npm run typecheck 2>&1 | tail -5 && npm run build 2>&1 | tail -2","description":"Typecheck and build"}}
 {"ts":"2026-06-10T08:40:59Z","tool":"Bash","params":{"command":"cd /Users/yanghungtw/Tools/grove; npx vitest run 2>&1 | tail -3 && npm run e2e 2>&1 | tail -2","description":"Run tests and e2e"}}
 {"ts":"2026-06-10T08:41:24Z","tool":"Bash","params":{"command":"cd /Users/yanghungtw/Tools/grove; git add src/main/index.ts src/renderer/store.ts src/core/settings.ts src/renderer/Sett","description":"Commit font redesign, bump to 0.2.3, tag, push"}}
+{"ts":"2026-06-10T08:41:43Z","tool":"Bash","params":{"command":"cd /Users/yanghungtw/Tools/grove; npm run dist 2>&1 | grep -iE \"ad-hoc deep-signed|building.*DMG\" | tail -2; codesign --","timeout":300000,"description":"Build 0.2.3, verify, release"}}
+{"ts":"2026-06-10T09:20:28Z","tool":"Bash","params":{"command":"cd /Users/yanghungtw/Tools/grove; echo \"=== unpushed commits? ===\"; git log origin/main..HEAD --oneline; echo \"(empty = ","description":"Verify everything is pushed"}}
+{"ts":"2026-06-10T09:20:43Z","tool":"Bash","params":{"command":"cd /Users/yanghungtw/Tools/grove; git add -A && git commit -q -m \"Update session log\" && git push 2>&1 | tail -1; echo \"","description":"Commit and push session log"}}
