@@ -9,6 +9,7 @@ import { wrapIndex } from '../core/cycle'
 import {
   DEFAULT_SETTINGS,
   SHELL_ICON,
+  FONT_FALLBACK,
   type AppSettings,
   type AgentDef,
   type ResolvedAgent
@@ -748,6 +749,8 @@ class Store {
   async updateSettings(patch: Partial<AppSettings>): Promise<void> {
     this.settings = await window.api.settingsSave(patch)
     this.applyAppearance()
+    // Font changes alter the cell size → re-fit visible panes (rows/cols change).
+    if ('fontFamily' in patch || 'fontSize' in patch) this.fitVisible()
     this.notify()
   }
   /**
@@ -780,11 +783,15 @@ class Store {
       root.style.setProperty('--panel', mix(s.background, '#ffffff', 0.06))
       root.style.setProperty('--panel-2', mix(s.background, '#ffffff', 0.11))
     }
-    // Apply the theme to live terminals too (background + foreground).
+    // Apply theme + font to live terminals too. (Font changes also need a refit
+    // since the cell size changes — updateSettings triggers fitVisible for that.)
+    const font = this.terminalFont()
     for (const { term } of this.panes.values()) {
       try {
         term.options.allowTransparency = s.transparent
         term.options.theme = { background: termBg, foreground: s.foreground }
+        term.options.fontFamily = font.fontFamily
+        term.options.fontSize = font.fontSize
       } catch {
         /* ignore */
       }
@@ -796,6 +803,15 @@ class Store {
     return {
       background: s.transparent ? hexToRgba(s.background, s.opacity) : s.background,
       foreground: s.foreground
+    }
+  }
+  /** Terminal font: the user's family first, then the bundled Nerd Font fallback
+   * so box-drawing/agent glyphs always render. */
+  terminalFont(): { fontFamily: string; fontSize: number } {
+    const fam = this.settings.fontFamily?.trim()
+    return {
+      fontFamily: fam ? `"${fam}", ${FONT_FALLBACK}` : FONT_FALLBACK,
+      fontSize: this.settings.fontSize || 13
     }
   }
 

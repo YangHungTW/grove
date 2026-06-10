@@ -110,10 +110,11 @@ function Pane({
   useEffect(() => {
     const el = ref.current
     if (!el) return
+    const font = store.terminalFont()
     const term = new Terminal({
       convertEol: true,
-      fontSize: 13,
-      fontFamily: '"MesloLGS NF", "MesloLGS Nerd Font", Menlo, Monaco, "Courier New", monospace',
+      fontSize: font.fontSize,
+      fontFamily: font.fontFamily,
       cursorBlink: true,
       // Solid theme background + foreground so agents that don't paint a full
       // background (e.g. agy/antigravity) show the theme colour, not a flat fill.

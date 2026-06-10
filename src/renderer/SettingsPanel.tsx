@@ -68,6 +68,31 @@ export function SettingsPanel(): JSX.Element | null {
         </div>
 
         <label className="settings-row">
+          <span>Font</span>
+          <input
+            type="text"
+            className="key-input"
+            style={{ width: 170 }}
+            value={cfg.fontFamily}
+            spellCheck={false}
+            placeholder="MesloLGS NF"
+            onChange={(e) => void store.updateSettings({ fontFamily: e.target.value })}
+          />
+        </label>
+
+        <label className="settings-row">
+          <span>Font size {cfg.fontSize}px</span>
+          <input
+            type="range"
+            min={9}
+            max={24}
+            step={1}
+            value={cfg.fontSize}
+            onChange={(e) => void store.updateSettings({ fontSize: Number(e.target.value) })}
+          />
+        </label>
+
+        <label className="settings-row">
           <span>Transparent window</span>
           <input
             type="checkbox"

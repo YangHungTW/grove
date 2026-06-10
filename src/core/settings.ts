@@ -100,6 +100,11 @@ export interface AppSettings {
   foreground: string
   /** Background opacity 0..1 (used when transparent is on). */
   opacity: number
+  /** Terminal font family (a single family name; the bundled Nerd Font is kept
+   * as a fallback so box-drawing/agent glyphs always render). */
+  fontFamily: string
+  /** Terminal font size in px. */
+  fontSize: number
   /** Enable window vibrancy / transparent background. */
   transparent: boolean
   /** Whether the sidebar is collapsed. */
@@ -124,10 +129,16 @@ export const AGENT_PRESETS: AgentDef[] = [
 /** Icon for plain shell sessions. */
 export const SHELL_ICON = '❯'
 
+/** Bundled Nerd Font kept as a fallback after the user's chosen family, so
+ * box-drawing lines and agent UI glyphs always render even with a plain font. */
+export const FONT_FALLBACK = '"MesloLGS NF", "MesloLGS Nerd Font", Menlo, Monaco, "Courier New", monospace'
+
 export const DEFAULT_SETTINGS: AppSettings = {
   background: '#1b1b1f',
   foreground: '#dcdce4',
   opacity: 1,
+  fontFamily: 'MesloLGS NF',
+  fontSize: 13,
   transparent: false,
   sidebarCollapsed: false,
   agents: AGENT_PRESETS,
