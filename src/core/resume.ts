@@ -26,7 +26,16 @@ export function buildAgentLaunch(
   resumeId?: string
 ): { command: string; resumeId?: string } {
   if (!supportsResume(baseCommand)) return { command: baseCommand }
-  if (resumeId) return { command: `${baseCommand} --resume ${resumeId}`, resumeId }
+  if (resumeId) {
+    // Resume the pinned session, but degrade gracefully so the tab never just
+    // vanishes: if the session can't be resumed (it was never saved — an agent
+    // opened but never used, a wiped/expired transcript), fall back to a fresh
+    // session reusing the same id (resumable next time), then to a plain session.
+    return {
+      command: `${baseCommand} --resume ${resumeId} || ${baseCommand} --session-id ${resumeId} || ${baseCommand}`,
+      resumeId
+    }
+  }
   const id = newId()
   return { command: `${baseCommand} --session-id ${id}`, resumeId: id }
 }

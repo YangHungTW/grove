@@ -33,12 +33,13 @@ describe('buildAgentLaunch', () => {
     })
   })
 
-  it('resumes an existing session id without minting a new one', () => {
+  it('resumes an existing session id without minting a new one (with graceful fallback)', () => {
     const newId = (): string => {
       throw new Error('newId must not be called on resume')
     }
     expect(buildAgentLaunch('claude', newId, 'abc-123')).toEqual({
-      command: 'claude --resume abc-123',
+      // resume → else fresh-with-same-id → else plain, so the tab never vanishes
+      command: 'claude --resume abc-123 || claude --session-id abc-123 || claude',
       resumeId: 'abc-123'
     })
   })
