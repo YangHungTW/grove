@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type MouseEvent } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { WebglAddon } from '@xterm/addon-webgl'
 import { CanvasAddon } from '@xterm/addon-canvas'
 import { useStore } from './useStore'
 import { store } from './store'
@@ -119,13 +120,31 @@ function Pane({
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(el)
-    // Canvas renderer: the DOM renderer mis-draws box-drawing glyphs (claude's
-    // ─/│ frame lines showed as garbage). The canvas addon draws them correctly
-    // (customGlyphs) and — unlike WebGL — repaints reliably on a fresh pane.
+    // WebGL renderer: lowest input latency (canvas 2D repaints per keystroke and
+    // feels laggy on Retina). Two known WebGL caveats are handled here:
+    //  - it can leave a freshly-opened pane unpainted → force a full refresh once
+    //    the addon is attached (refit() refreshes again after fit/font-load);
+    //  - on GPU context loss the canvas goes blank → dispose and fall back to the
+    //    canvas addon, which also draws box-drawing glyphs (─/│) correctly.
+    const useCanvas = (): void => {
+      try {
+        term.loadAddon(new CanvasAddon())
+        term.refresh(0, term.rows - 1)
+      } catch {
+        /* keep DOM renderer */
+      }
+    }
     try {
-      term.loadAddon(new CanvasAddon())
+      const webgl = new WebglAddon()
+      webgl.onContextLoss(() => {
+        webgl.dispose()
+        useCanvas()
+      })
+      term.loadAddon(webgl)
+      term.refresh(0, term.rows - 1)
     } catch {
-      /* keep DOM renderer */
+      // WebGL unavailable (software rendering / blocklisted GPU) — use canvas.
+      useCanvas()
     }
     term.onData((d) => window.api.sessionInput(session.id, d))
     termRef.current = term
