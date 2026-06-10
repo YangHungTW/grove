@@ -6,3 +6,5 @@ src/renderer/store.ts
 src/core/resume.ts
 src/renderer/Icons.tsx
 src/renderer/GroupTabs.tsx
+src/renderer/App.tsx
+src/core/cycle.ts
