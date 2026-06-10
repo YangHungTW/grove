@@ -1,7 +1,7 @@
 import type { AgentDef } from '../core/settings'
 import { useStore } from './useStore'
 import { store } from './store'
-import { KEYBIND_LABELS, AGENT_PRESETS, THEMES } from '../core/settings'
+import { KEYBIND_LABELS, FIXED_SHORTCUTS, AGENT_PRESETS, THEMES } from '../core/settings'
 
 export function SettingsPanel(): JSX.Element | null {
   const s = useStore()
@@ -181,6 +181,17 @@ export function SettingsPanel(): JSX.Element | null {
         ))}
         <small className="settings-note">
           Format: modifiers + key, e.g. Ctrl+Shift+B or Cmd+T. Defaults match kitty (⌃⇧).
+        </small>
+
+        <div className="settings-section">Navigation (fixed)</div>
+        {FIXED_SHORTCUTS.map(({ label, keys }) => (
+          <div className="settings-row" key={label}>
+            <span>{label}</span>
+            <kbd className="key-fixed">{keys}</kbd>
+          </div>
+        ))}
+        <small className="settings-note">
+          These ⌘ shortcuts are built in and can&apos;t be rebound.
         </small>
       </div>
     </div>

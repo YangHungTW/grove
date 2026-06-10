@@ -57,6 +57,23 @@ export const KEYBIND_LABELS: { action: KeybindAction; label: string }[] = [
   { action: 'toggleSidebar', label: 'Toggle sidebar' }
 ]
 
+/** Fixed (non-rebindable) shortcuts, shown read-only in settings for discovery.
+ * These are wired in App.tsx and match on physical keys (e.code), so they can't
+ * be expressed by the editable accelerator list above. */
+export const FIXED_SHORTCUTS: { label: string; keys: string }[] = [
+  { label: 'Previous / next tab', keys: '⌘⇧[  /  ⌘⇧]' },
+  { label: 'Previous / next worktree', keys: '⌘⇧↑ / ⌘⇧↓  (⌘⇧K / ⌘⇧J)' },
+  { label: 'Previous / next project', keys: '⌘⇧← / ⌘⇧→  (⌘⇧H / ⌘⇧L)' },
+  { label: 'Jump to worktree 1–9', keys: '⌘1 … ⌘9' },
+  { label: 'Jump to project 1–9', keys: '⌘⌥1 … ⌘⌥9' },
+  { label: 'New shell', keys: '⌘T' },
+  { label: 'Close tab', keys: '⌘W' },
+  { label: 'Split / merge', keys: '⌘D' },
+  { label: 'Toggle sidebar', keys: '⌘B' },
+  { label: 'Jump to agent needing input', keys: '⌘⇧U' },
+  { label: 'Open settings', keys: '⌘,' }
+]
+
 /** A coordinated colour theme (terminal + chrome). */
 export interface Theme {
   id: string
