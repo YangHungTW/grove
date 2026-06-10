@@ -37,13 +37,15 @@
       "**/node_modules/node-pty/**"
     ],
     "npmRebuild": false,
+    "afterSign": "build/adhoc-sign.cjs",
     "mac": {
       "target": [
         "dmg",
         "zip"
       ],
       "category": "public.app-category.developer-tools",
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "identity": null
     }
   },
   "keywords": [
