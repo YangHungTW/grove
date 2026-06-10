@@ -83,6 +83,14 @@ export function TabBar(): JSX.Element {
         >
           <PlusIcon size={12} /> shell
         </button>
+        <button
+          className="add-session"
+          aria-label="Open file"
+          disabled={!wt}
+          onClick={() => wt && store.promptOpenFile(wt)}
+        >
+          <PlusIcon size={12} /> file
+        </button>
         <span className="toolbar-sep" />
         <button
           id="split-toggle"

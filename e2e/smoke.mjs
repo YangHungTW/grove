@@ -210,6 +210,74 @@ try {
   const agentAfterSwitch = await win.locator('.tab[data-kind="agent"]').count()
   assert.equal(agentAfterSwitch, 2, `worktree switch lost agents (count=${agentAfterSwitch})`)
 
+  // 7c) FILE VIEWER — open a Markdown and an HTML file in read-only viewer panes
+  //     (driven through the in-app dialog so no native OS picker is needed).
+  const mdFile = join(repoA, 'VIEWME.md')
+  const htmlFile = join(repoA, 'VIEWME.html')
+  writeFileSync(mdFile, '# HelloViewer\n\nsome **markdown** body\n')
+  writeFileSync(htmlFile, '<!doctype html><html><body><p>HTMLVIEW</p></body></html>')
+
+  const openFileViaDialog = async (path) => {
+    await win.getByRole('button', { name: 'Open file' }).click()
+    await win.waitForSelector('.dialog-field input', { timeout: 5000 })
+    await win.locator('.dialog-field input').fill(path)
+    await win.getByRole('button', { name: 'Open', exact: true }).click()
+  }
+
+  await openFileViaDialog(mdFile)
+  // Markdown is rendered to an <h1> carrying the heading text.
+  await win.waitForFunction(
+    () => {
+      const h = document.querySelector('.pane[data-kind="viewer"] .viewer-markdown h1')
+      return !!h && (h.textContent || '').includes('HelloViewer')
+    },
+    { timeout: 10000 }
+  )
+
+  await openFileViaDialog(htmlFile)
+  // The HTML viewer renders inside a sandboxed <iframe>.
+  await win.waitForFunction(
+    () =>
+      [...document.querySelectorAll('.pane[data-kind="viewer"]')].some((p) =>
+        p.querySelector('iframe.viewer-frame')
+      ),
+    { timeout: 10000 }
+  )
+  const viewerPanes = await win.locator('.pane[data-kind="viewer"]').count()
+  const htmlIframe = await win.locator('.pane[data-kind="viewer"] iframe').count()
+  assert.ok(viewerPanes >= 2, `viewer: expected >= 2 viewer panes, got ${viewerPanes}`)
+  assert.ok(htmlIframe >= 1, `viewer: expected an <iframe> in the html pane, got ${htmlIframe}`)
+  const fileViewer = true
+
+  // 7d) WORKTREE DIFF / REVIEW — make a committed + uncommitted change in the
+  //     feat worktree, open its review pane from the sidebar card, and assert
+  //     added AND removed lines render.
+  execFileSync('git', ['-C', wtPath, 'config', 'user.email', 't@e.com'])
+  execFileSync('git', ['-C', wtPath, 'config', 'user.name', 'T'])
+  writeFileSync(join(wtPath, 'diffme.txt'), 'alpha\n')
+  execFileSync('git', ['-C', wtPath, 'add', 'diffme.txt'])
+  execFileSync('git', ['-C', wtPath, 'commit', '-q', '-m', 'add diffme'])
+  writeFileSync(join(wtPath, 'diffme.txt'), 'beta\n') // uncommitted modification → +/−
+
+  await groupA
+    .locator('.card', { hasText: 'feat' })
+    .getByRole('button', { name: 'Review changes' })
+    .click()
+  await win.waitForFunction(
+    () => {
+      const p = document.querySelector('.pane[data-kind="diff"]')
+      return !!p && !!p.querySelector('.diff-line-add') && !!p.querySelector('.diff-line-del')
+    },
+    { timeout: 10000 }
+  )
+  const diffPanes = await win.locator('.pane[data-kind="diff"]').count()
+  const addLines = await win.locator('.pane[data-kind="diff"] .diff-line-add').count()
+  const delLines = await win.locator('.pane[data-kind="diff"] .diff-line-del').count()
+  assert.ok(diffPanes >= 1, `diff: expected a diff pane, got ${diffPanes}`)
+  assert.ok(addLines >= 1, `diff: expected added lines, got ${addLines}`)
+  assert.ok(delLines >= 1, `diff: expected removed lines, got ${delLines}`)
+  const diffReview = true
+
   await win.screenshot({ path: join(process.cwd(), 'e2e', 'smoke.png') })
 
   // 8) PERSISTENCE — close, relaunch with the same stores; sessions are restored.
@@ -226,7 +294,9 @@ try {
   console.log(
     `SMOKE_OK fontLoaded=${fontLoaded} noClip=${noClip} projects=${projectCount} split=${visible} dragResize=${dragResize} roundTrip=true ` +
       `worktreeCreated=true agentLaunched=true multiAgent=${agentRows === 2} ` +
-      `agentAfterSwitch=${agentAfterSwitch} kbdNav=${kbdNav} restored=${restored}`
+      `agentAfterSwitch=${agentAfterSwitch} kbdNav=${kbdNav} fileViewer=${fileViewer} ` +
+      `viewerPanes=${viewerPanes} htmlIframe=${htmlIframe} diffReview=${diffReview} ` +
+      `diffAdd=${addLines} diffDel=${delLines} restored=${restored}`
   )
 } catch (err) {
   failed = true

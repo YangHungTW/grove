@@ -23,6 +23,35 @@ function git(repoRoot: string, args: string[]): string {
   return execFileSync('git', args, { cwd: repoRoot, encoding: 'utf8' })
 }
 
+function pad2(n: number): string {
+  return String(n).padStart(2, '0')
+}
+
+/** Filesystem-safe local datetime: `YYYYMMDD-HHMMSS` (no `/`, `:`, or spaces). */
+function formatTimestamp(d: Date): string {
+  return (
+    `${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}` +
+    `-${pad2(d.getHours())}${pad2(d.getMinutes())}${pad2(d.getSeconds())}`
+  )
+}
+
+/**
+ * Expand a worktree folder template. Supported placeholders:
+ * `{repo}`, `{branch}` (sanitized to `[\w.-]`), and `{timestamp}`
+ * (the `now` Date formatted as `YYYYMMDD-HHMMSS`). Pure — the caller
+ * supplies `now` so resolution is deterministic and testable.
+ */
+export function expandWorktreeTemplate(
+  tmpl: string,
+  vars: { repo: string; branch: string; now: Date }
+): string {
+  const safeBranch = vars.branch.replace(/[^\w.-]/g, '_')
+  return tmpl
+    .replace(/\{repo\}/g, vars.repo)
+    .replace(/\{branch\}/g, safeBranch)
+    .replace(/\{timestamp\}/g, formatTimestamp(vars.now))
+}
+
 export interface WorktreeStatus {
   /** Number of changed (porcelain) entries. */
   dirty: number
@@ -119,6 +148,50 @@ export function listWorktrees(repoRoot: string): WorktreeInfo[] {
   }
   flush()
   return records
+}
+
+/**
+ * The set of changes a worktree introduced, as a unified diff. Combines:
+ *  - committed work: `git diff <base>..HEAD`, where `base` is the merge-base
+ *    with the repo's default branch (origin/HEAD, else `main`/`master`);
+ *  - uncommitted work: `git diff HEAD` (staged + unstaged vs HEAD).
+ * An explicit `baseRef` overrides the computed base. Untracked files are not
+ * included (they have no diff against the index).
+ */
+export function worktreeDiff(path: string, baseRef?: string): string {
+  let base = baseRef
+  if (!base) {
+    for (const ref of ['origin/HEAD', 'main', 'master']) {
+      try {
+        base = git(path, ['merge-base', 'HEAD', ref]).trim()
+        if (base) break
+      } catch {
+        /* try the next candidate */
+      }
+    }
+  }
+  const head = (() => {
+    try {
+      return git(path, ['rev-parse', 'HEAD']).trim()
+    } catch {
+      return ''
+    }
+  })()
+  let committed = ''
+  if (base && base !== head) {
+    try {
+      committed = git(path, ['diff', `${base}..HEAD`])
+    } catch {
+      /* base unreachable */
+    }
+  }
+  let uncommitted = ''
+  try {
+    uncommitted = git(path, ['diff', 'HEAD'])
+  } catch {
+    /* not a repo */
+  }
+  return [committed, uncommitted].filter((s) => s.trim().length > 0).join('\n')
 }
 
 /** `git worktree remove` (with `--force` when requested). */

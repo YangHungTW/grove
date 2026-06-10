@@ -5,6 +5,8 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import { CanvasAddon } from '@xterm/addon-canvas'
 import { useStore } from './useStore'
 import { store } from './store'
+import { ViewerPane } from './ViewerPane'
+import { DiffPane } from './DiffPane'
 import type { SessionSnapshot } from '../main/ipc'
 
 export function PaneGrid(): JSX.Element {
@@ -70,16 +72,34 @@ export function PaneGrid(): JSX.Element {
 
   return (
     <div id="panes" ref={ref} style={style} className={cols <= 1 ? 'single' : ''}>
-      {[...s.sessions.values()].map((sess) => (
-        <Pane
-          key={sess.id}
-          session={sess}
-          visible={colOf.has(sess.id)}
-          column={colOf.get(sess.id) ?? 1}
-          focused={sess.id === s.focusedSessionId}
-          transparent={s.settings.transparent}
-        />
-      ))}
+      {[...s.sessions.values()].map((sess) =>
+        sess.kind === 'viewer' ? (
+          <ViewerPane
+            key={sess.id}
+            session={sess}
+            visible={colOf.has(sess.id)}
+            column={colOf.get(sess.id) ?? 1}
+            focused={sess.id === s.focusedSessionId}
+          />
+        ) : sess.kind === 'diff' ? (
+          <DiffPane
+            key={sess.id}
+            session={sess}
+            visible={colOf.has(sess.id)}
+            column={colOf.get(sess.id) ?? 1}
+            focused={sess.id === s.focusedSessionId}
+          />
+        ) : (
+          <Pane
+            key={sess.id}
+            session={sess}
+            visible={colOf.has(sess.id)}
+            column={colOf.get(sess.id) ?? 1}
+            focused={sess.id === s.focusedSessionId}
+            transparent={s.settings.transparent}
+          />
+        )
+      )}
       {gutters}
     </div>
   )

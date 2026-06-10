@@ -1,6 +1,6 @@
 import { useStore } from './useStore'
 import { store, type ProjectView, type WorktreeView } from './store'
-import { RepoIcon, PlusIcon, GearIcon, XIcon } from './Icons'
+import { RepoIcon, PlusIcon, GearIcon, XIcon, DiffIcon } from './Icons'
 import groveLogo from './assets/grove-logo.svg'
 
 export function Sidebar(): JSX.Element {
@@ -135,6 +135,17 @@ function WorktreeCard({
             {statusParts.join(' ')}
           </span>
         )}
+        <button
+          className="row-review"
+          aria-label="Review changes"
+          title="Review changes (git diff)"
+          onClick={(e) => {
+            e.stopPropagation()
+            void store.reviewWorktreeChanges(project.repoRoot, wt.id)
+          }}
+        >
+          <DiffIcon size={12} />
+        </button>
         {!wt.primary && (
           <button
             className="row-x"

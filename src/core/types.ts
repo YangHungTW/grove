@@ -17,10 +17,15 @@ export interface Worktree {
 
 /**
  * What a session is running.
- * - `agent` : a coding agent (Claude Code, etc.). Multiple allowed per worktree.
- * - `shell` : an interactive login shell ($SHELL).
+ * - `agent`  : a coding agent (Claude Code, etc.). Multiple allowed per worktree.
+ * - `shell`  : an interactive login shell ($SHELL).
+ * - `viewer` : a non-terminal file viewer (Markdown/HTML). Has no pty.
+ * - `diff`   : a non-terminal git-diff / code-review pane. Has no pty.
  */
-export type SessionKind = 'agent' | 'shell'
+export type SessionKind = 'agent' | 'shell' | 'viewer' | 'diff'
+
+/** What a viewer session is rendering. */
+export type ViewerKind = 'markdown' | 'html'
 
 /** Lifecycle / attention state of a session. */
 export type SessionState = 'starting' | 'idle' | 'busy' | 'waiting' | 'exited'
@@ -40,6 +45,10 @@ export interface Session {
   state: SessionState
   /** OS pid once spawned; undefined for registry-only records. */
   pid?: number
+  /** Viewer sessions: absolute path of the opened file. */
+  filePath?: string
+  /** Viewer sessions: how to render `filePath`. */
+  viewerKind?: ViewerKind
 }
 
 /** Fields a caller supplies when registering a session. */
@@ -54,4 +63,6 @@ export interface NewSession {
   id?: string
   state?: SessionState
   pid?: number
+  filePath?: string
+  viewerKind?: ViewerKind
 }

@@ -1,10 +1,18 @@
 import { app, BrowserWindow, Notification, dialog, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { join, resolve, basename, dirname } from 'node:path'
 import { execFile } from 'node:child_process'
-import { existsSync, copyFileSync } from 'node:fs'
+import { existsSync, copyFileSync, readFileSync } from 'node:fs'
 import { SessionRegistry } from '../core/sessionRegistry'
 import { PtySession } from '../core/session'
-import { createWorktree, listWorktrees, removeWorktree, isGitRepo, worktreeStatus } from '../core/worktree'
+import {
+  createWorktree,
+  listWorktrees,
+  removeWorktree,
+  isGitRepo,
+  worktreeStatus,
+  worktreeDiff,
+  expandWorktreeTemplate
+} from '../core/worktree'
 import { ProjectStore, type ProjectEntry, type ProjectPatch } from '../core/projectStore'
 import { LayoutStore, type SessionDescriptor } from '../core/layoutStore'
 import { ClosedAgentsStore, type ClosedAgent } from '../core/closedAgentsStore'
@@ -94,8 +102,7 @@ function resolveAgents(): ResolvedAgent[] {
 /** Resolve a new worktree path from the settings template (relative to repo). */
 function resolveWorktreePath(repoRoot: string, branch: string): string {
   const tmpl = settings().load().worktreeFolder || '../{repo}-wt-{branch}'
-  const safeBranch = branch.replace(/[^\w.-]/g, '_')
-  const sub = tmpl.replace(/\{repo\}/g, basename(repoRoot)).replace(/\{branch\}/g, safeBranch)
+  const sub = expandWorktreeTemplate(tmpl, { repo: basename(repoRoot), branch, now: new Date() })
   return resolve(repoRoot, sub)
 }
 
@@ -152,7 +159,9 @@ function snapshot(s: Session): SessionSnapshot {
     icon: s.icon,
     cwd: s.cwd,
     state: s.state,
-    pid: s.pid
+    pid: s.pid,
+    filePath: s.filePath,
+    viewerKind: s.viewerKind
   }
 }
 
@@ -189,8 +198,16 @@ function createSession(req: CreateSessionRequest): SessionSnapshot {
     kind: req.kind,
     title: req.title,
     icon: req.icon,
-    cwd: req.cwd
+    cwd: req.cwd,
+    filePath: req.filePath,
+    viewerKind: req.viewerKind,
+    // Non-pty panes (viewer/diff) are inert from the start — no 'starting' state.
+    state: req.kind === 'viewer' || req.kind === 'diff' ? 'idle' : undefined
   })
+
+  // Viewer/diff panes render content, not a pty — skip the whole spawn path.
+  // sessionInput/resize/kill all key off the `ptys` map, so they no-op safely.
+  if (req.kind === 'viewer' || req.kind === 'diff') return snapshot(record)
 
   const agent = req.agent ?? (req.kind === 'agent' ? 'claude' : '')
   const spec = launchSpecFor(req)
@@ -294,6 +311,11 @@ function registerIpc(): void {
   ipcMain.handle(Channels.worktreeStatus, (_e: IpcMainInvokeEvent, worktreePath: string) =>
     worktreeStatus(worktreePath)
   )
+  ipcMain.handle(
+    Channels.worktreeDiff,
+    (_e: IpcMainInvokeEvent, worktreePath: string, baseRef?: string) =>
+      worktreeDiff(worktreePath, baseRef)
+  )
   ipcMain.handle(Channels.worktreeRemove, (_e: IpcMainInvokeEvent, req: WorktreeRemoveRequest) => {
     runHook(store().get(req.repoRoot)?.hookRemove ?? '', req.path, {
       CCM_WORKTREE_PATH: req.path,
@@ -307,6 +329,27 @@ function registerIpc(): void {
   )
   ipcMain.handle(Channels.sessionList, (_e: IpcMainInvokeEvent, worktreeId?: string) =>
     (worktreeId ? registry.getSessions(worktreeId) : registry.all()).map(snapshot)
+  )
+
+  ipcMain.handle(
+    Channels.fileOpenDialog,
+    async (_e: IpcMainInvokeEvent, defaultPath?: string): Promise<string | null> => {
+      const res = await dialog.showOpenDialog(mainWindow ?? undefined!, {
+        title: 'Open file',
+        // Start the picker in the worktree folder.
+        defaultPath: defaultPath || undefined,
+        properties: ['openFile'],
+        filters: [
+          { name: 'Viewable', extensions: ['md', 'markdown', 'html', 'htm'] },
+          { name: 'All files', extensions: ['*'] }
+        ]
+      })
+      if (res.canceled || res.filePaths.length === 0) return null
+      return res.filePaths[0]
+    }
+  )
+  ipcMain.handle(Channels.fileRead, (_e: IpcMainInvokeEvent, filePath: string) =>
+    readFileSync(filePath, 'utf8')
   )
 
   ipcMain.on(Channels.sessionInput, (_e, id: string, data: string) => ptys.get(id)?.write(data))

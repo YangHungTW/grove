@@ -218,7 +218,7 @@ export function SettingsPanel(): JSX.Element | null {
             placeholder="../{repo}-wt-{branch}"
             onChange={(e) => void store.updateSettings({ worktreeFolder: e.target.value })}
           />
-          <small>Placeholders: {'{repo}'}, {'{branch}'}</small>
+          <small>Placeholders: {'{repo}'}, {'{branch}'}, {'{timestamp}'}</small>
         </label>
         <small className="settings-note">
           Create/remove <b>hooks are per-project</b> — set them from the ⚙ on each project in the

@@ -1,4 +1,4 @@
-import type { SessionKind, SessionState } from '../core/types'
+import type { SessionKind, SessionState, ViewerKind } from '../core/types'
 import type { WorktreeInfo, CreateWorktreeOptions, WorktreeStatus } from '../core/worktree'
 import type { ProjectEntry, ProjectPatch } from '../core/projectStore'
 import type { SessionDescriptor } from '../core/layoutStore'
@@ -25,11 +25,14 @@ export const Channels = {
   worktreeList: 'worktree:list',
   worktreeRemove: 'worktree:remove',
   worktreeStatus: 'worktree:status',
+  worktreeDiff: 'worktree:diff',
   sessionCreate: 'session:create',
   sessionInput: 'session:input',
   sessionResize: 'session:resize',
   sessionKill: 'session:kill',
   sessionList: 'session:list',
+  fileOpenDialog: 'file:open-dialog',
+  fileRead: 'file:read',
   notifyAttention: 'notify:attention',
   notifyBadge: 'notify:badge',
   // events (main -> renderer)
@@ -49,6 +52,10 @@ export interface SessionSnapshot {
   cwd?: string
   state: SessionState
   pid?: number
+  /** Viewer sessions: absolute path of the opened file. */
+  filePath?: string
+  /** Viewer sessions: how to render `filePath`. */
+  viewerKind?: ViewerKind
 }
 
 export interface CreateSessionRequest {
@@ -63,6 +70,9 @@ export interface CreateSessionRequest {
   rows?: number
   /** Agent id used for state detection (e.g. 'claude'); defaults from kind. */
   agent?: string
+  /** Viewer sessions: file to open + how to render it (no pty is spawned). */
+  filePath?: string
+  viewerKind?: ViewerKind
 }
 
 export interface SessionDataEvent {
@@ -115,12 +125,19 @@ export interface RendererApi {
   worktreeCreate(repoRoot: string, opts: CreateWorktreeOptions): Promise<WorktreeInfo>
   worktreeList(repoRoot: string): Promise<WorktreeInfo[]>
   worktreeStatus(worktreePath: string): Promise<WorktreeStatus>
+  /** Unified diff of everything a worktree changed (committed vs base + uncommitted). */
+  worktreeDiff(worktreePath: string, baseRef?: string): Promise<string>
   worktreeRemove(req: WorktreeRemoveRequest): Promise<void>
   sessionCreate(req: CreateSessionRequest): Promise<SessionSnapshot>
   sessionInput(id: string, data: string): void
   sessionResize(id: string, cols: number, rows: number): void
   sessionKill(id: string): void
   sessionList(worktreeId?: string): Promise<SessionSnapshot[]>
+  /** Open a native picker for a Markdown/HTML file, starting in `defaultPath`
+   * (the worktree folder). null if cancelled. */
+  fileOpenDialog(defaultPath?: string): Promise<string | null>
+  /** Read a UTF-8 file's contents (used by viewer panes). */
+  fileRead(filePath: string): Promise<string>
   /** Fire an OS notification that a session needs input (no-op if Grove is focused). */
   notifyAttention(id: string, title: string): void
   /** Set the Dock/taskbar badge to the pending-session count (0 clears it). */

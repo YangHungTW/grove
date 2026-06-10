@@ -111,7 +111,7 @@ export interface AppSettings {
   sidebarCollapsed: boolean
   /** Configured agents for the "+" menu. */
   agents: AgentDef[]
-  /** Worktree folder template, relative to the project (supports {branch}, {repo}). */
+  /** Worktree folder template, relative to the project (supports {branch}, {repo}, {timestamp}). */
   worktreeFolder: string
   /** Customisable keyboard shortcuts (action -> accelerator). */
   keybindings: Keybindings

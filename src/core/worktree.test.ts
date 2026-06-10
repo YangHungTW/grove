@@ -3,7 +3,15 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createWorktree, listWorktrees, removeWorktree, isGitRepo, worktreeStatus } from './worktree'
+import {
+  createWorktree,
+  listWorktrees,
+  removeWorktree,
+  isGitRepo,
+  worktreeStatus,
+  expandWorktreeTemplate,
+  worktreeDiff
+} from './worktree'
 
 let repo: string
 
@@ -69,6 +77,18 @@ describe('worktree git operations', () => {
     expect(s.behind).toBe(0)
   })
 
+  it('worktreeDiff reports a modified tracked file with the new line and path', () => {
+    writeFileSync(join(repo, 'README.md'), '# changed line\n')
+    const diff = worktreeDiff(repo)
+    expect(diff).toContain('README.md')
+    expect(diff).toMatch(/^\+# changed line$/m)
+    expect(diff).toMatch(/^-# temp$/m)
+  })
+
+  it('worktreeDiff is empty for a clean worktree', () => {
+    expect(worktreeDiff(repo).trim()).toBe('')
+  })
+
   it('removeWorktree makes it disappear from the list', () => {
     const wtPath = join(repo, '..', `wt-rm-${Date.now()}`)
     createWorktree(repo, { path: wtPath, branch: 'to-remove', newBranch: true })
@@ -76,6 +96,28 @@ describe('worktree git operations', () => {
 
     removeWorktree(repo, wtPath, { force: true })
     expect(listWorktrees(repo).some((w) => w.branch === 'to-remove')).toBe(false)
+  })
+
+  it('expandWorktreeTemplate fills {repo}/{branch} and a filesystem-safe {timestamp}', () => {
+    const now = new Date(2026, 5, 10, 14, 5, 2) // 2026-06-10 14:05:02 (local)
+    const out = expandWorktreeTemplate('../{repo}-wt-{branch}-{timestamp}', {
+      repo: 'r',
+      branch: 'b',
+      now
+    })
+    expect(out.startsWith('../r-wt-b-')).toBe(true)
+    const ts = out.slice('../r-wt-b-'.length)
+    expect(ts).toMatch(/^\d{8}-\d{6}$/)
+    expect(ts).not.toMatch(/[/: ]/)
+  })
+
+  it('expandWorktreeTemplate sanitizes the branch and leaves no placeholders behind', () => {
+    const out = expandWorktreeTemplate('{repo}/{branch}', {
+      repo: 'myrepo',
+      branch: 'feat/new thing',
+      now: new Date(2026, 0, 1, 0, 0, 0)
+    })
+    expect(out).toBe('myrepo/feat_new_thing')
   })
 
   it('removeWorktree keeps the branch by default but deletes it when asked', () => {

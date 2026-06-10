@@ -24,7 +24,9 @@ export class SessionRegistry {
       cwd: input.cwd,
       command: input.command,
       state: input.state ?? 'starting',
-      pid: input.pid
+      pid: input.pid,
+      filePath: input.filePath,
+      viewerKind: input.viewerKind
     }
 
     this.byId.set(session.id, session)

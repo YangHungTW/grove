@@ -99,6 +99,22 @@ export const RepoIcon = ({ size = 14, className }: P): JSX.Element =>
     <path d="M4.5 1.5A2.5 2.5 0 0 0 2 4v8.5A2.5 2.5 0 0 0 4.5 15H13a.75.75 0 0 0 .75-.75V2.25A.75.75 0 0 0 13 1.5H4.5Zm0 1.5h7.75v8.5H4.5a1 1 0 0 0-1 .73V4a1 1 0 0 1 1-1Zm.75 9.5h7v1h-7a.5.5 0 0 1 0-1Z" />
   )
 
+/** A document/file (viewer panes). */
+export const DocIcon = ({ size = 16, className }: P): JSX.Element =>
+  svg(
+    size,
+    className,
+    <path d="M4 1.5h5L13 5.5v8A1.5 1.5 0 0 1 11.5 15h-7A1.5 1.5 0 0 1 3 13.5v-10A2 2 0 0 1 4 1.5Zm4.5 1.2v3h3l-3-3ZM5.5 7.5h5v1.1h-5V7.5Zm0 2.4h5V11h-5V9.9Z" />
+  )
+
+/** A diff / code-review glyph (two rows with +/− implied). */
+export const DiffIcon = ({ size = 16, className }: P): JSX.Element =>
+  svg(
+    size,
+    className,
+    <path d="M4 2h2v2h2v1.6H6v2H4v-2H2V4h2V2Zm-2 9h6v1.6H2V11Zm8-7.5 4 2.5-4 2.5V3.5Zm-1.5 8.1 1.1-1.1 1 1 2.4-2.4 1.1 1.1L11.6 14 8.5 11.6Z" />
+  )
+
 /** Tab icon for an agent, chosen by its configured icon char (presets) with a
  * generic fallback so custom agents still get a solid icon (never an emoji). */
 export function AgentTabIcon({ icon, size = 13 }: { icon?: string; size?: number }): JSX.Element {
@@ -106,5 +122,7 @@ export function AgentTabIcon({ icon, size = 13 }: { icon?: string; size?: number
   if (icon === '★') return <StarIcon size={size} />
   if (icon === '◆') return <HexIcon size={size} />
   if (icon === '✦') return <SparkleIcon size={size} />
+  if (icon === '▤') return <DocIcon size={size} />
+  if (icon === '±') return <DiffIcon size={size} />
   return <AgentIcon size={size} />
 }

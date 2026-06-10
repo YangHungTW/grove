@@ -42,6 +42,13 @@ export type DialogState =
   | { kind: 'removeWorktree'; repoRoot: string; wtId: string; branch: string; folder: string }
   | { kind: 'projectSettings'; repoRoot: string; name: string }
   | { kind: 'renameSession'; id: string; title: string }
+  | { kind: 'openFile'; worktreeId: string }
+
+/** Tab/sidebar icon char for a file-viewer pane (mapped to a doc SVG). */
+export const VIEWER_ICON = '▤'
+/** Tab/sidebar icon char for a diff/review pane (mapped to a diff SVG). */
+export const DIFF_ICON = '±'
+
 interface PaneRef {
   term: Terminal
   fit: FitAddon
@@ -217,7 +224,9 @@ class Store {
     const out: SessionDescriptor[] = []
     for (const project of this.projects.values())
       for (const wt of project.worktrees.values())
-        for (const s of this.sessionsOf(wt.id))
+        for (const s of this.sessionsOf(wt.id)) {
+          // Viewer/diff panes are transient views — not worth restoring.
+          if (s.kind === 'viewer' || s.kind === 'diff') continue
           out.push({
             repoRoot: project.repoRoot,
             worktreePath: wt.path,
@@ -228,6 +237,7 @@ class Store {
             // back into the same conversation. undefined → omitted by JSON.
             resumeId: this.resumeMeta.get(s.id)?.resumeId
           })
+        }
     return out
   }
   private persistLayout(): void {
@@ -485,6 +495,85 @@ class Store {
       groups[gi].active = snap.id
       this.focusedSessionId = snap.id
       this.persistLayout()
+    } catch (err) {
+      this.toast(errMsg(err))
+    }
+    this.notify()
+  }
+  /** Open the "open file" dialog for a worktree (or the active one). */
+  promptOpenFile(worktreeId?: string): void {
+    const wt = worktreeId ?? this.activeWorktreeId
+    if (wt) this.openDialog({ kind: 'openFile', worktreeId: wt })
+  }
+  /** Native file picker (Markdown/HTML), starting in the worktree folder.
+   * Returns the chosen path or null. */
+  async browseForFile(worktreeId?: string): Promise<string | null> {
+    const wt = worktreeId ?? this.activeWorktreeId ?? undefined
+    try {
+      return await window.api.fileOpenDialog(wt)
+    } catch (err) {
+      this.toast(errMsg(err))
+      return null
+    }
+  }
+  /** Insert a freshly-created non-pty pane (viewer/diff) into the focused group
+   * and focus it. Mirrors the placement tail of addSession. */
+  private placePane(worktreeId: string, snap: SessionSnapshot): void {
+    this.sessions.set(snap.id, snap)
+    this.activeWorktreeId = worktreeId
+    const groups = this.groupsOf(worktreeId)
+    const gi = this.focusedGroup(worktreeId)
+    if (gi !== 0) {
+      groups[0].ids = groups[0].ids.filter((x) => x !== snap.id)
+      groups[gi].ids.push(snap.id)
+    }
+    groups[gi].active = snap.id
+    this.focusedSessionId = snap.id
+    this.persistLayout()
+  }
+  /** Open a read-only diff/review pane for what `wtId` changed. */
+  async reviewWorktreeChanges(repoRoot: string, wtId: string): Promise<void> {
+    await this.selectWorktree(repoRoot, wtId)
+    const wt = this.activeProject()?.worktrees.get(wtId)
+    if (!wt) return
+    try {
+      const snap = await window.api.sessionCreate({
+        worktreeId: wtId,
+        kind: 'diff',
+        command: '',
+        cwd: wt.path,
+        title: 'Changes',
+        icon: DIFF_ICON,
+        filePath: wt.path
+      })
+      this.placePane(wtId, snap)
+    } catch (err) {
+      this.toast(errMsg(err))
+    }
+    this.notify()
+  }
+  /** Open `filePath` as a read-only viewer pane in `worktreeId`. The viewer kind
+   * is inferred from the extension (.html/.htm → html, else markdown). */
+  async openFile(worktreeId: string, filePath: string): Promise<void> {
+    const wt = this.activeProject()?.worktrees.get(worktreeId)
+    const path = filePath.trim()
+    if (!wt || !path) return
+    const lower = path.toLowerCase()
+    const viewerKind: 'markdown' | 'html' =
+      lower.endsWith('.html') || lower.endsWith('.htm') ? 'html' : 'markdown'
+    const title = path.split('/').pop() || path
+    try {
+      const snap = await window.api.sessionCreate({
+        worktreeId,
+        kind: 'viewer',
+        command: '',
+        cwd: wt.path,
+        title,
+        icon: VIEWER_ICON,
+        filePath: path,
+        viewerKind
+      })
+      this.placePane(worktreeId, snap)
     } catch (err) {
       this.toast(errMsg(err))
     }

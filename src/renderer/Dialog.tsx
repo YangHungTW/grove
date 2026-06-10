@@ -23,8 +23,58 @@ export function Dialog(): JSX.Element | null {
         )}
         {d.kind === 'projectSettings' && <ProjectSettings name={d.name} repoRoot={d.repoRoot} />}
         {d.kind === 'renameSession' && <RenameSession id={d.id} title={d.title} />}
+        {d.kind === 'openFile' && <OpenFile worktreeId={d.worktreeId} />}
       </div>
     </div>
+  )
+}
+
+function OpenFile({ worktreeId }: { worktreeId: string }): JSX.Element {
+  const [path, setPath] = useState('')
+  const submit = (): void => {
+    const v = path.trim()
+    if (!v) return
+    store.closeDialog()
+    void store.openFile(worktreeId, v)
+  }
+  const browse = async (): Promise<void> => {
+    const picked = await store.browseForFile(worktreeId)
+    if (picked) setPath(picked)
+  }
+  return (
+    <>
+      <h3 className="dialog-title">Open file</h3>
+      <p className="dialog-body">
+        Open a Markdown or HTML file in a read-only viewer pane. Markdown is rendered (and
+        sanitized); HTML is shown in a sandboxed frame.
+      </p>
+      <label className="dialog-field">
+        <span>File path</span>
+        <input
+          autoFocus
+          value={path}
+          placeholder="/path/to/README.md"
+          spellCheck={false}
+          onChange={(e) => setPath(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') submit()
+            else if (e.key === 'Escape') store.closeDialog()
+          }}
+        />
+      </label>
+      <div className="dialog-actions">
+        <button className="btn-ghost" onClick={() => void browse()}>
+          Browse…
+        </button>
+        <span style={{ flex: 1 }} />
+        <button className="btn-ghost" onClick={() => store.closeDialog()}>
+          Cancel
+        </button>
+        <button className="btn-primary" disabled={!path.trim()} onClick={submit}>
+          Open
+        </button>
+      </div>
+    </>
   )
 }
 

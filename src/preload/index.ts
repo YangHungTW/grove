@@ -37,6 +37,8 @@ const api: RendererApi = {
     ipcRenderer.invoke(Channels.worktreeList, repoRoot),
   worktreeStatus: (worktreePath: string) =>
     ipcRenderer.invoke(Channels.worktreeStatus, worktreePath),
+  worktreeDiff: (worktreePath: string, baseRef?: string): Promise<string> =>
+    ipcRenderer.invoke(Channels.worktreeDiff, worktreePath, baseRef),
   worktreeRemove: (req: WorktreeRemoveRequest): Promise<void> =>
     ipcRenderer.invoke(Channels.worktreeRemove, req),
   sessionCreate: (req: CreateSessionRequest): Promise<SessionSnapshot> =>
@@ -52,6 +54,9 @@ const api: RendererApi = {
   },
   sessionList: (worktreeId?: string): Promise<SessionSnapshot[]> =>
     ipcRenderer.invoke(Channels.sessionList, worktreeId),
+  fileOpenDialog: (defaultPath?: string): Promise<string | null> =>
+    ipcRenderer.invoke(Channels.fileOpenDialog, defaultPath),
+  fileRead: (filePath: string): Promise<string> => ipcRenderer.invoke(Channels.fileRead, filePath),
   notifyAttention: (id: string, title: string): void => {
     ipcRenderer.send(Channels.notifyAttention, id, title)
   },

@@ -1235,3 +1235,301 @@ button {
   background: var(--danger);
   color: #fff;
 }
+
+/* --- file viewer panes (Markdown / HTML) ------------------------------- */
+.viewer-pane {
+  overflow: hidden;
+  background: var(--panel);
+  color: var(--fg);
+}
+.viewer-frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+}
+.viewer-markdown {
+  height: 100%;
+  overflow: auto;
+  padding: 18px 24px;
+  line-height: 1.55;
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+.viewer-markdown h1,
+.viewer-markdown h2,
+.viewer-markdown h3 {
+  line-height: 1.25;
+  margin: 1.2em 0 0.5em;
+}
+.viewer-markdown h1 {
+  font-size: 1.7em;
+  border-bottom: 1px solid var(--panel-2);
+  padding-bottom: 0.3em;
+}
+.viewer-markdown code {
+  background: var(--panel-2);
+  padding: 0.12em 0.36em;
+  border-radius: 4px;
+  font-family: var(--mono, monospace);
+  font-size: 0.9em;
+}
+.viewer-markdown pre {
+  background: var(--panel-2);
+  padding: 12px 14px;
+  border-radius: 6px;
+  overflow: auto;
+}
+.viewer-markdown pre code {
+  background: none;
+  padding: 0;
+}
+.viewer-markdown a {
+  color: var(--accent);
+}
+.viewer-markdown img {
+  max-width: 100%;
+}
+.viewer-markdown table {
+  border-collapse: collapse;
+}
+.viewer-markdown th,
+.viewer-markdown td {
+  border: 1px solid var(--panel-2);
+  padding: 5px 10px;
+}
+.viewer-loading,
+.viewer-error {
+  padding: 18px 24px;
+  opacity: 0.7;
+  font-size: 13px;
+}
+.viewer-error {
+  color: var(--danger);
+}
+
+/* --- diff / code-review panes ----------------------------------------- */
+.diff-pane {
+  overflow: hidden;
+  background: var(--panel);
+  color: var(--fg);
+  display: flex;
+  flex-direction: column;
+}
+.diff-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--panel-2);
+  background: var(--panel-2);
+  flex: 0 0 auto;
+}
+.diff-toolbar-title {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.diff-toolbar-count {
+  font-size: 11.5px;
+  opacity: 0.6;
+}
+.diff-index-toggle {
+  display: inline-flex;
+  align-items: center;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--fg);
+  opacity: 0.6;
+  padding: 2px 4px;
+  cursor: pointer;
+}
+.diff-index-toggle.active {
+  opacity: 1;
+  background: var(--panel);
+  border-color: var(--panel-2);
+}
+.diff-index-toggle:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.diff-refresh {
+  margin-left: auto;
+  background: var(--panel);
+  color: var(--fg);
+  border: 1px solid var(--panel-2);
+  border-radius: 5px;
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+/* layout: changed-files index (left) + diff body (right) */
+.diff-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+}
+.diff-index {
+  flex: 0 0 auto;
+  width: 210px;
+  min-width: 140px;
+  max-width: 40%;
+  overflow: auto;
+  border-right: 1px solid var(--panel-2);
+  padding: 6px 0;
+  resize: horizontal;
+}
+.diff-index-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: none;
+  border: 0;
+  color: var(--fg);
+  cursor: pointer;
+  padding: 4px 12px;
+  font-size: 12px;
+  text-align: left;
+}
+.diff-index-item:hover {
+  background: var(--panel-2);
+}
+.diff-index-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.diff-index-stats {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 6px;
+  font-family: var(--mono, monospace);
+  font-size: 11px;
+}
+.diff-add-count {
+  color: #3fb950;
+}
+.diff-del-count {
+  color: #f85149;
+}
+.diff-bin-badge {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.6;
+  border: 1px solid var(--panel-2);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+.diff-binary-note {
+  opacity: 0.6;
+  font-style: italic;
+  padding: 4px 12px;
+}
+.diff-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  /* min-height:0 lets this flex child shrink below its content so overflow
+     actually scrolls (flex items default to min-height:auto). */
+  min-height: 0;
+  overflow: auto;
+  font-family: var(--mono, monospace);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.diff-file {
+  margin-bottom: 10px;
+}
+.diff-file-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: var(--panel-2);
+  padding: 5px 12px;
+  font-weight: 600;
+  font-size: 12.5px;
+  color: var(--fg);
+  border: 0;
+  border-top: 1px solid var(--panel-2);
+  cursor: pointer;
+  text-align: left;
+}
+.diff-file-header:hover {
+  background: color-mix(in srgb, var(--panel-2) 80%, var(--fg) 12%);
+}
+.diff-file-chevron {
+  flex: 0 0 auto;
+  width: 1em;
+  opacity: 0.7;
+  font-size: 10px;
+}
+.diff-file-path {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono, monospace);
+}
+.diff-file-stats {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 6px;
+  font-family: var(--mono, monospace);
+  font-size: 11px;
+  font-weight: 500;
+}
+.diff-line {
+  display: flex;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 0 6px;
+}
+.diff-gutter {
+  flex: 0 0 1.4em;
+  text-align: center;
+  opacity: 0.6;
+  user-select: none;
+}
+.diff-text {
+  flex: 1 1 auto;
+}
+.diff-line-add {
+  background: color-mix(in srgb, #2ea043 22%, transparent);
+}
+.diff-line-del {
+  background: color-mix(in srgb, #f85149 22%, transparent);
+}
+.diff-line-hunk {
+  color: var(--accent);
+  opacity: 0.85;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.diff-loading,
+.diff-empty,
+.diff-error {
+  padding: 16px 18px;
+  opacity: 0.7;
+  font-size: 13px;
+}
+.diff-error {
+  color: var(--danger);
+}
+.row-review {
+  background: none;
+  border: 0;
+  color: var(--fg);
+  opacity: 0.55;
+  cursor: pointer;
+  padding: 2px;
+  display: inline-flex;
+}
+.row-review:hover {
+  opacity: 1;
+}
