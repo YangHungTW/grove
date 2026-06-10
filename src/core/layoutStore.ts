@@ -10,6 +10,9 @@ export interface SessionDescriptor {
   title: string
   /** Tab icon — also used on restore to recover which agent it was. */
   icon?: string
+  /** Pinned agent session id (claude) — restored via `--resume` so the agent
+   * reopens its previous conversation instead of starting fresh. */
+  resumeId?: string
 }
 
 /**

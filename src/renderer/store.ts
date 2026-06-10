@@ -90,7 +90,9 @@ class Store {
   // entry becomes a ClosedAgent so the agent can be resumed later.
   private resumeMeta = new Map<string, { resumeId: string; baseCommand: string }>()
   private savedLayout: SessionDescriptor[] = []
-  private restoredProjects = new Set<string>()
+  // Worktree paths whose saved sessions have been respawned this run (lazy
+  // restore happens per worktree, on first select — not all at once on launch).
+  private restoredWorktrees = new Set<string>()
   private restoring = false
   private repoRoot = ''
   private prevVisible: string[] = []
@@ -220,31 +222,37 @@ class Store {
             worktreePath: wt.path,
             kind: s.kind,
             title: s.title,
-            icon: s.icon
+            icon: s.icon,
+            // Persist the agent's pinned resume id so a relaunch can `--resume`
+            // back into the same conversation. undefined → omitted by JSON.
+            resumeId: this.resumeMeta.get(s.id)?.resumeId
           })
     return out
   }
   private persistLayout(): void {
     if (this.restoring) return
-    const keep = this.savedLayout.filter((d) => !this.restoredProjects.has(d.repoRoot))
+    // Keep saved descriptors for worktrees not yet restored this run; replace the
+    // rest with their live sessions.
+    const keep = this.savedLayout.filter((d) => !this.restoredWorktrees.has(d.worktreePath))
     const merged = [...keep, ...this.currentDescriptors()]
     this.savedLayout = merged
     window.api.layoutSave(merged)
   }
-  private async restoreProject(project: ProjectView): Promise<void> {
-    if (this.restoredProjects.has(project.repoRoot)) return
-    this.restoredProjects.add(project.repoRoot)
-    const toRestore = this.savedLayout.filter((d) => d.repoRoot === project.repoRoot)
+  /** Lazily respawn a worktree's saved sessions on first select. Agents that were
+   * launched with a pinned session id reopen via `claude --resume <id>` so the
+   * conversation continues; everything else respawns fresh. */
+  private async restoreWorktree(wtId: string): Promise<void> {
+    if (this.restoredWorktrees.has(wtId)) return
+    this.restoredWorktrees.add(wtId)
+    const toRestore = this.savedLayout.filter((d) => d.worktreePath === wtId)
     if (toRestore.length === 0) return
     this.restoring = true
     for (const d of toRestore) {
-      const wt = [...project.worktrees.values()].find((w) => w.path === d.worktreePath)
-      if (!wt) continue
       // Recover which agent this was from its icon so codex/gemini restore as
       // themselves (not the default), and keep the saved/renamed title.
       const agentDef =
         d.kind === 'agent' ? this.availableAgents.find((a) => a.icon === d.icon) : undefined
-      await this.addSession(wt.id, d.kind, agentDef, d.title)
+      await this.addSession(wtId, d.kind, agentDef, d.title, d.resumeId)
     }
     this.restoring = false
     this.persistLayout()
@@ -323,8 +331,8 @@ class Store {
     this.activeProjectId = repoRoot
     p.expanded = true // select expands this one; never collapses others
     if (!p.loaded) await this.loadWorktrees(p)
-    await this.restoreProject(p)
     this.activeWorktreeId = p.worktrees.keys().next().value ?? null
+    if (this.activeWorktreeId) await this.restoreWorktree(this.activeWorktreeId)
     this.syncFocus()
     this.notify()
   }
@@ -336,7 +344,6 @@ class Store {
     this.savedLayout = this.savedLayout.filter((d) => d.repoRoot !== repoRoot)
     this.closedAgents = this.closedAgents.filter((c) => c.repoRoot !== repoRoot)
     this.persistClosedAgents()
-    this.restoredProjects.add(repoRoot)
     if (this.activeProjectId === repoRoot) {
       this.activeProjectId = this.projects.keys().next().value ?? null
       this.activeWorktreeId = this.activeProject()?.worktrees.keys().next().value ?? null
@@ -379,6 +386,8 @@ class Store {
       this.toast(errMsg(err))
     }
     project.worktrees.delete(wtId)
+    this.savedLayout = this.savedLayout.filter((d) => d.worktreePath !== wtId)
+    this.restoredWorktrees.delete(wtId)
     this.closedAgents = this.closedAgents.filter((c) => c.worktreePath !== wtId)
     this.persistClosedAgents()
     if (this.activeWorktreeId === wtId)
@@ -389,8 +398,7 @@ class Store {
   async selectWorktree(projectId: string, wtId: string): Promise<void> {
     this.activeProjectId = projectId
     this.activeWorktreeId = wtId
-    const p = this.projects.get(projectId)
-    if (p) await this.restoreProject(p) // respawn this project's sessions on first select
+    await this.restoreWorktree(wtId) // respawn this worktree's sessions on first select
     this.syncFocus()
     this.notify()
   }

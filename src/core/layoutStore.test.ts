@@ -50,4 +50,20 @@ describe('LayoutStore — session layout (persisted)', () => {
     store.save(withIcon)
     expect(store.load()).toEqual(withIcon)
   })
+
+  it('round-trips the optional resumeId (so an agent reopens via --resume)', () => {
+    const store = new LayoutStore(file)
+    const withResume: SessionDescriptor[] = [
+      {
+        repoRoot: '/a',
+        worktreePath: '/a',
+        kind: 'agent',
+        title: 'claude',
+        icon: '★',
+        resumeId: '550e8400-e29b-41d4-a716-446655440000'
+      }
+    ]
+    store.save(withResume)
+    expect(store.load()).toEqual(withResume)
+  })
 })
