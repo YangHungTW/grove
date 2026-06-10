@@ -8,3 +8,6 @@ src/renderer/Icons.tsx
 src/renderer/GroupTabs.tsx
 src/renderer/App.tsx
 src/core/cycle.ts
+src/core/settings.ts
+src/renderer/SettingsPanel.tsx
+src/renderer/PaneGrid.tsx
