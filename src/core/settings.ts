@@ -133,6 +133,25 @@ export const SHELL_ICON = '❯'
  * box-drawing lines and agent UI glyphs always render even with a plain font. */
 export const FONT_FALLBACK = '"MesloLGS NF", "MesloLGS Nerd Font", Menlo, Monaco, "Courier New", monospace'
 
+/** Monospace fonts offered in the settings font picker. Only the ones actually
+ * installed are shown (filtered at render time); 'MesloLGS NF' is bundled. */
+export const FONT_OPTIONS = [
+  'MesloLGS NF',
+  'SF Mono',
+  'Menlo',
+  'Monaco',
+  'JetBrains Mono',
+  'Fira Code',
+  'Cascadia Code',
+  'Cascadia Mono',
+  'Hack',
+  'Source Code Pro',
+  'IBM Plex Mono',
+  'Roboto Mono',
+  'Ubuntu Mono',
+  'Courier New'
+]
+
 export const DEFAULT_SETTINGS: AppSettings = {
   background: '#1b1b1f',
   foreground: '#dcdce4',

@@ -1,7 +1,13 @@
 import type { AgentDef } from '../core/settings'
 import { useStore } from './useStore'
 import { store } from './store'
-import { KEYBIND_LABELS, FIXED_SHORTCUTS, AGENT_PRESETS, THEMES } from '../core/settings'
+import {
+  KEYBIND_LABELS,
+  FIXED_SHORTCUTS,
+  FONT_OPTIONS,
+  AGENT_PRESETS,
+  THEMES
+} from '../core/settings'
 
 export function SettingsPanel(): JSX.Element | null {
   const s = useStore()
@@ -69,15 +75,22 @@ export function SettingsPanel(): JSX.Element | null {
 
         <label className="settings-row">
           <span>Font</span>
-          <input
-            type="text"
+          <select
             className="key-input"
-            style={{ width: 170 }}
+            style={{ width: 184 }}
             value={cfg.fontFamily}
-            spellCheck={false}
-            placeholder="MesloLGS NF"
             onChange={(e) => void store.updateSettings({ fontFamily: e.target.value })}
-          />
+          >
+            {/* Only fonts actually installed on this machine (+ the current one,
+                so a value set elsewhere isn't silently dropped). */}
+            {[...new Set([cfg.fontFamily, ...FONT_OPTIONS])]
+              .filter((f) => f === cfg.fontFamily || document.fonts.check(`13px "${f}"`))
+              .map((f) => (
+                <option key={f} value={f}>
+                  {f}
+                </option>
+              ))}
+          </select>
         </label>
 
         <label className="settings-row">
