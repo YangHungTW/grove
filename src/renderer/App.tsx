@@ -27,6 +27,10 @@ export function App(): JSX.Element {
   const s = useStore()
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
+      // Never hijack keys mid IME composition (Chinese/Japanese/Korean input):
+      // a composition keydown reports keyCode 229 / isComposing, and must reach
+      // the terminal's textarea untouched.
+      if (e.isComposing || e.keyCode === 229) return
       // Never hijack typing in our own inputs (settings, tab rename). The xterm
       // terminal uses a <textarea>, so terminal-focused shortcuts still work.
       if (e.target instanceof HTMLInputElement) return
