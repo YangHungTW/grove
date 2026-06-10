@@ -11,3 +11,5 @@ src/core/cycle.ts
 src/core/settings.ts
 src/renderer/SettingsPanel.tsx
 src/renderer/PaneGrid.tsx
+src/renderer/main.tsx
+src/core/layoutStore.ts
