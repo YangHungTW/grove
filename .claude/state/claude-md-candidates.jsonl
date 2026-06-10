@@ -2,5 +2,5 @@
 {"ts":"2026-06-10T06:23:42Z","dir":"e2e","signals":["edit-touch","recent-activity","not-in-ancestor"],"score":0.611,"status":"pending"}
 {"ts":"2026-06-10T06:37:38Z","dir":"src/preload","signals":["edit-touch","recent-activity","depth>=2","not-in-ancestor"],"score":0.667,"status":"pending"}
 {"ts":"2026-06-10T08:39:58Z","dir":"src/main","signals":["edit-touch","recent-activity","depth>=2","not-in-ancestor"],"score":0.667,"status":"pending"}
-{"ts":"2026-06-10T08:40:41Z","dir":"src/renderer","signals":["size>=4","edit-touch","recent-activity","depth>=2","not-in-ancestor"],"score":0.889,"status":"pending"}
 {"ts":"2026-06-10T09:49:58Z","dir":"src/core","signals":["size>=4","edit-touch","recent-activity","bounded-context-name","depth>=2","not-in-ancestor"],"score":1.000,"status":"pending"}
+{"ts":"2026-06-10T09:56:28Z","dir":"src/renderer","signals":["size>=4","edit-touch","recent-activity","depth>=2","not-in-ancestor"],"score":0.889,"status":"pending"}
