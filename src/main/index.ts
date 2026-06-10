@@ -382,6 +382,13 @@ function createWindow(): void {
     }
   })
 
+  // Grant web permissions for this trusted, local-only renderer — notably
+  // 'local-fonts', so the settings font picker can list the machine's installed
+  // fonts via queryLocalFonts().
+  const ses = mainWindow.webContents.session
+  ses.setPermissionRequestHandler((_wc, _permission, cb) => cb(true))
+  ses.setPermissionCheckHandler(() => true)
+
   mainWindow.on('ready-to-show', () => {
     applyAppearance(settings().load())
     mainWindow?.show()

@@ -81,15 +81,23 @@ export function SettingsPanel(): JSX.Element | null {
             value={cfg.fontFamily}
             onChange={(e) => void store.updateSettings({ fontFamily: e.target.value })}
           >
-            {/* Only fonts actually installed on this machine (+ the current one,
-                so a value set elsewhere isn't silently dropped). */}
-            {[...new Set([cfg.fontFamily, ...FONT_OPTIONS])]
-              .filter((f) => f === cfg.fontFamily || document.fonts.check(`13px "${f}"`))
-              .map((f) => (
-                <option key={f} value={f}>
-                  {f}
-                </option>
-              ))}
+            {/* The machine's installed fonts (queryLocalFonts) when available;
+                otherwise the curated list filtered to what's installed. The
+                bundled default + current value are always present so nothing is
+                silently dropped. */}
+            {[
+              ...new Set([
+                'MesloLGS NF',
+                cfg.fontFamily,
+                ...(s.localFonts.length
+                  ? s.localFonts
+                  : FONT_OPTIONS.filter((f) => document.fonts.check(`13px "${f}"`)))
+              ])
+            ].map((f) => (
+              <option key={f} value={f}>
+                {f}
+              </option>
+            ))}
           </select>
         </label>
 
