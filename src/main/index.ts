@@ -342,8 +342,10 @@ function createWindow(): void {
     height: 800,
     show: false,
     title: 'Grove',
-    // Construct with vibrancy + a transparent backing so macOS frosted-glass can
-    // actually show through when the user enables transparency at runtime.
+    // Vibrancy (frosted glass) rather than `transparent: true`: on macOS a truly
+    // transparent window breaks GPU compositing and the xterm canvas/WebGL
+    // renderer paints blank. Vibrancy keeps the terminal rendering while still
+    // letting the background show through (frosted) when transparency is on.
     vibrancy: 'under-window',
     visualEffectState: 'active',
     backgroundColor: '#00000000',

@@ -77,6 +77,7 @@ export function PaneGrid(): JSX.Element {
           visible={colOf.has(sess.id)}
           column={colOf.get(sess.id) ?? 1}
           focused={sess.id === s.focusedSessionId}
+          transparent={s.settings.transparent}
         />
       ))}
       {gutters}
@@ -88,12 +89,14 @@ function Pane({
   session,
   visible,
   column,
-  focused
+  focused,
+  transparent
 }: {
   session: SessionSnapshot
   visible: boolean
   column: number
   focused: boolean
+  transparent: boolean
 }): JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
@@ -120,32 +123,6 @@ function Pane({
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(el)
-    // WebGL renderer: lowest input latency (canvas 2D repaints per keystroke and
-    // feels laggy on Retina). Two known WebGL caveats are handled here:
-    //  - it can leave a freshly-opened pane unpainted → force a full refresh once
-    //    the addon is attached (refit() refreshes again after fit/font-load);
-    //  - on GPU context loss the canvas goes blank → dispose and fall back to the
-    //    canvas addon, which also draws box-drawing glyphs (─/│) correctly.
-    const useCanvas = (): void => {
-      try {
-        term.loadAddon(new CanvasAddon())
-        term.refresh(0, term.rows - 1)
-      } catch {
-        /* keep DOM renderer */
-      }
-    }
-    try {
-      const webgl = new WebglAddon()
-      webgl.onContextLoss(() => {
-        webgl.dispose()
-        useCanvas()
-      })
-      term.loadAddon(webgl)
-      term.refresh(0, term.rows - 1)
-    } catch {
-      // WebGL unavailable (software rendering / blocklisted GPU) — use canvas.
-      useCanvas()
-    }
     term.onData((d) => window.api.sessionInput(session.id, d))
     termRef.current = term
     store.registerPane(session.id, term, fit)
@@ -184,6 +161,58 @@ function Pane({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id])
+
+  // Renderer choice depends on transparency, and re-runs when it toggles:
+  //  - opaque  → WebGL: lowest input latency (canvas 2D repaints per keystroke
+  //    and feels laggy on Retina). Force a refresh on attach (WebGL can leave a
+  //    fresh pane unpainted) and fall back to canvas on GPU context loss.
+  //  - transparent → Canvas: xterm's WebGL renderer ignores allowTransparency
+  //    (paints an opaque background), so it would defeat the see-through effect.
+  //    Canvas renders the rgba background transparent while keeping text fully
+  //    opaque — exactly "background shows through, glyphs stay solid".
+  useEffect(() => {
+    const term = termRef.current
+    if (!term) return
+    let addon: { dispose(): void } | null = null
+    const loadCanvas = (): void => {
+      try {
+        const c = new CanvasAddon()
+        term.loadAddon(c)
+        addon = c
+        term.refresh(0, term.rows - 1)
+      } catch {
+        /* keep DOM renderer */
+      }
+    }
+    if (transparent) {
+      loadCanvas()
+    } else {
+      try {
+        const webgl = new WebglAddon()
+        webgl.onContextLoss(() => {
+          try {
+            webgl.dispose()
+          } catch {
+            /* ignore */
+          }
+          loadCanvas()
+        })
+        term.loadAddon(webgl)
+        addon = webgl
+        term.refresh(0, term.rows - 1)
+      } catch {
+        // WebGL unavailable (software rendering / blocklisted GPU) — use canvas.
+        loadCanvas()
+      }
+    }
+    return () => {
+      try {
+        addon?.dispose()
+      } catch {
+        /* term may already be disposed */
+      }
+    }
+  }, [session.id, transparent])
 
   return (
     <div

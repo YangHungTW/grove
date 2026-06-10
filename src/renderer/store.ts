@@ -751,11 +751,19 @@ class Store {
     root.style.setProperty('--fg', s.foreground)
     const termBg = s.transparent ? hexToRgba(s.background, s.opacity) : s.background
     if (s.transparent) {
+      // Both html AND body must be cleared: the CSS `html, body { background:
+      // var(--bg) }` rule otherwise leaves the root <html> painting an opaque
+      // fill behind everything, so the window vibrancy never shows through.
+      root.style.background = 'transparent'
       document.body.style.background = 'transparent'
-      root.style.setProperty('--pane-bg', termBg)
+      // Pane container stays fully transparent — the terminal canvas paints the
+      // single rgba tint (theme background). If the container also tinted, the
+      // two rgba layers would stack to nearly opaque under the glyphs.
+      root.style.setProperty('--pane-bg', 'transparent')
       root.style.setProperty('--panel', hexToRgba(s.background, Math.min(1, s.opacity + 0.12)))
       root.style.setProperty('--panel-2', hexToRgba(s.background, Math.min(1, s.opacity + 0.2)))
     } else {
+      root.style.background = s.background
       document.body.style.background = s.background
       root.style.setProperty('--pane-bg', s.background)
       root.style.setProperty('--panel', mix(s.background, '#ffffff', 0.06))
