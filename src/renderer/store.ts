@@ -516,6 +516,7 @@ class Store {
     this.resumeMeta.delete(id)
     this.sessions.delete(id)
     this.pending.delete(id)
+    this.syncBadge()
     this.lastLine.delete(id)
     // Reconcile groups (drops the id, collapses an emptied split) and re-focus.
     if (wtId) {
@@ -590,6 +591,7 @@ class Store {
     }
     this.focusedSessionId = id
     this.pending.delete(id)
+    this.syncBadge()
     this.notify()
     this.panes.get(id)?.term.focus()
   }
@@ -703,6 +705,7 @@ class Store {
     const s = this.sessions.get(id)
     if (!s) {
       this.pending.delete(id)
+      this.syncBadge()
       return
     }
     for (const p of this.projects.values())
@@ -828,6 +831,10 @@ class Store {
       if ((state as SessionState) === 'waiting' && id !== this.focusedSessionId) {
         this.pending.add(id)
         this.toast(`${s.title} needs your attention`)
+        // Grove in the background → the in-app toast/glow is invisible. Fire an OS
+        // notification so the user is alerted while doing something else.
+        if (!document.hasFocus()) window.api.notifyAttention(id, s.title)
+        this.syncBadge()
       }
       this.notify()
     })
@@ -835,6 +842,20 @@ class Store {
       // The pty ended (shell/agent exited) — auto-close its tab/pane.
       if (this.sessions.has(id)) this.closeSession(id)
     })
+    // A clicked OS notification: jump to the session that needs input.
+    window.api.onNotifyJump(({ id }) => {
+      const s = this.sessions.get(id)
+      if (s) {
+        this.activeProjectId = this.repoRootOf(s.worktreeId) ?? this.activeProjectId
+        this.activeWorktreeId = s.worktreeId
+        this.focusSession(id)
+      }
+    })
+  }
+
+  /** Reflect the pending (needs-attention) count on the Dock/taskbar badge. */
+  private syncBadge(): void {
+    window.api.setBadgeCount(this.pending.size)
   }
 
   async init(): Promise<void> {

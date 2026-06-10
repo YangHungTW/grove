@@ -52,10 +52,17 @@ const api: RendererApi = {
   },
   sessionList: (worktreeId?: string): Promise<SessionSnapshot[]> =>
     ipcRenderer.invoke(Channels.sessionList, worktreeId),
+  notifyAttention: (id: string, title: string): void => {
+    ipcRenderer.send(Channels.notifyAttention, id, title)
+  },
+  setBadgeCount: (count: number): void => {
+    ipcRenderer.send(Channels.notifyBadge, count)
+  },
   onSessionData: (cb: (e: SessionDataEvent) => void) => subscribe(Channels.sessionData, cb),
   onSessionState: (cb: (e: SessionStateEvent) => void) =>
     subscribe(Channels.sessionStateChange, cb),
-  onSessionExit: (cb: (e: SessionExitEvent) => void) => subscribe(Channels.sessionExit, cb)
+  onSessionExit: (cb: (e: SessionExitEvent) => void) => subscribe(Channels.sessionExit, cb),
+  onNotifyJump: (cb: (e: { id: string }) => void) => subscribe(Channels.notifyJump, cb)
 }
 
 contextBridge.exposeInMainWorld('api', api)

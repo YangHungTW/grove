@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, Notification, dialog, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { join, resolve, basename, dirname } from 'node:path'
 import { execFile } from 'node:child_process'
 import { existsSync, copyFileSync } from 'node:fs'
@@ -316,6 +316,31 @@ function registerIpc(): void {
   ipcMain.on(Channels.sessionKill, (_e, id: string) => {
     ptys.get(id)?.kill()
     registry.removeSession(id)
+  })
+
+  // OS notification when an agent needs input and Grove isn't the focused window.
+  // Clicking it brings Grove forward and jumps to that session.
+  ipcMain.on(Channels.notifyAttention, (_e, id: string, title: string) => {
+    if (!Notification.isSupported() || mainWindow?.isFocused()) return
+    const n = new Notification({ title: 'Grove', body: `${title} needs your attention` })
+    n.on('click', () => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        if (mainWindow.isMinimized()) mainWindow.restore()
+        mainWindow.show()
+        mainWindow.focus()
+        send(Channels.notifyJump, { id })
+      }
+    })
+    n.show()
+  })
+
+  // Dock/taskbar badge = number of sessions waiting on the user (0 clears it).
+  ipcMain.on(Channels.notifyBadge, (_e, count: number) => {
+    try {
+      app.setBadgeCount(Math.max(0, count | 0))
+    } catch {
+      /* unsupported platform */
+    }
   })
 }
 

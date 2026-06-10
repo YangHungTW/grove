@@ -30,10 +30,13 @@ export const Channels = {
   sessionResize: 'session:resize',
   sessionKill: 'session:kill',
   sessionList: 'session:list',
+  notifyAttention: 'notify:attention',
+  notifyBadge: 'notify:badge',
   // events (main -> renderer)
   sessionData: 'session:data',
   sessionStateChange: 'session:state-change',
-  sessionExit: 'session:exit'
+  sessionExit: 'session:exit',
+  notifyJump: 'notify:jump'
 } as const
 
 /** Serializable view of a session sent across the IPC boundary. */
@@ -118,7 +121,13 @@ export interface RendererApi {
   sessionResize(id: string, cols: number, rows: number): void
   sessionKill(id: string): void
   sessionList(worktreeId?: string): Promise<SessionSnapshot[]>
+  /** Fire an OS notification that a session needs input (no-op if Grove is focused). */
+  notifyAttention(id: string, title: string): void
+  /** Set the Dock/taskbar badge to the pending-session count (0 clears it). */
+  setBadgeCount(count: number): void
   onSessionData(cb: (e: SessionDataEvent) => void): () => void
   onSessionState(cb: (e: SessionStateEvent) => void): () => void
   onSessionExit(cb: (e: SessionExitEvent) => void): () => void
+  /** A clicked OS notification asks the renderer to focus that session. */
+  onNotifyJump(cb: (e: { id: string }) => void): () => void
 }
