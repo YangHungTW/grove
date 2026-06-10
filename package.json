@@ -12,7 +12,39 @@
     "start": "electron .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest",
-    "e2e": "electron-vite build && node e2e/smoke.mjs"
+    "e2e": "electron-vite build && node e2e/smoke.mjs",
+    "dist": "npm run build && electron-builder --mac",
+    "dist:dir": "npm run build && electron-builder --mac --dir"
+  },
+  "build": {
+    "appId": "com.yanghung.grove",
+    "productName": "Grove",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "!**/.vscode/*",
+      "!src/**",
+      "!e2e/**",
+      "!.claude/**",
+      "!build/**",
+      "!{electron.vite.config.ts,tsconfig.json}",
+      "!{.eslintrc,.eslintignore,.prettierrc,.prettierignore,README.md}",
+      "!**/*.{test,spec}.*"
+    ],
+    "asarUnpack": [
+      "**/node_modules/node-pty/**"
+    ],
+    "npmRebuild": false,
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.png"
+    }
   },
   "keywords": [
     "electron",
@@ -36,6 +68,7 @@
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "^33.0.0",
+    "electron-builder": "^26.15.2",
     "electron-vite": "^2.3.0",
     "playwright": "^1.60.0",
     "typescript": "^5.6.0",
