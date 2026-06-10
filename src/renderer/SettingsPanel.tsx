@@ -15,6 +15,15 @@ export function SettingsPanel(): JSX.Element | null {
   const cfg = s.settings
   const installedById = new Map(s.availableAgents.map((a) => [a.id, a.installed]))
 
+  // Font picker: curated monospace fonts that are actually installed (document.
+  // fonts.check needs no permission), plus a "Custom…" path where the user types
+  // any family name. fontFamily not in the list ⇒ custom mode (show the input).
+  const FONT_CUSTOM = '__custom__'
+  const fontChoices = [
+    ...new Set(['MesloLGS NF', ...FONT_OPTIONS.filter((f) => document.fonts.check(`13px "${f}"`))])
+  ]
+  const fontIsCustom = !fontChoices.includes(cfg.fontFamily)
+
   const setAgents = (agents: AgentDef[]): void => void store.updateSettings({ agents })
   const updateAgent = (i: number, patch: Partial<AgentDef>): void =>
     setAgents(cfg.agents.map((a, idx) => (idx === i ? { ...a, ...patch } : a)))
@@ -78,28 +87,36 @@ export function SettingsPanel(): JSX.Element | null {
           <select
             className="key-input"
             style={{ width: 184 }}
-            value={cfg.fontFamily}
-            onChange={(e) => void store.updateSettings({ fontFamily: e.target.value })}
+            value={fontIsCustom ? FONT_CUSTOM : cfg.fontFamily}
+            onChange={(e) =>
+              void store.updateSettings({
+                fontFamily: e.target.value === FONT_CUSTOM ? '' : e.target.value
+              })
+            }
           >
-            {/* The machine's installed fonts (queryLocalFonts) when available;
-                otherwise the curated list filtered to what's installed. The
-                bundled default + current value are always present so nothing is
-                silently dropped. */}
-            {[
-              ...new Set([
-                'MesloLGS NF',
-                cfg.fontFamily,
-                ...(s.localFonts.length
-                  ? s.localFonts
-                  : FONT_OPTIONS.filter((f) => document.fonts.check(`13px "${f}"`)))
-              ])
-            ].map((f) => (
+            {fontChoices.map((f) => (
               <option key={f} value={f}>
                 {f}
               </option>
             ))}
+            <option value={FONT_CUSTOM}>Custom…</option>
           </select>
         </label>
+
+        {fontIsCustom && (
+          <label className="settings-row">
+            <span>Custom font</span>
+            <input
+              type="text"
+              className="key-input"
+              style={{ width: 184 }}
+              value={cfg.fontFamily}
+              spellCheck={false}
+              placeholder="Exact font name"
+              onChange={(e) => void store.updateSettings({ fontFamily: e.target.value })}
+            />
+          </label>
+        )}
 
         <label className="settings-row">
           <span>Font size {cfg.fontSize}px</span>

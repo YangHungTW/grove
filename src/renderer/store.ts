@@ -730,26 +730,8 @@ class Store {
   }
 
   // --- settings / appearance ---------------------------------------------
-  /** Installed font families (Local Font Access API), for the settings picker. */
-  localFonts: string[] = []
-  /** Query the machine's installed fonts once (needs a user gesture → called from
-   * openSettings). Falls back silently to the curated list if denied/unsupported. */
-  private async loadLocalFonts(): Promise<void> {
-    if (this.localFonts.length) return
-    try {
-      const q = (window as unknown as { queryLocalFonts?: () => Promise<{ family: string }[]> })
-        .queryLocalFonts
-      if (!q) return
-      const fonts = await q()
-      this.localFonts = [...new Set(fonts.map((f) => f.family))].sort((a, b) => a.localeCompare(b))
-      this.notify()
-    } catch {
-      /* permission denied / unsupported — keep the curated list */
-    }
-  }
   openSettings(open: boolean): void {
     this.settingsOpen = open
-    if (open) void this.loadLocalFonts()
     this.notify()
     // Re-check which agent commands are installed when opening/closing settings
     // (cheap: commandExists is cached per command in main).
