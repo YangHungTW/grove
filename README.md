@@ -4,6 +4,11 @@
   <p>A desktop control room for running multiple coding-agent sessions per git worktree — across all your projects.</p>
 </div>
 
+<div align="center">
+  <img src="docs/screenshot.png" width="900" alt="Grove showing a shell and a rendered Markdown file side by side in one git worktree" />
+  <p><em>A shell and a rendered Markdown file, side by side in one worktree.</em></p>
+</div>
+
 ---
 
 Grove is a native-feeling desktop app (Electron + [xterm.js](https://xtermjs.org) + [node-pty](https://github.com/microsoft/node-pty)) for people who run **AI coding agents in the terminal** and juggle several at once. Open a project, spin up a git **worktree** per task, and run as many **agent / shell sessions** as you like inside it — each in its own tab, with on-demand split panes.
@@ -14,6 +19,8 @@ The name is a nod to git *worktrees*: a grove of trees. 🌳
 
 - **Projects → worktrees → sessions.** A flat, cmux-style sidebar: each project (git repo) contains its worktrees; selecting one shows its sessions.
 - **One worktree, many agents.** Run Claude, Codex, Antigravity (`agy`), a plain shell — as many as you want, side by side. Tabs + drag-resizable split panes.
+- **Open files in a pane.** Open a Markdown or HTML file (`+ file`) in a read-only viewer alongside your terminals — Markdown is rendered and sanitized; HTML loads in a sandboxed frame.
+- **Review worktree changes.** Hit *Review changes* on any worktree card for an in-app `git diff` (committed + uncommitted) rendered as a unified code-review pane.
 - **Installed-only agent menu.** The `+` menu lists only agents whose command is on your `PATH`. One installed → opens directly; several → a dropdown. Fully editable in Settings (name / command / icon).
 - **Real git worktree management.** Create a worktree (new branch) and remove it from the UI — with a clear confirmation that explains the branch is *kept* by default (optional "also delete branch").
 - **Per-project hooks.** Run a command, script, or agent skill on worktree create/remove (e.g. `./scripts/setup.sh {worktree}` or `agy -p "/onboard"`). Placeholders: `{worktree}` `{branch}` `{repo}`.
@@ -38,7 +45,7 @@ Open **Settings** (⚙ in the toolbar, or `⌘,`):
 
 - **Theme** — pick a preset swatch or set custom background/text colours; toggle a transparent window + opacity.
 - **Agents** — add/edit/remove agents (icon, name, command). A green dot = installed (on `PATH`).
-- **Worktree** — the folder template for new worktrees (`../{repo}-wt-{branch}` by default).
+- **Worktree** — the folder template for new worktrees (`../{repo}-wt-{branch}` by default). Placeholders: `{repo}` `{branch}` `{timestamp}`.
 - **Keyboard shortcuts** — remap any action.
 
 **Per-project hooks** live on each project's ⚙ in the sidebar (they differ per repo, so they aren't global).
