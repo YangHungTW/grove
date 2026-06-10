@@ -768,14 +768,16 @@ class Store {
       // Both html AND body must be cleared: the CSS `html, body { background:
       // var(--bg) }` rule otherwise leaves the root <html> painting an opaque
       // fill behind everything, so the window vibrancy never shows through.
+      // Only the terminal is see-through (iTerm-style): html/body go transparent
+      // so the panes can show the window vibrancy, and the pane container stays
+      // transparent (the terminal canvas paints the single rgba tint). The chrome
+      // — sidebar, tab bars, settings panel, dialogs — all use --panel/--panel-2,
+      // which stay OPAQUE so the UI is solid and readable.
       root.style.background = 'transparent'
       document.body.style.background = 'transparent'
-      // Pane container stays fully transparent — the terminal canvas paints the
-      // single rgba tint (theme background). If the container also tinted, the
-      // two rgba layers would stack to nearly opaque under the glyphs.
       root.style.setProperty('--pane-bg', 'transparent')
-      root.style.setProperty('--panel', hexToRgba(s.background, Math.min(1, s.opacity + 0.12)))
-      root.style.setProperty('--panel-2', hexToRgba(s.background, Math.min(1, s.opacity + 0.2)))
+      root.style.setProperty('--panel', mix(s.background, '#ffffff', 0.06))
+      root.style.setProperty('--panel-2', mix(s.background, '#ffffff', 0.11))
     } else {
       root.style.background = s.background
       document.body.style.background = s.background
