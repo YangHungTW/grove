@@ -1,4 +1,7 @@
-import { execFileSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+
+const execFileAsync = promisify(execFile)
 
 export interface WorktreeInfo {
   path: string
@@ -19,8 +22,13 @@ export interface CreateWorktreeOptions {
   newBranch?: boolean
 }
 
-function git(repoRoot: string, args: string[]): string {
-  return execFileSync('git', args, { cwd: repoRoot, encoding: 'utf8' })
+// Async on purpose: these run in the Electron MAIN process. A synchronous
+// execFileSync would block the event loop (and therefore all pty I/O + IPC for
+// every window) for the whole duration of the git call — a large `git diff`
+// would visibly freeze every open terminal. execFile keeps the loop free.
+async function git(repoRoot: string, args: string[]): Promise<string> {
+  const { stdout } = await execFileAsync('git', args, { cwd: repoRoot, encoding: 'utf8' })
+  return stdout as string
 }
 
 function pad2(n: number): string {
@@ -60,19 +68,19 @@ export interface WorktreeStatus {
 }
 
 /** Working-tree status: dirty file count and ahead/behind vs upstream (0 if none). */
-export function worktreeStatus(path: string): WorktreeStatus {
+export async function worktreeStatus(path: string): Promise<WorktreeStatus> {
   let dirty = 0
   let ahead = 0
   let behind = 0
   try {
-    const porcelain = git(path, ['status', '--porcelain'])
+    const porcelain = await git(path, ['status', '--porcelain'])
     dirty = porcelain.split('\n').filter((l) => l.trim().length > 0).length
   } catch {
     /* not a repo */
   }
   try {
     // left-right counts vs upstream; throws if no upstream configured.
-    const lr = git(path, ['rev-list', '--count', '--left-right', '@{upstream}...HEAD']).trim()
+    const lr = (await git(path, ['rev-list', '--count', '--left-right', '@{upstream}...HEAD'])).trim()
     const [b, a] = lr.split(/\s+/).map((n) => parseInt(n, 10) || 0)
     behind = b
     ahead = a
@@ -83,16 +91,19 @@ export function worktreeStatus(path: string): WorktreeStatus {
 }
 
 /** True if `path` is inside a git working tree (used to validate opened folders). */
-export function isGitRepo(path: string): boolean {
+export async function isGitRepo(path: string): Promise<boolean> {
   try {
-    return git(path, ['rev-parse', '--is-inside-work-tree']).trim() === 'true'
+    return (await git(path, ['rev-parse', '--is-inside-work-tree'])).trim() === 'true'
   } catch {
     return false
   }
 }
 
 /** `git worktree add` — returns the resulting worktree's parsed info. */
-export function createWorktree(repoRoot: string, opts: CreateWorktreeOptions): WorktreeInfo {
+export async function createWorktree(
+  repoRoot: string,
+  opts: CreateWorktreeOptions
+): Promise<WorktreeInfo> {
   const path = opts.path
   if (!path) throw new Error('createWorktree: path is required')
   const args = ['worktree', 'add']
@@ -102,9 +113,9 @@ export function createWorktree(repoRoot: string, opts: CreateWorktreeOptions): W
   } else {
     args.push(path, opts.branch)
   }
-  git(repoRoot, args)
+  await git(repoRoot, args)
 
-  const list = listWorktrees(repoRoot)
+  const list = await listWorktrees(repoRoot)
   const match = list.find((w) => w.branch === opts.branch)
   if (match) return match
   // Fallback: synthesize from inputs if parsing missed it.
@@ -112,8 +123,8 @@ export function createWorktree(repoRoot: string, opts: CreateWorktreeOptions): W
 }
 
 /** `git worktree list --porcelain` parsed into structured records. */
-export function listWorktrees(repoRoot: string): WorktreeInfo[] {
-  const out = git(repoRoot, ['worktree', 'list', '--porcelain'])
+export async function listWorktrees(repoRoot: string): Promise<WorktreeInfo[]> {
+  const out = await git(repoRoot, ['worktree', 'list', '--porcelain'])
   const records: WorktreeInfo[] = []
   let current: Partial<WorktreeInfo> | null = null
 
@@ -156,38 +167,39 @@ export function listWorktrees(repoRoot: string): WorktreeInfo[] {
  *    with the repo's default branch (origin/HEAD, else `main`/`master`);
  *  - uncommitted work: `git diff HEAD` (staged + unstaged vs HEAD).
  * An explicit `baseRef` overrides the computed base. Untracked files are not
- * included (they have no diff against the index).
+ * included (they have no diff against the index). `core.quotepath=false` keeps
+ * non-ASCII (e.g. CJK) filenames literal instead of octal-escaped.
  */
-export function worktreeDiff(path: string, baseRef?: string): string {
+export async function worktreeDiff(path: string, baseRef?: string): Promise<string> {
   let base = baseRef
   if (!base) {
     for (const ref of ['origin/HEAD', 'main', 'master']) {
       try {
-        base = git(path, ['merge-base', 'HEAD', ref]).trim()
+        base = (await git(path, ['merge-base', 'HEAD', ref])).trim()
         if (base) break
       } catch {
         /* try the next candidate */
       }
     }
   }
-  const head = (() => {
-    try {
-      return git(path, ['rev-parse', 'HEAD']).trim()
-    } catch {
-      return ''
-    }
-  })()
+  let head = ''
+  try {
+    head = (await git(path, ['rev-parse', 'HEAD'])).trim()
+  } catch {
+    /* no HEAD */
+  }
+  const diffArgs = (range: string[]): string[] => ['-c', 'core.quotepath=false', 'diff', ...range]
   let committed = ''
   if (base && base !== head) {
     try {
-      committed = git(path, ['diff', `${base}..HEAD`])
+      committed = await git(path, diffArgs([`${base}..HEAD`]))
     } catch {
       /* base unreachable */
     }
   }
   let uncommitted = ''
   try {
-    uncommitted = git(path, ['diff', 'HEAD'])
+    uncommitted = await git(path, diffArgs(['HEAD']))
   } catch {
     /* not a repo */
   }
@@ -195,15 +207,15 @@ export function worktreeDiff(path: string, baseRef?: string): string {
 }
 
 /** `git worktree remove` (with `--force` when requested). */
-export function removeWorktree(
+export async function removeWorktree(
   repoRoot: string,
   worktreePath: string,
   opts: { force?: boolean; deleteBranch?: string } = {}
-): void {
+): Promise<void> {
   const args = ['worktree', 'remove']
   if (opts.force) args.push('--force')
   args.push(worktreePath)
-  git(repoRoot, args)
+  await git(repoRoot, args)
   // `git worktree remove` keeps the branch; delete it only when asked.
-  if (opts.deleteBranch) git(repoRoot, ['branch', '-D', opts.deleteBranch])
+  if (opts.deleteBranch) await git(repoRoot, ['branch', '-D', opts.deleteBranch])
 }

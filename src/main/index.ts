@@ -1,7 +1,8 @@
 import { app, BrowserWindow, Notification, dialog, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { join, resolve, basename, dirname } from 'node:path'
 import { execFile } from 'node:child_process'
-import { existsSync, copyFileSync, readFileSync } from 'node:fs'
+import { existsSync, copyFileSync } from 'node:fs'
+import { stat as statAsync, readFile as readFileAsync } from 'node:fs/promises'
 import { SessionRegistry } from '../core/sessionRegistry'
 import { PtySession } from '../core/session'
 import {
@@ -83,7 +84,9 @@ function commandExists(cmd: string): boolean {
   let ok = false
   try {
     const shell = process.env.SHELL || '/bin/zsh'
-    execFileSync(shell, ['-lc', `command -v ${first}`], { stdio: 'ignore' })
+    // Pass the command name as a positional arg, not interpolated into the
+    // shell string, so a setting like `claude; rm -rf ~` can't inject.
+    execFileSync(shell, ['-lc', 'command -v "$1"', '--', first], { stdio: 'ignore' })
     ok = true
   } catch {
     ok = false
@@ -106,18 +109,27 @@ function resolveWorktreePath(repoRoot: string, branch: string): string {
   return resolve(repoRoot, sub)
 }
 
+/** Single-quote a value for safe interpolation into a shell command. */
+function shQuote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`
+}
+
 /**
  * Run a user hook (fire-and-forget) in a login shell. The command can be any
  * shell command, a script path, or an agent invocation (e.g. `agy -p "/setup"`).
  * {worktree}/{branch}/{repo} placeholders are expanded; the same values are also
  * exposed as $CCM_WORKTREE_PATH / $CCM_BRANCH / $CCM_REPO.
+ *
+ * Substituted values are SHELL-QUOTED: branch/worktree/repo can contain shell
+ * metacharacters (git allows `;` `|` `$()` backticks in branch names), so an
+ * unquoted `{branch}` would be a command-injection vector when a hook runs.
  */
 function runHook(cmd: string, cwd: string, extraEnv: Record<string, string>): void {
   if (!cmd || !cmd.trim()) return
   const expanded = cmd
-    .replace(/\{worktree\}/g, extraEnv.CCM_WORKTREE_PATH ?? '')
-    .replace(/\{branch\}/g, extraEnv.CCM_BRANCH ?? '')
-    .replace(/\{repo\}/g, extraEnv.CCM_REPO ?? '')
+    .replace(/\{worktree\}/g, shQuote(extraEnv.CCM_WORKTREE_PATH ?? ''))
+    .replace(/\{branch\}/g, shQuote(extraEnv.CCM_BRANCH ?? ''))
+    .replace(/\{repo\}/g, shQuote(extraEnv.CCM_REPO ?? ''))
   const shell = process.env.SHELL || '/bin/zsh'
   try {
     execFile(shell, ['-lc', expanded], { cwd, env: { ...process.env, ...extraEnv } }, () => {})
@@ -138,8 +150,8 @@ function applyAppearance(s: AppSettings): void {
 }
 
 /** Validate + record a project by path. Throws if it is not a git repo. */
-function addProject(repoRoot: string): ProjectEntry {
-  if (!isGitRepo(repoRoot)) throw new Error(`not a git repository: ${repoRoot}`)
+async function addProject(repoRoot: string): Promise<ProjectEntry> {
+  if (!(await isGitRepo(repoRoot))) throw new Error(`not a git repository: ${repoRoot}`)
   return store().add(repoRoot)
 }
 
@@ -182,9 +194,21 @@ function launchSpecFor(req: CreateSessionRequest): {
   if (req.kind === 'agent') {
     // Login NON-interactive shell: gets PATH from the profile but does NOT load
     // .zshrc/p10k, so the agent pane shows the CLI directly with no shell prompt.
-    // The agent command comes from the renderer (req.command); CCM_AGENT_CMD
-    // overrides it (used by tests to avoid real auth).
-    const agentCmd = process.env.CCM_AGENT_CMD ?? req.command ?? 'claude'
+    // CCM_AGENT_CMD (a trusted env override, used by tests) takes precedence.
+    const override = process.env.CCM_AGENT_CMD
+    if (override) return { command: shell, args: ['-lc', override] }
+    // Defense-in-depth: the command runs via `$SHELL -lc`, so a compromised
+    // renderer could otherwise request an arbitrary command. The legitimate
+    // value (built by buildAgentLaunch) always begins with a CONFIGURED agent
+    // command, so require that prefix before handing it to the shell.
+    const agentCmd = req.command ?? 'claude'
+    const allowed = settings()
+      .load()
+      .agents.map((a) => a.command.trim())
+      .filter(Boolean)
+    const ok =
+      allowed.length === 0 || allowed.some((ac) => agentCmd === ac || agentCmd.startsWith(`${ac} `))
+    if (!ok) throw new Error(`agent command not allowed: ${agentCmd.split(/\s+/)[0]}`)
     return { command: shell, args: ['-lc', agentCmd] }
   }
   // A shell pane is an interactive login shell (p10k prompt expected).
@@ -294,9 +318,9 @@ function registerIpc(): void {
 
   ipcMain.handle(
     Channels.worktreeCreate,
-    (_e: IpcMainInvokeEvent, repoRoot: string, opts: CreateWorktreeOptions) => {
+    async (_e: IpcMainInvokeEvent, repoRoot: string, opts: CreateWorktreeOptions) => {
       const path = opts.path ?? resolveWorktreePath(repoRoot, opts.branch)
-      const info = createWorktree(repoRoot, { ...opts, path })
+      const info = await createWorktree(repoRoot, { ...opts, path })
       runHook(store().get(repoRoot)?.hookCreate ?? '', info.path, {
         CCM_WORKTREE_PATH: info.path,
         CCM_BRANCH: info.branch,
@@ -316,13 +340,19 @@ function registerIpc(): void {
     (_e: IpcMainInvokeEvent, worktreePath: string, baseRef?: string) =>
       worktreeDiff(worktreePath, baseRef)
   )
-  ipcMain.handle(Channels.worktreeRemove, (_e: IpcMainInvokeEvent, req: WorktreeRemoveRequest) => {
-    runHook(store().get(req.repoRoot)?.hookRemove ?? '', req.path, {
-      CCM_WORKTREE_PATH: req.path,
-      CCM_REPO: req.repoRoot
-    })
-    removeWorktree(req.repoRoot, req.path, { force: req.force, deleteBranch: req.deleteBranch })
-  })
+  ipcMain.handle(
+    Channels.worktreeRemove,
+    async (_e: IpcMainInvokeEvent, req: WorktreeRemoveRequest) => {
+      runHook(store().get(req.repoRoot)?.hookRemove ?? '', req.path, {
+        CCM_WORKTREE_PATH: req.path,
+        CCM_REPO: req.repoRoot
+      })
+      await removeWorktree(req.repoRoot, req.path, {
+        force: req.force,
+        deleteBranch: req.deleteBranch
+      })
+    }
+  )
 
   ipcMain.handle(Channels.sessionCreate, (_e: IpcMainInvokeEvent, req: CreateSessionRequest) =>
     createSession(req)
@@ -348,9 +378,14 @@ function registerIpc(): void {
       return res.filePaths[0]
     }
   )
-  ipcMain.handle(Channels.fileRead, (_e: IpcMainInvokeEvent, filePath: string) =>
-    readFileSync(filePath, 'utf8')
-  )
+  ipcMain.handle(Channels.fileRead, async (_e: IpcMainInvokeEvent, filePath: string) => {
+    const MAX = 5 * 1024 * 1024 // 5 MB — viewer panes are for human-readable files
+    const { size } = await statAsync(filePath)
+    if (size > MAX) {
+      throw new Error(`File too large to preview (${(size / 1048576).toFixed(1)} MB; limit 5 MB)`)
+    }
+    return readFileAsync(filePath, 'utf8')
+  })
 
   ipcMain.on(Channels.sessionInput, (_e, id: string, data: string) => ptys.get(id)?.write(data))
   ipcMain.on(Channels.sessionResize, (_e, id: string, cols: number, rows: number) =>
@@ -436,6 +471,15 @@ function createWindow(): void {
     for (const p of ptys.values()) p.kill()
     ptys.clear()
     mainWindow = null
+  })
+
+  // Hardening (defense-in-depth for rendered Markdown/HTML): never let the
+  // renderer spawn new windows, and never let it navigate the main window away
+  // from our own app (the classic Electron navigation-hijack vector).
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  mainWindow.webContents.on('will-navigate', (e, url) => {
+    const dev = process.env.ELECTRON_RENDERER_URL
+    if (url !== dev && !url.startsWith('file://')) e.preventDefault()
   })
 
   if (process.env.ELECTRON_RENDERER_URL) {
