@@ -40,6 +40,29 @@ describe('parseUnifiedDiff', () => {
     expect(parseUnifiedDiff('')).toEqual([])
   })
 
+  it('decodes git-quoted (octal-escaped) non-ASCII paths', () => {
+    const cjk =
+      'diff --git "a/\\344\\270\\255.txt" "b/\\344\\270\\255.txt"\n' +
+      'index 1..2 100644\n' +
+      '--- "a/\\344\\270\\255.txt"\n' +
+      '+++ "b/\\344\\270\\255.txt"\n' +
+      '@@ -1 +1 @@\n' +
+      '-a\n' +
+      '+b\n'
+    const [f] = parseUnifiedDiff(cjk)
+    expect(f.oldPath).toBe('中.txt')
+    expect(f.newPath).toBe('中.txt')
+  })
+
+  it('names a binary file from a git-quoted header', () => {
+    const bin =
+      'diff --git "a/\\345\\234\\226.png" "b/\\345\\234\\226.png"\n' +
+      'Binary files "a/\\345\\234\\226.png" and "b/\\345\\234\\226.png" differ\n'
+    const [f] = parseUnifiedDiff(bin)
+    expect(f.newPath).toBe('圖.png')
+    expect(f.binary).toBe(true)
+  })
+
   it('names binary files from the header and flags them (no phantom +0/−0)', () => {
     const bin = `diff --git a/e2e/smoke.png b/e2e/smoke.png
 index ea717e4..5187f0f 100644

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { store } from './store'
 import { parseUnifiedDiff, type DiffFile } from './diffParse'
 import type { SessionSnapshot } from '../main/ipc'
@@ -40,9 +40,23 @@ export function DiffPane({
   const [files, setFiles] = useState<DiffFile[] | null>(null)
   const [empty, setEmpty] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [collapsed, setCollapsed] = useState<Set<number>>(new Set())
+  // Keyed by file path (not array index) so collapse state survives a Refresh
+  // that reorders/adds files.
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [showIndex, setShowIndex] = useState(true)
   const fileRefs = useRef<(HTMLDivElement | null)[]>([])
+
+  // Per-file name + add/del counts, computed once per parse (used by both the
+  // index and the body — no double O(N) walk).
+  const metas = useMemo(
+    () =>
+      (files ?? []).map((f) => {
+        const name = f.newPath && f.newPath !== '/dev/null' ? f.newPath : f.oldPath
+        const { add, del } = counts(f)
+        return { name, add, del, binary: !!f.binary }
+      }),
+    [files]
+  )
 
   const load = useCallback(() => {
     const path = session.filePath
@@ -54,9 +68,19 @@ export function DiffPane({
     window.api
       .worktreeDiff(path)
       .then((text) => {
-        setFiles(parseUnifiedDiff(text))
+        const parsed = parseUnifiedDiff(text)
+        setFiles(parsed)
         setEmpty(text.trim().length === 0)
-        setCollapsed(new Set()) // start fully expanded
+        // Collapse large files by default so a huge agent diff doesn't render
+        // thousands of DOM nodes at once (no virtualization). Small files stay
+        // open; the user can expand the big ones.
+        const BIG = 400 // lines
+        const big = new Set<string>()
+        for (const f of parsed) {
+          const n = f.hunks.reduce((acc, h) => acc + h.lines.length, 0)
+          if (n > BIG) big.add(f.newPath && f.newPath !== '/dev/null' ? f.newPath : f.oldPath)
+        }
+        setCollapsed(big)
         fileRefs.current = []
       })
       .catch((err) => setError(err instanceof Error ? err.message : String(err)))
@@ -64,18 +88,18 @@ export function DiffPane({
 
   useEffect(() => load(), [load])
 
-  const toggle = (fi: number): void =>
+  const toggle = (key: string): void =>
     setCollapsed((prev) => {
       const next = new Set(prev)
-      if (next.has(fi)) next.delete(fi)
-      else next.add(fi)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
       return next
     })
 
-  const jumpTo = (fi: number): void => {
+  const jumpTo = (fi: number, key: string): void => {
     setCollapsed((prev) => {
       const next = new Set(prev)
-      next.delete(fi) // expand the target so the jump lands on content
+      next.delete(key) // expand the target so the jump lands on content
       return next
     })
     requestAnimationFrame(() =>
@@ -123,24 +147,23 @@ export function DiffPane({
       <div className="diff-main">
         {showIndex && hasFiles && (
           <div className="diff-index">
-            {files!.map((f, fi) => {
-              const c = counts(f)
-              const name = f.newPath && f.newPath !== '/dev/null' ? f.newPath : f.oldPath
+            {files!.map((_f, fi) => {
+              const m = metas[fi]
               return (
                 <button
                   className="diff-index-item"
                   key={fi}
-                  title={name}
-                  onClick={() => jumpTo(fi)}
+                  title={m.name}
+                  onClick={() => jumpTo(fi, m.name)}
                 >
-                  <span className="diff-index-name">{basename(name)}</span>
+                  <span className="diff-index-name">{basename(m.name)}</span>
                   <span className="diff-index-stats">
-                    {f.binary ? (
+                    {m.binary ? (
                       <span className="diff-bin-badge">bin</span>
                     ) : (
                       <>
-                        <span className="diff-add-count">+{c.add}</span>
-                        <span className="diff-del-count">−{c.del}</span>
+                        <span className="diff-add-count">+{m.add}</span>
+                        <span className="diff-del-count">−{m.del}</span>
                       </>
                     )}
                   </span>
@@ -159,9 +182,8 @@ export function DiffPane({
             <div className="diff-empty">No changes in this worktree.</div>
           ) : (
             files.map((f, fi) => {
-              const c = counts(f)
-              const name = f.newPath && f.newPath !== '/dev/null' ? f.newPath : f.oldPath
-              const isCollapsed = collapsed.has(fi)
+              const m = metas[fi]
+              const isCollapsed = collapsed.has(m.name)
               return (
                 <div
                   className="diff-file"
@@ -170,18 +192,18 @@ export function DiffPane({
                 >
                   <button
                     className={'diff-file-header' + (isCollapsed ? ' collapsed' : '')}
-                    onClick={() => toggle(fi)}
+                    onClick={() => toggle(m.name)}
                     aria-expanded={!isCollapsed}
                   >
                     <span className="diff-file-chevron">{isCollapsed ? '▸' : '▾'}</span>
-                    <span className="diff-file-path">{name}</span>
+                    <span className="diff-file-path">{m.name}</span>
                     <span className="diff-file-stats">
-                      {f.binary ? (
+                      {m.binary ? (
                         <span className="diff-bin-badge">bin</span>
                       ) : (
                         <>
-                          <span className="diff-add-count">+{c.add}</span>
-                          <span className="diff-del-count">−{c.del}</span>
+                          <span className="diff-add-count">+{m.add}</span>
+                          <span className="diff-del-count">−{m.del}</span>
                         </>
                       )}
                     </span>

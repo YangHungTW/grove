@@ -41,7 +41,11 @@ export function renderMarkdown(md: string, baseDir?: string): string {
     if (!src || /^[a-z][a-z0-9+.-]*:/i.test(src) || src.startsWith('//') || src.startsWith('#')) {
       return
     }
-    const abs = src.startsWith('/') ? `file://${src}` : `file://${baseDir}/${src}`
+    // encodeURI so spaces / unicode / '#' in the path don't break the file://
+    // URL (Chromium rejects unencoded spaces); it preserves '/' and ':'.
+    const abs = src.startsWith('/')
+      ? `file://${encodeURI(src)}`
+      : `file://${encodeURI(baseDir)}/${encodeURI(src)}`
     img.setAttribute('src', abs)
   })
   return tpl.innerHTML

@@ -20,6 +20,12 @@ describe('renderMarkdown', () => {
     expect(out).toContain('file:///home/me/proj/assets/logo.svg')
   })
 
+  it('encodes spaces in the baseDir of rewritten file:// image paths', () => {
+    const out = renderMarkdown('![logo](assets/logo.png)', '/Users/me/My Projects/repo')
+    expect(out).toContain('file:///Users/me/My%20Projects/repo/assets/logo.png')
+    expect(out).not.toContain('My Projects/repo/assets')
+  })
+
   it('leaves absolute image URLs untouched', () => {
     const out = renderMarkdown('![x](https://example.com/x.png)', '/home/me/proj')
     expect(out).toContain('https://example.com/x.png')

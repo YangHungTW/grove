@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { store } from './store'
 import { renderMarkdown } from './markdown'
 import type { SessionSnapshot } from '../main/ipc'
@@ -32,6 +32,10 @@ export function ViewerPane({
 
   useEffect(() => {
     let alive = true
+    // Clear any state from a previous file so a stale error/content isn't shown
+    // while the new file loads.
+    setError(null)
+    setContent(null)
     if (!session.filePath) {
       setError('No file path')
       return
@@ -52,6 +56,16 @@ export function ViewerPane({
   const style: CSSProperties = visible
     ? { display: 'block', gridColumn: column }
     : { display: 'none' }
+
+  // Render Markdown once per content/file change — not on every store notify
+  // (marked + DOMPurify is non-trivial and ViewerPane re-renders on pty events).
+  const markdownHtml = useMemo(
+    () =>
+      content != null && session.viewerKind !== 'html'
+        ? renderMarkdown(content, dirOf(session.filePath))
+        : '',
+    [content, session.viewerKind, session.filePath]
+  )
 
   return (
     <div
@@ -75,10 +89,7 @@ export function ViewerPane({
           srcDoc={content}
         />
       ) : (
-        <div
-          className="viewer-markdown"
-          dangerouslySetInnerHTML={{ __html: renderMarkdown(content, dirOf(session.filePath)) }}
-        />
+        <div className="viewer-markdown" dangerouslySetInnerHTML={{ __html: markdownHtml }} />
       )}
     </div>
   )
