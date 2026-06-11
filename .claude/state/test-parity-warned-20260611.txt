@@ -1,0 +1,6 @@
+src/core/worktree.ts
+src/main/index.ts
+src/renderer/markdown.ts
+src/renderer/ViewerPane.tsx
+src/renderer/diffParse.ts
+src/renderer/DiffPane.tsx
