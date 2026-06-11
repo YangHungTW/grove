@@ -106,7 +106,7 @@ export function TabBar(): JSX.Element {
           id="zoom-toggle"
           className={'icon-btn' + (s.isZoomed() ? ' active' : '')}
           aria-label="Zoom pane"
-          title={(s.isZoomed() ? 'Unzoom pane' : 'Zoom pane') + ' (⌘⇧Enter)'}
+          title={(s.isZoomed() ? 'Unzoom pane' : 'Zoom pane') + ` (${s.settings.keybindings.zoomPane})`}
           disabled={!s.focusedSessionId}
           onClick={() => store.toggleZoom()}
         >

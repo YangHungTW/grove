@@ -20,7 +20,8 @@ const KEYBIND_ACTIONS: Record<KeybindAction, () => void> = {
   focusRight: () => store.focusGroup(1),
   moveToOtherGroup: () => store.moveFocusedToGroup(store.focusedGroup(store.activeWorktreeId ?? '') === 0 ? 1 : 0),
   renameTab: () => store.renameFocused(),
-  toggleSidebar: () => store.toggleSidebar()
+  toggleSidebar: () => store.toggleSidebar(),
+  zoomPane: () => store.toggleZoom()
 }
 
 export function App(): JSX.Element {
@@ -50,10 +51,6 @@ export function App(): JSX.Element {
       if (e.shiftKey && k === 'u') {
         e.preventDefault()
         store.jumpToPending()
-      } else if (e.shiftKey && k === 'enter') {
-        // ⌘⇧Enter — zoom: temporarily maximize the focused pane (iTerm-style).
-        e.preventDefault()
-        store.toggleZoom()
       } else if (e.shiftKey && e.code === 'BracketRight') {
         // ⌘⇧] — next tab. Match on e.code: with modifiers the bracket keys
         // report e.key '}'/'{' (and option-glyphs on macOS); e.code is stable.

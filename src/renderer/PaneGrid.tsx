@@ -171,6 +171,22 @@ function Pane({
     // Fit whenever this pane actually has a box — fires on display:none→block
     // (worktree/tab switch, split), grid drag, and window resize. The resize
     // also sends SIGWINCH so full-screen TUI agents repaint.
+    //
+    // The pty notification is DEBOUNCED: a single split/zoom toggle changes the
+    // pane's box several times in a burst (grid columns, gutters, fraction
+    // reset), and forwarding every intermediate size sends a SIGWINCH per step
+    // — zsh/p10k redraws its prompt on each one, stacking stale prompts in the
+    // scrollback. The xterm box still fits immediately; only the final
+    // geometry reaches the shell. The first resize is sent right away so a
+    // fresh session's prompt renders at the correct width.
+    let resizeTimer: number | undefined
+    let lastSent = { cols: -1, rows: -1 }
+    const sendResize = (): void => {
+      const { cols, rows } = term
+      if (cols === lastSent.cols && rows === lastSent.rows) return
+      lastSent = { cols, rows }
+      window.api.sessionResize(session.id, cols, rows)
+    }
     const refit = (): void => {
       if (el.clientHeight < 2 || el.clientWidth < 2) return
       try {
@@ -179,10 +195,15 @@ function Pane({
         // row) isn't flush against the pane edge. The canvas sits at top:0, so a
         // shorter terminal just leaves a clean margin at the bottom.
         if (term.rows > 4) term.resize(term.cols, term.rows - 1)
-        window.api.sessionResize(session.id, term.cols, term.rows)
         term.refresh(0, term.rows - 1) // force a full repaint (new/reshown pane)
       } catch {
         /* ignore transient measure errors */
+      }
+      if (lastSent.cols < 0) {
+        sendResize()
+      } else {
+        window.clearTimeout(resizeTimer)
+        resizeTimer = window.setTimeout(sendResize, 120)
       }
     }
     const ro = new ResizeObserver(refit)
@@ -197,6 +218,7 @@ function Pane({
 
     return () => {
       alive = false
+      window.clearTimeout(resizeTimer)
       ro.disconnect()
       store.unregisterPane(session.id)
     }

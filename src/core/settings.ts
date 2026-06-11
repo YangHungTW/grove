@@ -26,6 +26,7 @@ export type KeybindAction =
   | 'moveToOtherGroup'
   | 'renameTab'
   | 'toggleSidebar'
+  | 'zoomPane'
 
 export type Keybindings = Record<KeybindAction, string>
 
@@ -40,7 +41,8 @@ export const DEFAULT_KEYBINDINGS: Keybindings = {
   focusRight: 'Ctrl+Shift+L',
   moveToOtherGroup: 'Ctrl+Shift+M',
   renameTab: 'Ctrl+Shift+R',
-  toggleSidebar: 'Ctrl+Shift+S'
+  toggleSidebar: 'Ctrl+Shift+S',
+  zoomPane: 'Ctrl+Shift+T'
 }
 
 /** Human labels for the settings UI, in display order. */
@@ -54,7 +56,8 @@ export const KEYBIND_LABELS: { action: KeybindAction; label: string }[] = [
   { action: 'focusRight', label: 'Focus right group' },
   { action: 'moveToOtherGroup', label: 'Move tab to other group' },
   { action: 'renameTab', label: 'Rename tab' },
-  { action: 'toggleSidebar', label: 'Toggle sidebar' }
+  { action: 'toggleSidebar', label: 'Toggle sidebar' },
+  { action: 'zoomPane', label: 'Zoom / unzoom pane' }
 ]
 
 /** Fixed (non-rebindable) shortcuts, shown read-only in settings for discovery.
@@ -70,7 +73,6 @@ export const FIXED_SHORTCUTS: { label: string; keys: string }[] = [
   { label: 'Close tab', keys: '⌘W' },
   { label: 'Split / merge', keys: '⌘D' },
   { label: 'Find in terminal', keys: '⌘F' },
-  { label: 'Zoom / unzoom pane', keys: '⌘⇧Enter' },
   { label: 'Toggle sidebar', keys: '⌘B' },
   { label: 'Jump to agent needing input', keys: '⌘⇧U' },
   { label: 'Open settings', keys: '⌘,' }

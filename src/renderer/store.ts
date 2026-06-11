@@ -229,7 +229,10 @@ class Store {
         pane.fit.fit()
         const { cols, rows } = pane.term
         window.api.sessionResize(id, cols, rows)
-        if (newlyShown.includes(id) && rows > 1) {
+        // The rows-1→rows bounce forces a full-screen TUI to repaint. Plain
+        // shells don't need it — for them each extra SIGWINCH just reprints
+        // the prompt, stacking stale copies in the scrollback.
+        if (newlyShown.includes(id) && rows > 1 && this.sessions.get(id)?.kind === 'agent') {
           pane.term.resize(cols, rows - 1)
           window.api.sessionResize(id, cols, rows - 1)
           requestAnimationFrame(() => {

@@ -73,7 +73,10 @@ export async function worktreeStatus(path: string): Promise<WorktreeStatus> {
   let ahead = 0
   let behind = 0
   try {
-    const porcelain = await git(path, ['status', '--porcelain'])
+    // -uall counts each untracked FILE (porcelain otherwise collapses a whole
+    // untracked directory into one entry), so the card's dirty count matches
+    // the file count in the diff/review pane.
+    const porcelain = await git(path, ['status', '--porcelain', '-uall'])
     dirty = porcelain.split('\n').filter((l) => l.trim().length > 0).length
   } catch {
     /* not a repo */
@@ -161,17 +164,82 @@ export async function listWorktrees(repoRoot: string): Promise<WorktreeInfo[]> {
   return records
 }
 
+/** True when `path` is a linked worktree (`git worktree add`), false for the
+ * repo's primary checkout. A linked worktree's git dir always lives at the
+ * main repo's `.git/worktrees/<name>` — a path-shape check, deliberately not a
+ * string comparison against --git-common-dir (symlinked tmp dirs on macOS make
+ * the two render differently for the same location). */
+export async function isLinkedWorktree(path: string): Promise<boolean> {
+  try {
+    const gitDir = (await git(path, ['rev-parse', '--absolute-git-dir'])).trim()
+    return /\.git[/\\]worktrees[/\\][^/\\]+$/.test(gitDir)
+  } catch {
+    return false
+  }
+}
+
+const diffArgs = (range: string[]): string[] => ['-c', 'core.quotepath=false', 'diff', ...range]
+
+// Hard cap on per-file `--no-index` spawns for untracked files — an agent that
+// generated thousands of files shouldn't fork thousands of git processes.
+const UNTRACKED_DIFF_CAP = 200
+
+/** Unified diff of untracked files (each against /dev/null), so brand-new
+ * files show up in the review pane. Respects .gitignore. */
+async function untrackedDiff(path: string): Promise<string> {
+  let names: string[] = []
+  try {
+    names = (await git(path, ['ls-files', '--others', '--exclude-standard']))
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean)
+  } catch {
+    return ''
+  }
+  const parts: string[] = []
+  for (const name of names.slice(0, UNTRACKED_DIFF_CAP)) {
+    try {
+      // `--no-index` exits 1 when the files differ — the expected outcome, so
+      // the diff body arrives on the error's stdout.
+      parts.push(await git(path, diffArgs(['--no-index', '--', '/dev/null', name])))
+    } catch (err) {
+      const out = (err as { stdout?: string }).stdout
+      if (out) parts.push(out)
+    }
+  }
+  return parts.join('')
+}
+
 /**
- * The set of changes a worktree introduced, as a unified diff. Combines:
+ * The set of changes a worktree introduced, as a unified diff.
+ *
+ * For a LINKED worktree (a feature branch) it combines:
  *  - committed work: `git diff <base>..HEAD`, where `base` is the merge-base
  *    with the repo's default branch (origin/HEAD, else `main`/`master`);
- *  - uncommitted work: `git diff HEAD` (staged + unstaged vs HEAD).
- * An explicit `baseRef` overrides the computed base. Untracked files are not
- * included (they have no diff against the index). `core.quotepath=false` keeps
- * non-ASCII (e.g. CJK) filenames literal instead of octal-escaped.
+ *  - uncommitted work: `git diff HEAD` (staged + unstaged vs HEAD);
+ *  - untracked files, each diffed against /dev/null.
+ *
+ * The PRIMARY checkout is the repo's long-lived branch, not a feature branch
+ * under review — diffing it against the default branch would dump the whole
+ * branch history (e.g. develop vs main), so only uncommitted + untracked work
+ * is shown (matching the card's dirty count).
+ *
+ * An explicit `baseRef` overrides the computed base (and the primary-checkout
+ * shortcut). `core.quotepath=false` keeps non-ASCII (e.g. CJK) filenames
+ * literal instead of octal-escaped.
  */
 export async function worktreeDiff(path: string, baseRef?: string): Promise<string> {
   let base = baseRef
+  if (!base && !(await isLinkedWorktree(path))) {
+    let tracked = ''
+    try {
+      tracked = await git(path, diffArgs(['HEAD']))
+    } catch {
+      /* no HEAD / not a repo */
+    }
+    const untracked = await untrackedDiff(path)
+    return [tracked, untracked].filter((s) => s.trim().length > 0).join('\n')
+  }
   if (!base) {
     for (const ref of ['origin/HEAD', 'main', 'master']) {
       try {
@@ -188,7 +256,6 @@ export async function worktreeDiff(path: string, baseRef?: string): Promise<stri
   } catch {
     /* no HEAD */
   }
-  const diffArgs = (range: string[]): string[] => ['-c', 'core.quotepath=false', 'diff', ...range]
   let committed = ''
   if (base && base !== head) {
     try {
@@ -203,7 +270,8 @@ export async function worktreeDiff(path: string, baseRef?: string): Promise<stri
   } catch {
     /* not a repo */
   }
-  return [committed, uncommitted].filter((s) => s.trim().length > 0).join('\n')
+  const untracked = await untrackedDiff(path)
+  return [committed, uncommitted, untracked].filter((s) => s.trim().length > 0).join('\n')
 }
 
 /** The repo's default branch: origin/HEAD if set, else an existing local

@@ -130,13 +130,13 @@ try {
   assert.ok(after[0] > before[0] + 20, `drag-resize: col0 should widen (${before[0]}→${after[0]})`)
   const dragResize = true
 
-  // 3c) ZOOM — ⌘⇧Enter maximizes the focused pane (1 visible), toggles back.
-  await win.keyboard.press('Meta+Shift+Enter')
+  // 3c) ZOOM — ⌃⇧T (configurable) maximizes the focused pane, toggles back.
+  await win.keyboard.press('Control+Shift+T')
   await win.waitForFunction(
     () => [...document.querySelectorAll('.pane')].filter((p) => getComputedStyle(p).display !== 'none').length === 1,
     { timeout: 5000 }
   )
-  await win.keyboard.press('Meta+Shift+Enter')
+  await win.keyboard.press('Control+Shift+T')
   await win.waitForFunction(
     () => [...document.querySelectorAll('.pane')].filter((p) => getComputedStyle(p).display !== 'none').length >= 2,
     { timeout: 5000 }

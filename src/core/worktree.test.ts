@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -13,7 +13,8 @@ import {
   worktreeDiff,
   defaultBranch,
   commitAll,
-  mergeIntoDefault
+  mergeIntoDefault,
+  isLinkedWorktree
 } from './worktree'
 
 let repo: string
@@ -74,6 +75,14 @@ describe('worktree git operations', () => {
     expect((await worktreeStatus(repo)).dirty).toBe(2)
   })
 
+  it('worktreeStatus counts every file inside an untracked directory (matches the diff pane)', async () => {
+    mkdirSync(join(repo, 'newdir', 'nested'), { recursive: true })
+    writeFileSync(join(repo, 'newdir', 'a.txt'), 'a')
+    writeFileSync(join(repo, 'newdir', 'b.txt'), 'b')
+    writeFileSync(join(repo, 'newdir', 'nested', 'c.txt'), 'c')
+    expect((await worktreeStatus(repo)).dirty).toBe(3)
+  })
+
   it('worktreeStatus returns ahead/behind 0 with no upstream', async () => {
     const s = await worktreeStatus(repo)
     expect(s.ahead).toBe(0)
@@ -100,6 +109,63 @@ describe('worktree git operations', () => {
 
   it('worktreeDiff is empty for a clean worktree', async () => {
     expect((await worktreeDiff(repo)).trim()).toBe('')
+  })
+
+  it('worktreeDiff includes untracked files (diffed against /dev/null)', async () => {
+    // The card's dirty count includes untracked files — the diff pane must too.
+    writeFileSync(join(repo, 'brand-new.txt'), 'first line\n')
+    const diff = await worktreeDiff(repo)
+    expect(diff).toContain('brand-new.txt')
+    expect(diff).toMatch(/^\+first line$/m)
+    expect(diff).toContain('new file mode')
+  })
+
+  it('worktreeDiff respects .gitignore for untracked files', async () => {
+    writeFileSync(join(repo, '.gitignore'), 'ignored.log\n')
+    git(['add', '.gitignore'])
+    git(['commit', '-q', '-m', 'ignore logs'])
+    writeFileSync(join(repo, 'ignored.log'), 'noise\n')
+    expect(await worktreeDiff(repo)).not.toContain('ignored.log')
+  })
+
+  it('isLinkedWorktree is false for the primary checkout, true for a linked one', async () => {
+    expect(await isLinkedWorktree(repo)).toBe(false)
+    const wtPath = join(repo, '..', `wt-linked-${Date.now()}`)
+    await createWorktree(repo, { path: wtPath, branch: 'feat-linked', newBranch: true })
+    try {
+      expect(await isLinkedWorktree(wtPath)).toBe(true)
+    } finally {
+      rmSync(wtPath, { recursive: true, force: true })
+    }
+  })
+
+  it('worktreeDiff on the PRIMARY checkout shows only uncommitted work, even on a non-default branch', async () => {
+    // Reproduces: primary checkout on `develop`, far ahead of `main` — the diff
+    // pane must NOT dump the whole develop-vs-main history (196-file syndrome).
+    git(['checkout', '-q', '-b', 'develop'])
+    writeFileSync(join(repo, 'committed-on-develop.txt'), 'lots of history\n')
+    await commitAll(repo, 'develop work')
+    writeFileSync(join(repo, 'README.md'), '# uncommitted edit\n')
+
+    const diff = await worktreeDiff(repo)
+    expect(diff).toContain('README.md')
+    expect(diff).not.toContain('committed-on-develop.txt')
+  })
+
+  it('worktreeDiff on a LINKED worktree still includes committed + uncommitted work', async () => {
+    const wtPath = join(repo, '..', `wt-diff-${Date.now()}`)
+    await createWorktree(repo, { path: wtPath, branch: 'feat-diff', newBranch: true })
+    try {
+      writeFileSync(join(wtPath, 'committed.txt'), 'committed\n')
+      await commitAll(wtPath, 'committed change')
+      writeFileSync(join(wtPath, 'README.md'), '# uncommitted\n')
+
+      const diff = await worktreeDiff(wtPath)
+      expect(diff).toContain('committed.txt')
+      expect(diff).toContain('README.md')
+    } finally {
+      rmSync(wtPath, { recursive: true, force: true })
+    }
   })
 
   it('removeWorktree makes it disappear from the list', async () => {
