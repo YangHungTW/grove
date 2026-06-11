@@ -56,6 +56,37 @@ function stripPathPrefix(p: string): string {
   return path.replace(/^[ab]\//, '')
 }
 
+/** One row of a side-by-side (split) diff: old text left, new text right.
+ * null = no counterpart (a pure insertion/deletion leaves the other cell blank). */
+export interface SplitRow {
+  left: DiffLine | null
+  right: DiffLine | null
+}
+
+/**
+ * Pair a hunk's lines into side-by-side rows: context lines mirror into both
+ * columns; each run of deletions is paired index-by-index with the run of
+ * additions that follows it (the standard split-diff alignment).
+ */
+export function splitHunkRows(lines: DiffLine[]): SplitRow[] {
+  const rows: SplitRow[] = []
+  let i = 0
+  while (i < lines.length) {
+    if (lines[i].type === 'context') {
+      rows.push({ left: lines[i], right: lines[i] })
+      i++
+      continue
+    }
+    const dels: DiffLine[] = []
+    const adds: DiffLine[] = []
+    while (i < lines.length && lines[i].type === 'del') dels.push(lines[i++])
+    while (i < lines.length && lines[i].type === 'add') adds.push(lines[i++])
+    for (let k = 0; k < Math.max(dels.length, adds.length); k++)
+      rows.push({ left: dels[k] ?? null, right: adds[k] ?? null })
+  }
+  return rows
+}
+
 /**
  * Parse a unified diff (the output of `git diff`) into structured files → hunks
  * → typed lines. Unknown/metadata lines (index, mode, "\ No newline") are

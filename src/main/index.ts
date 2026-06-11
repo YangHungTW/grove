@@ -1,4 +1,12 @@
-import { app, BrowserWindow, Notification, dialog, ipcMain, type IpcMainInvokeEvent } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  Notification,
+  dialog,
+  ipcMain,
+  shell,
+  type IpcMainInvokeEvent
+} from 'electron'
 import { join, resolve, basename, dirname } from 'node:path'
 import { execFile } from 'node:child_process'
 import { existsSync, copyFileSync } from 'node:fs'
@@ -12,8 +20,14 @@ import {
   isGitRepo,
   worktreeStatus,
   worktreeDiff,
-  expandWorktreeTemplate
+  expandWorktreeTemplate,
+  defaultBranch,
+  commitAll,
+  mergeIntoDefault,
+  pushBranch
 } from '../core/worktree'
+import { prCreate, prStatus } from '../core/gh'
+import { worktreeClaudeUsage } from '../core/claudeUsage'
 import { ProjectStore, type ProjectEntry, type ProjectPatch } from '../core/projectStore'
 import { LayoutStore, type SessionDescriptor } from '../core/layoutStore'
 import { ClosedAgentsStore, type ClosedAgent } from '../core/closedAgentsStore'
@@ -340,6 +354,35 @@ function registerIpc(): void {
     (_e: IpcMainInvokeEvent, worktreePath: string, baseRef?: string) =>
       worktreeDiff(worktreePath, baseRef)
   )
+  ipcMain.handle(Channels.worktreeCommitAll, (_e: IpcMainInvokeEvent, path: string, msg: string) =>
+    commitAll(path, msg)
+  )
+  ipcMain.handle(
+    Channels.worktreeMergeToDefault,
+    (_e: IpcMainInvokeEvent, repoRoot: string, branch: string) => mergeIntoDefault(repoRoot, branch)
+  )
+  ipcMain.handle(Channels.worktreePush, (_e: IpcMainInvokeEvent, path: string) => pushBranch(path))
+  ipcMain.handle(Channels.worktreeDefaultBranch, (_e: IpcMainInvokeEvent, repoRoot: string) =>
+    defaultBranch(repoRoot)
+  )
+  ipcMain.handle(Channels.prCreate, (_e: IpcMainInvokeEvent, path: string) => {
+    if (!commandExists('gh'))
+      throw new Error('GitHub CLI (gh) not found — install it to create PRs from Grove')
+    return prCreate(path)
+  })
+  ipcMain.handle(Channels.prStatus, (_e: IpcMainInvokeEvent, path: string) =>
+    commandExists('gh') ? prStatus(path) : null
+  )
+  ipcMain.on(Channels.openExternal, (_e, url: string) => {
+    // Only ever open web URLs — never file:// or custom schemes from the renderer.
+    if (/^https?:\/\//i.test(url)) void shell.openExternal(url)
+  })
+  ipcMain.handle(Channels.claudeUsage, (_e: IpcMainInvokeEvent, worktreePath: string) => {
+    // "Today" in local time — the card shows what this worktree cost today.
+    const since = new Date()
+    since.setHours(0, 0, 0, 0)
+    return worktreeClaudeUsage(worktreePath, since.getTime())
+  })
   ipcMain.handle(
     Channels.worktreeRemove,
     async (_e: IpcMainInvokeEvent, req: WorktreeRemoveRequest) => {

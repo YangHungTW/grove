@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseUnifiedDiff } from './diffParse'
+import { parseUnifiedDiff, splitHunkRows, type DiffLine } from './diffParse'
 
 const SAMPLE = `diff --git a/foo.txt b/foo.txt
 index 1234567..89abcde 100644
@@ -72,5 +72,45 @@ Binary files a/e2e/smoke.png and b/e2e/smoke.png differ
     expect(f.newPath).toBe('e2e/smoke.png')
     expect(f.binary).toBe(true)
     expect(f.hunks).toEqual([])
+  })
+})
+
+describe('splitHunkRows', () => {
+  const ctx = (text: string): DiffLine => ({ type: 'context', text })
+  const add = (text: string): DiffLine => ({ type: 'add', text })
+  const del = (text: string): DiffLine => ({ type: 'del', text })
+
+  it('mirrors context into both columns', () => {
+    const rows = splitHunkRows([ctx('a'), ctx('b')])
+    expect(rows).toEqual([
+      { left: ctx('a'), right: ctx('a') },
+      { left: ctx('b'), right: ctx('b') }
+    ])
+  })
+
+  it('pairs a del run with the add run that follows it', () => {
+    const rows = splitHunkRows([del('old1'), del('old2'), add('new1'), add('new2')])
+    expect(rows).toEqual([
+      { left: del('old1'), right: add('new1') },
+      { left: del('old2'), right: add('new2') }
+    ])
+  })
+
+  it('leaves the other cell empty for unbalanced runs and pure insertions', () => {
+    expect(splitHunkRows([del('a'), add('x'), add('y')])).toEqual([
+      { left: del('a'), right: add('x') },
+      { left: null, right: add('y') }
+    ])
+    expect(splitHunkRows([add('only-new')])).toEqual([{ left: null, right: add('only-new') }])
+    expect(splitHunkRows([del('only-old')])).toEqual([{ left: del('only-old'), right: null }])
+  })
+
+  it('keeps separate change runs separated by context apart', () => {
+    const rows = splitHunkRows([del('a'), add('b'), ctx('mid'), add('c')])
+    expect(rows).toEqual([
+      { left: del('a'), right: add('b') },
+      { left: ctx('mid'), right: ctx('mid') },
+      { left: null, right: add('c') }
+    ])
   })
 })

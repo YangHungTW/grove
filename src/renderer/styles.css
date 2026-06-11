@@ -248,6 +248,99 @@ button {
   text-overflow: ellipsis;
 }
 
+/* PR + CI badge on a worktree card (gh CLI). Click → open the PR. */
+.pr-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  padding: 0 6px;
+  line-height: 16px;
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+}
+.pr-badge:hover {
+  filter: brightness(1.25);
+}
+.pr-badge.pr-pass {
+  background: color-mix(in srgb, #3fb950 18%, transparent);
+  color: #3fb950;
+}
+.pr-badge.pr-fail {
+  background: color-mix(in srgb, #f85149 18%, transparent);
+  color: #f85149;
+}
+.pr-badge.pr-pending {
+  background: color-mix(in srgb, #fbbf24 16%, transparent);
+  color: #fbbf24;
+}
+.pr-badge.pr-merged {
+  background: color-mix(in srgb, #a371f7 18%, transparent);
+  color: #a371f7;
+}
+.pr-badge.pr-closed {
+  opacity: 0.6;
+}
+
+/* Today's Claude token/cost usage for the worktree. */
+.card-usage {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 3px;
+  font-size: 10.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.card-usage-model {
+  color: color-mix(in srgb, var(--accent) 75%, var(--fg));
+  font-weight: 600;
+}
+
+/* Quick-respond row: answer a waiting agent's prompt right from the card. */
+.card-quick {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+}
+.card-quick-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 10.5px;
+  color: var(--attention);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.card-quick button {
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, var(--attention) 55%, transparent);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--attention) 12%, transparent);
+  color: var(--fg);
+  font-size: 10.5px;
+  font-family: 'MesloLGS NF', Menlo, monospace;
+  padding: 1px 7px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.card-quick button:hover {
+  background: color-mix(in srgb, var(--attention) 30%, transparent);
+}
+.card-quick .quick-yes {
+  background: color-mix(in srgb, var(--attention) 28%, transparent);
+  font-weight: 700;
+}
+
 .card-confirm {
   display: flex;
   align-items: center;
@@ -1114,6 +1207,50 @@ button {
   height: 0 !important;
 }
 
+/* In-terminal find bar (⌘F), floated over the pane's top-right corner. */
+.term-search {
+  position: absolute;
+  top: 6px;
+  right: 14px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 6px;
+  background: var(--panel-2);
+  border: 1px solid #000;
+  border-radius: 7px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+.term-search-input {
+  width: 170px;
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  color: var(--fg);
+  font-size: 12px;
+  font-family: 'MesloLGS NF', Menlo, monospace;
+  padding: 3px 7px;
+  outline: none;
+}
+.term-search-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.term-search-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--fg);
+}
+
 .gutter {
   position: absolute;
   z-index: 5;
@@ -1369,8 +1506,8 @@ button {
   opacity: 0.3;
   cursor: default;
 }
-.diff-refresh {
-  margin-left: auto;
+.diff-refresh,
+.diff-auto {
   background: var(--panel);
   color: var(--fg);
   border: 1px solid var(--panel-2);
@@ -1378,6 +1515,34 @@ button {
   padding: 3px 10px;
   font-size: 12px;
   cursor: pointer;
+}
+.diff-auto {
+  opacity: 0.55;
+}
+.diff-auto.active {
+  opacity: 1;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+/* Unified ⇄ Split layout segmented toggle. */
+.diff-view-toggle {
+  display: inline-flex;
+  border: 1px solid var(--panel-2);
+  border-radius: 5px;
+  overflow: hidden;
+}
+.diff-view-toggle button {
+  background: var(--panel);
+  color: var(--fg);
+  border: 0;
+  padding: 3px 9px;
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0.55;
+}
+.diff-view-toggle button.active {
+  opacity: 1;
+  background: color-mix(in srgb, var(--accent) 22%, var(--panel));
 }
 /* layout: changed-files index (left) + diff body (right) */
 .diff-main {
@@ -1459,6 +1624,12 @@ button {
 .diff-file {
   margin-bottom: 10px;
 }
+/* Don't lay out / paint off-screen file bodies — keeps 50k-line diffs usable.
+   The intrinsic-size estimate preserves scrollbar stability while skipped. */
+.diff-file-body {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 600px;
+}
 .diff-file-header {
   position: sticky;
   top: 0;
@@ -1526,6 +1697,28 @@ button {
   color: var(--accent);
   opacity: 0.85;
   background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+/* Side-by-side rows: old text left, new text right. */
+.diff-srow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+}
+.diff-scell {
+  min-width: 0;
+  padding: 0 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.diff-scell-del {
+  background: color-mix(in srgb, #f85149 22%, transparent);
+}
+.diff-scell-add {
+  background: color-mix(in srgb, #2ea043 22%, transparent);
+}
+.diff-scell-empty {
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  opacity: 0.4;
 }
 .diff-loading,
 .diff-empty,

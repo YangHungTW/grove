@@ -1,6 +1,9 @@
 import type { Terminal } from '@xterm/xterm'
 import type { FitAddon } from '@xterm/addon-fit'
+import type { SearchAddon } from '@xterm/addon-search'
 import type { SessionKind, SessionState } from '../core/types'
+import type { WorktreeUsage } from '../core/claudeUsage'
+import type { PrInfo } from '../core/gh'
 import type { SessionSnapshot } from '../main/ipc'
 import type { SessionDescriptor } from '../core/layoutStore'
 import type { ClosedAgent } from '../core/closedAgentsStore'
@@ -43,6 +46,7 @@ export type DialogState =
   | { kind: 'projectSettings'; repoRoot: string; name: string }
   | { kind: 'renameSession'; id: string; title: string }
   | { kind: 'openFile'; worktreeId: string }
+  | { kind: 'finishWorktree'; repoRoot: string; wtId: string; branch: string }
 
 /** Tab/sidebar icon char for a file-viewer pane (mapped to a doc SVG). */
 export const VIEWER_ICON = '▤'
@@ -52,6 +56,7 @@ export const DIFF_ICON = '±'
 interface PaneRef {
   term: Terminal
   fit: FitAddon
+  search?: SearchAddon
 }
 
 const ANSI_RE = /\[[0-9;?]*[A-Za-z]|\][^]*|[()][AB0]/g
@@ -82,6 +87,10 @@ class Store {
   focusedGroupByWt = new Map<string, number>()
   lastLine = new Map<string, string>()
   wtStatus = new Map<string, WtStatus>()
+  /** Today's Claude token/cost usage per worktree (from transcript files). */
+  wtUsage = new Map<string, WorktreeUsage>()
+  /** PR + CI summary per worktree branch (gh CLI; absent = no PR or no gh). */
+  wtPr = new Map<string, PrInfo>()
   activeProjectId: string | null = null
   activeWorktreeId: string | null = null
   focusedSessionId: string | null = null
@@ -93,6 +102,10 @@ class Store {
   dialog: DialogState | null = null
   /** Recently-closed resumable agents (most-recent-first), persisted to disk. */
   closedAgents: ClosedAgent[] = []
+  /** Session temporarily maximized over the whole grid (iTerm-style zoom). */
+  zoomedSessionId: string | null = null
+  /** Session whose terminal search bar is open (the focused one), or null. */
+  searchSessionId: string | null = null
 
   // Live agents that own a pinned resume id, keyed by session id. On close the
   // entry becomes a ClosedAgent so the agent can be resumed later.
@@ -165,12 +178,19 @@ class Store {
     const n = this.groupsOf(wtId).length
     return Math.min(this.focusedGroupByWt.get(wtId) ?? 0, n - 1)
   }
-  /** The visible panes (active session of each group), in column order. */
+  /** The visible panes (active session of each group), in column order. When a
+   * session is zoomed it is the only visible pane, occupying the full grid. */
   visiblePanes(): { id: string; group: number }[] {
     if (!this.activeWorktreeId) return []
+    const z = this.zoomedSessionId ? this.sessions.get(this.zoomedSessionId) : undefined
+    if (z && z.worktreeId === this.activeWorktreeId) return [{ id: z.id, group: 0 }]
     return this.groupsOf(this.activeWorktreeId)
       .map((g, i) => ({ id: g.active, group: i }))
       .filter((p) => p.id)
+  }
+  isZoomed(): boolean {
+    const z = this.zoomedSessionId ? this.sessions.get(this.zoomedSessionId) : undefined
+    return !!z && z.worktreeId === this.activeWorktreeId
   }
   visibleSessions(): string[] {
     return this.visiblePanes().map((p) => p.id)
@@ -181,14 +201,16 @@ class Store {
   /** Ensure colFr matches the group count; returns {cols, visible}. */
   computeGrid(): { cols: number; visible: string[] } {
     const visible = this.visibleSessions()
-    const cols = Math.max(this.activeWorktreeId ? this.groupsOf(this.activeWorktreeId).length : 1, 1)
+    const cols = this.isZoomed()
+      ? 1
+      : Math.max(this.activeWorktreeId ? this.groupsOf(this.activeWorktreeId).length : 1, 1)
     if (this.colFr.length !== cols) this.colFr = Array(cols).fill(1)
     return { cols, visible }
   }
 
   // --- terminal registration (called by <Pane>) --------------------------
-  registerPane(id: string, term: Terminal, fit: FitAddon): void {
-    this.panes.set(id, { term, fit })
+  registerPane(id: string, term: Terminal, fit: FitAddon, search?: SearchAddon): void {
+    this.panes.set(id, { term, fit, search })
   }
   unregisterPane(id: string): void {
     this.panes.get(id)?.term.dispose()
@@ -287,13 +309,99 @@ class Store {
     }
     project.loaded = true
     for (const wt of project.worktrees.values()) {
-      window.api
-        .worktreeStatus(wt.path)
-        .then((s) => {
-          this.wtStatus.set(wt.id, s)
-          this.notify()
-        })
-        .catch(() => {})
+      this.refreshWorktreeMeta(wt.id)
+      if (!wt.primary) this.refreshPr(wt.id)
+    }
+  }
+
+  /** Refresh a worktree card's live metadata: git status + Claude usage. */
+  private refreshWorktreeMeta(wtId: string): void {
+    window.api
+      .worktreeStatus(wtId)
+      .then((s) => {
+        this.wtStatus.set(wtId, s)
+        this.notify()
+      })
+      .catch(() => {})
+    window.api
+      .claudeUsage(wtId)
+      .then((u) => {
+        const had = this.wtUsage.has(wtId)
+        if (u) this.wtUsage.set(wtId, u)
+        else this.wtUsage.delete(wtId)
+        if (u || had) this.notify()
+      })
+      .catch(() => {})
+  }
+
+  /** Refresh a feature worktree's PR/CI badge (no-op without gh or a PR). */
+  private refreshPr(wtId: string): void {
+    window.api
+      .prStatus(wtId)
+      .then((pr) => {
+        const had = this.wtPr.has(wtId)
+        if (pr) this.wtPr.set(wtId, pr)
+        else this.wtPr.delete(wtId)
+        if (pr || had) this.notify()
+      })
+      .catch(() => {})
+  }
+
+  /** Periodic card refresh — git status and token usage would otherwise go
+   * stale the moment an agent starts committing/working. PR status polls on a
+   * slower cadence (each check is a gh API round-trip). */
+  private startMetaPolling(): void {
+    setInterval(() => {
+      if (document.hidden) return
+      for (const p of this.projects.values())
+        for (const wt of p.worktrees.values()) this.refreshWorktreeMeta(wt.id)
+    }, 20_000)
+    setInterval(() => {
+      if (document.hidden) return
+      for (const p of this.projects.values())
+        for (const wt of p.worktrees.values()) if (!wt.primary) this.refreshPr(wt.id)
+    }, 60_000)
+  }
+
+  /**
+   * One-click wrap-up for a feature worktree: commit whatever is dirty, then
+   * merge into the default branch (optionally removing the worktree) or push +
+   * open a PR. Returns false (with a toast) on the first failing step.
+   */
+  async finishWorktree(opts: {
+    repoRoot: string
+    wtId: string
+    branch: string
+    message: string
+    action: 'merge' | 'pr' | 'commit'
+    removeAfter: boolean
+  }): Promise<boolean> {
+    try {
+      const st = await window.api.worktreeStatus(opts.wtId)
+      if (st.dirty > 0) await window.api.worktreeCommitAll(opts.wtId, opts.message.trim())
+      if (opts.action === 'merge') {
+        const target = await window.api.worktreeMergeToDefault(opts.repoRoot, opts.branch)
+        this.toast(`Merged ${opts.branch} into ${target}`)
+        if (opts.removeAfter) {
+          const p = this.projects.get(opts.repoRoot)
+          // Branch was just merged, so deleting it with the worktree is safe.
+          if (p) await this.removeWorktree(p, opts.wtId, true)
+        }
+      } else if (opts.action === 'pr') {
+        await window.api.worktreePush(opts.wtId)
+        const url = await window.api.prCreate(opts.wtId)
+        this.toast(`PR created: ${url}`)
+        window.api.openExternal(url)
+        this.refreshPr(opts.wtId)
+      } else {
+        this.toast(`Committed on ${opts.branch}`)
+      }
+      this.refreshWorktreeMeta(opts.wtId)
+      this.notify()
+      return true
+    } catch (err) {
+      this.toast(errMsg(err))
+      return false
     }
   }
   private upsertProject(
@@ -376,6 +484,7 @@ class Store {
       })
       this.activeProjectId = project.repoRoot
       this.activeWorktreeId = info.path
+      this.refreshWorktreeMeta(info.path)
       this.syncFocus()
     } catch (err) {
       this.toast(errMsg(err))
@@ -397,6 +506,9 @@ class Store {
       this.toast(errMsg(err))
     }
     project.worktrees.delete(wtId)
+    this.wtStatus.delete(wtId)
+    this.wtUsage.delete(wtId)
+    this.wtPr.delete(wtId)
     this.savedLayout = this.savedLayout.filter((d) => d.worktreePath !== wtId)
     this.restoredWorktrees.delete(wtId)
     this.closedAgents = this.closedAgents.filter((c) => c.worktreePath !== wtId)
@@ -409,6 +521,8 @@ class Store {
   async selectWorktree(projectId: string, wtId: string): Promise<void> {
     this.activeProjectId = projectId
     this.activeWorktreeId = wtId
+    if (this.activeWorktreeId !== this.sessions.get(this.zoomedSessionId ?? '')?.worktreeId)
+      this.zoomedSessionId = null
     await this.restoreWorktree(wtId) // respawn this worktree's sessions on first select
     this.syncFocus()
     this.notify()
@@ -608,6 +722,8 @@ class Store {
     this.pending.delete(id)
     this.syncBadge()
     this.lastLine.delete(id)
+    if (this.zoomedSessionId === id) this.zoomedSessionId = null
+    if (this.searchSessionId === id) this.searchSessionId = null
     // Reconcile groups (drops the id, collapses an emptied split) and re-focus.
     if (wtId) {
       const groups = this.groupsOf(wtId)
@@ -679,11 +795,54 @@ class Store {
         this.focusedGroupByWt.set(s.worktreeId, gi)
       }
     }
+    // Switching focus to a different session leaves zoom/search mode (iTerm-style).
+    if (this.zoomedSessionId && this.zoomedSessionId !== id) this.zoomedSessionId = null
+    if (this.searchSessionId && this.searchSessionId !== id) this.closeSearch(false)
     this.focusedSessionId = id
     this.pending.delete(id)
     this.syncBadge()
     this.notify()
     this.panes.get(id)?.term.focus()
+  }
+
+  // --- zoom (temporarily maximize the focused pane) ----------------------
+  toggleZoom(): void {
+    if (this.isZoomed()) {
+      this.zoomedSessionId = null
+    } else {
+      const id = this.focusedSessionId
+      if (!id || !this.sessions.has(id)) return
+      this.zoomedSessionId = id
+    }
+    this.notify()
+    this.fitVisible()
+  }
+
+  // --- in-terminal search (xterm SearchAddon) -----------------------------
+  /** Open the search bar for the focused terminal pane (no-op for viewer/diff). */
+  openSearch(): void {
+    const id = this.focusedSessionId
+    if (!id || !this.panes.has(id)) return
+    this.searchSessionId = id
+    this.notify()
+  }
+  closeSearch(refocus = true): void {
+    const id = this.searchSessionId
+    if (!id) return
+    this.searchSessionId = null
+    const pane = this.panes.get(id)
+    pane?.search?.clearDecorations()
+    pane?.term.clearSelection()
+    this.notify()
+    if (refocus) pane?.term.focus()
+  }
+
+  /** Send a canned keystroke to a waiting agent (sidebar quick-respond). */
+  quickRespond(id: string, data: string): void {
+    window.api.sessionInput(id, data)
+    this.pending.delete(id)
+    this.syncBadge()
+    this.notify()
   }
   /** Cycle focus among the focused group's tabs (delta +1 / -1). */
   cycleSession(delta: number): void {
@@ -989,6 +1148,7 @@ class Store {
     const first = this.projects.keys().next().value as string | undefined
     if (first) await this.setActiveProject(first)
     else this.notify()
+    this.startMetaPolling()
   }
 }
 

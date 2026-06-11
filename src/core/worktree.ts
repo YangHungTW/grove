@@ -206,6 +206,62 @@ export async function worktreeDiff(path: string, baseRef?: string): Promise<stri
   return [committed, uncommitted].filter((s) => s.trim().length > 0).join('\n')
 }
 
+/** The repo's default branch: origin/HEAD if set, else an existing local
+ * `main`/`master`, else whatever the primary worktree has checked out. */
+export async function defaultBranch(repoRoot: string): Promise<string> {
+  try {
+    const ref = (await git(repoRoot, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])).trim()
+    if (ref) return ref.replace(/^origin\//, '')
+  } catch {
+    /* no origin/HEAD configured */
+  }
+  for (const b of ['main', 'master']) {
+    try {
+      await git(repoRoot, ['rev-parse', '--verify', '--quiet', `refs/heads/${b}`])
+      return b
+    } catch {
+      /* try the next candidate */
+    }
+  }
+  return (await git(repoRoot, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim()
+}
+
+/** Stage everything and commit. Throws if there is nothing to commit. */
+export async function commitAll(path: string, message: string): Promise<void> {
+  await git(path, ['add', '-A'])
+  await git(path, ['commit', '-m', message])
+}
+
+/**
+ * Merge `branch` into the repo's default branch, run from the PRIMARY worktree.
+ * Refuses (rather than half-merging) when the primary worktree is on a
+ * different branch or has uncommitted changes; a conflicted merge is aborted so
+ * the primary worktree is never left mid-merge. Returns the target branch name.
+ */
+export async function mergeIntoDefault(repoRoot: string, branch: string): Promise<string> {
+  const target = await defaultBranch(repoRoot)
+  const current = (await git(repoRoot, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim()
+  if (current !== target)
+    throw new Error(`primary worktree is on '${current}', not '${target}' — switch it first`)
+  // Untracked files don't block a merge — only tracked modifications do.
+  const porcelain = await git(repoRoot, ['status', '--porcelain', '--untracked-files=no'])
+  if (porcelain.trim().length > 0)
+    throw new Error(`'${target}' has uncommitted changes — commit or stash them first`)
+  try {
+    await git(repoRoot, ['merge', '--no-edit', branch])
+  } catch (err) {
+    await git(repoRoot, ['merge', '--abort']).catch(() => {})
+    const msg = err instanceof Error ? err.message : String(err)
+    throw new Error(`merge of '${branch}' failed and was aborted:\n${msg}`)
+  }
+  return target
+}
+
+/** Push the worktree's branch, creating/updating its upstream on origin. */
+export async function pushBranch(path: string): Promise<void> {
+  await git(path, ['push', '-u', 'origin', 'HEAD'])
+}
+
 /** `git worktree remove` (with `--force` when requested). */
 export async function removeWorktree(
   repoRoot: string,

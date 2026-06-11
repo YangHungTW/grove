@@ -50,6 +50,10 @@ export function App(): JSX.Element {
       if (e.shiftKey && k === 'u') {
         e.preventDefault()
         store.jumpToPending()
+      } else if (e.shiftKey && k === 'enter') {
+        // ⌘⇧Enter — zoom: temporarily maximize the focused pane (iTerm-style).
+        e.preventDefault()
+        store.toggleZoom()
       } else if (e.shiftKey && e.code === 'BracketRight') {
         // ⌘⇧] — next tab. Match on e.code: with modifiers the bracket keys
         // report e.key '}'/'{' (and option-glyphs on macOS); e.code is stable.
@@ -75,6 +79,10 @@ export function App(): JSX.Element {
         // ⌘⇧← / ⌘⇧H — previous project (vim left).
         e.preventDefault()
         store.cycleProject(-1)
+      } else if (k === 'f') {
+        // ⌘F — find in the focused terminal's scrollback.
+        e.preventDefault()
+        store.openSearch()
       } else if (k === 'b') {
         e.preventDefault()
         store.toggleSidebar()

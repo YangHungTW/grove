@@ -39,6 +39,21 @@ const api: RendererApi = {
     ipcRenderer.invoke(Channels.worktreeStatus, worktreePath),
   worktreeDiff: (worktreePath: string, baseRef?: string): Promise<string> =>
     ipcRenderer.invoke(Channels.worktreeDiff, worktreePath, baseRef),
+  claudeUsage: (worktreePath: string) => ipcRenderer.invoke(Channels.claudeUsage, worktreePath),
+  worktreeCommitAll: (worktreePath: string, message: string): Promise<void> =>
+    ipcRenderer.invoke(Channels.worktreeCommitAll, worktreePath, message),
+  worktreeMergeToDefault: (repoRoot: string, branch: string): Promise<string> =>
+    ipcRenderer.invoke(Channels.worktreeMergeToDefault, repoRoot, branch),
+  worktreePush: (worktreePath: string): Promise<void> =>
+    ipcRenderer.invoke(Channels.worktreePush, worktreePath),
+  worktreeDefaultBranch: (repoRoot: string): Promise<string> =>
+    ipcRenderer.invoke(Channels.worktreeDefaultBranch, repoRoot),
+  prCreate: (worktreePath: string): Promise<string> =>
+    ipcRenderer.invoke(Channels.prCreate, worktreePath),
+  prStatus: (worktreePath) => ipcRenderer.invoke(Channels.prStatus, worktreePath),
+  openExternal: (url: string): void => {
+    ipcRenderer.send(Channels.openExternal, url)
+  },
   worktreeRemove: (req: WorktreeRemoveRequest): Promise<void> =>
     ipcRenderer.invoke(Channels.worktreeRemove, req),
   sessionCreate: (req: CreateSessionRequest): Promise<SessionSnapshot> =>

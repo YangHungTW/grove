@@ -99,6 +99,22 @@ export const RepoIcon = ({ size = 14, className }: P): JSX.Element =>
     <path d="M4.5 1.5A2.5 2.5 0 0 0 2 4v8.5A2.5 2.5 0 0 0 4.5 15H13a.75.75 0 0 0 .75-.75V2.25A.75.75 0 0 0 13 1.5H4.5Zm0 1.5h7.75v8.5H4.5a1 1 0 0 0-1 .73V4a1 1 0 0 1 1-1Zm.75 9.5h7v1h-7a.5.5 0 0 1 0-1Z" />
   )
 
+/** Git merge: a branch dot feeding into the main line (finish worktree). */
+export const MergeIcon = ({ size = 16, className }: P): JSX.Element =>
+  svg(
+    size,
+    className,
+    <path d="M5.45 5.15A4.25 4.25 0 0 0 9.25 7.5h1.38a2.25 2.25 0 1 1 0 1.5H9.25A5.73 5.73 0 0 1 5 7.12v3.51a2.25 2.25 0 1 1-1.5 0V5.37a2.25 2.25 0 1 1 1.95-.22ZM4.25 13.5a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Zm8.5-4.5a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Zm-8.5-5.25a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Z" />
+  )
+
+/** Zoom / maximize a pane (two outward corner arrows). */
+export const ZoomIcon = ({ size = 16, className }: P): JSX.Element =>
+  svg(
+    size,
+    className,
+    <path d="M2 2h5v1.6H4.73l3.04 3.04-1.13 1.13L3.6 4.73V7H2V2Zm12 12H9v-1.6h2.27L8.23 9.36l1.13-1.13 3.04 3.04V9H14v5Z" />
+  )
+
 /** A document/file (viewer panes). */
 export const DocIcon = ({ size = 16, className }: P): JSX.Element =>
   svg(

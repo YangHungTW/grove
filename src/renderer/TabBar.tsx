@@ -8,7 +8,8 @@ import {
   PlusIcon,
   SplitIcon,
   SingleIcon,
-  ChevronDownIcon
+  ChevronDownIcon,
+  ZoomIcon
 } from './Icons'
 
 /** The top bar: sidebar toggle on the left, global actions on the right.
@@ -100,6 +101,16 @@ export function TabBar(): JSX.Element {
           onClick={() => store.toggleSplit()}
         >
           {split ? <SingleIcon size={15} /> : <SplitIcon size={15} />}
+        </button>
+        <button
+          id="zoom-toggle"
+          className={'icon-btn' + (s.isZoomed() ? ' active' : '')}
+          aria-label="Zoom pane"
+          title={(s.isZoomed() ? 'Unzoom pane' : 'Zoom pane') + ' (⌘⇧Enter)'}
+          disabled={!s.focusedSessionId}
+          onClick={() => store.toggleZoom()}
+        >
+          <ZoomIcon size={15} />
         </button>
         <button
           id="notif-btn"

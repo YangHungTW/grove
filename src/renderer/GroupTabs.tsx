@@ -27,7 +27,10 @@ export function GroupTabs(): JSX.Element | null {
   if (!wt) return null
   const groups = s.groupsOf(wt)
   const focusedG = s.focusedGroup(wt)
-  const style: CSSProperties = { gridTemplateColumns: s.colFr.map((f) => `${f}fr`).join(' ') }
+  // While a pane is zoomed, colFr is collapsed to one column — keep the strips
+  // evenly split so every group's tabs stay visible/clickable.
+  const fr = s.colFr.length === groups.length ? s.colFr : Array(groups.length).fill(1)
+  const style: CSSProperties = { gridTemplateColumns: fr.map((f) => `${f}fr`).join(' ') }
 
   return (
     <div id="grouptabs" style={style} className={groups.length <= 1 ? 'single' : ''}>

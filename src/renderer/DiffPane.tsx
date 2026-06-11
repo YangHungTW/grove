@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { store } from './store'
-import { parseUnifiedDiff, type DiffFile } from './diffParse'
+import { parseUnifiedDiff, splitHunkRows, type DiffFile, type DiffHunk } from './diffParse'
 import type { SessionSnapshot } from '../main/ipc'
 
 function basename(p: string): string {
@@ -17,6 +17,28 @@ function counts(f: DiffFile): { add: number; del: number } {
       else if (l.type === 'del') del++
     }
   return { add, del }
+}
+
+/** One hunk rendered side-by-side: old text left, new text right. */
+function SplitHunk({ hunk }: { hunk: DiffHunk }): JSX.Element {
+  const rows = useMemo(() => splitHunkRows(hunk.lines), [hunk])
+  return (
+    <div className="diff-hunk">
+      <div className="diff-line diff-line-hunk">{hunk.header}</div>
+      {rows.map((r, ri) => (
+        <div className="diff-srow" key={ri}>
+          <span className={'diff-scell' + (r.left ? ` diff-scell-${r.left.type}` : ' diff-scell-empty')}>
+            {r.left?.text ?? ''}
+          </span>
+          <span
+            className={'diff-scell' + (r.right ? ` diff-scell-${r.right.type}` : ' diff-scell-empty')}
+          >
+            {r.right?.text ?? ''}
+          </span>
+        </div>
+      ))}
+    </div>
+  )
 }
 
 /**
@@ -44,7 +66,13 @@ export function DiffPane({
   // that reorders/adds files.
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [showIndex, setShowIndex] = useState(true)
+  const [view, setView] = useState<'unified' | 'split'>('unified')
+  const [auto, setAuto] = useState(true)
   const fileRefs = useRef<(HTMLDivElement | null)[]>([])
+  // Files already shown once: a refresh must not re-collapse something the user
+  // expanded (or re-expand what they collapsed) — only brand-new files get the
+  // collapse-when-big default.
+  const seenFiles = useRef<Set<string>>(new Set())
 
   // Per-file name + add/del counts, computed once per parse (used by both the
   // index and the body — no double O(N) walk).
@@ -72,21 +100,39 @@ export function DiffPane({
         setFiles(parsed)
         setEmpty(text.trim().length === 0)
         // Collapse large files by default so a huge agent diff doesn't render
-        // thousands of DOM nodes at once (no virtualization). Small files stay
-        // open; the user can expand the big ones.
+        // thousands of DOM nodes at once. Small files stay open; on refresh the
+        // user's expand/collapse choices are kept for files already seen.
         const BIG = 400 // lines
-        const big = new Set<string>()
-        for (const f of parsed) {
-          const n = f.hunks.reduce((acc, h) => acc + h.lines.length, 0)
-          if (n > BIG) big.add(f.newPath && f.newPath !== '/dev/null' ? f.newPath : f.oldPath)
-        }
-        setCollapsed(big)
+        setCollapsed((prev) => {
+          const next = new Set<string>()
+          for (const f of parsed) {
+            const key = f.newPath && f.newPath !== '/dev/null' ? f.newPath : f.oldPath
+            const n = f.hunks.reduce((acc, h) => acc + h.lines.length, 0)
+            if (seenFiles.current.has(key)) {
+              if (prev.has(key)) next.add(key)
+            } else if (n > BIG) {
+              next.add(key)
+            }
+            seenFiles.current.add(key)
+          }
+          return next
+        })
         fileRefs.current = []
       })
       .catch((err) => setError(err instanceof Error ? err.message : String(err)))
   }, [session.filePath])
 
   useEffect(() => load(), [load])
+
+  // Live review: re-pull the diff while the pane is visible so changes show up
+  // as the agent makes them. Skipped when the window is hidden.
+  useEffect(() => {
+    if (!visible || !auto) return
+    const t = setInterval(() => {
+      if (!document.hidden) load()
+    }, 5000)
+    return () => clearInterval(t)
+  }, [visible, auto, load])
 
   const toggle = (key: string): void =>
     setCollapsed((prev) => {
@@ -139,6 +185,25 @@ export function DiffPane({
             {files!.length} file{files!.length > 1 ? 's' : ''}
           </span>
         )}
+        <span style={{ marginLeft: 'auto' }} />
+        <div className="diff-view-toggle" role="group" aria-label="Diff layout">
+          <button
+            className={view === 'unified' ? 'active' : ''}
+            onClick={() => setView('unified')}
+          >
+            Unified
+          </button>
+          <button className={view === 'split' ? 'active' : ''} onClick={() => setView('split')}>
+            Split
+          </button>
+        </div>
+        <button
+          className={'diff-auto' + (auto ? ' active' : '')}
+          title="Re-pull the diff every 5s while this pane is visible"
+          onClick={() => setAuto((v) => !v)}
+        >
+          Auto
+        </button>
         <button className="diff-refresh" onClick={() => load()}>
           Refresh
         </button>
@@ -213,19 +278,23 @@ export function DiffPane({
                       {f.binary && (
                         <div className="diff-line diff-binary-note">Binary file — no preview</div>
                       )}
-                      {f.hunks.map((h, hi) => (
-                        <div className="diff-hunk" key={hi}>
-                          <div className="diff-line diff-line-hunk">{h.header}</div>
-                          {h.lines.map((l, li) => (
-                            <div className={`diff-line diff-line-${l.type}`} key={li}>
-                              <span className="diff-gutter">
-                                {l.type === 'add' ? '+' : l.type === 'del' ? '-' : ' '}
-                              </span>
-                              <span className="diff-text">{l.text}</span>
-                            </div>
-                          ))}
-                        </div>
-                      ))}
+                      {f.hunks.map((h, hi) =>
+                        view === 'split' ? (
+                          <SplitHunk key={hi} hunk={h} />
+                        ) : (
+                          <div className="diff-hunk" key={hi}>
+                            <div className="diff-line diff-line-hunk">{h.header}</div>
+                            {h.lines.map((l, li) => (
+                              <div className={`diff-line diff-line-${l.type}`} key={li}>
+                                <span className="diff-gutter">
+                                  {l.type === 'add' ? '+' : l.type === 'del' ? '-' : ' '}
+                                </span>
+                                <span className="diff-text">{l.text}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )
+                      )}
                     </div>
                   )}
                 </div>

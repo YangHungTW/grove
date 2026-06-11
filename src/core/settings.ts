@@ -69,6 +69,8 @@ export const FIXED_SHORTCUTS: { label: string; keys: string }[] = [
   { label: 'New shell', keys: '⌘T' },
   { label: 'Close tab', keys: '⌘W' },
   { label: 'Split / merge', keys: '⌘D' },
+  { label: 'Find in terminal', keys: '⌘F' },
+  { label: 'Zoom / unzoom pane', keys: '⌘⇧Enter' },
   { label: 'Toggle sidebar', keys: '⌘B' },
   { label: 'Jump to agent needing input', keys: '⌘⇧U' },
   { label: 'Open settings', keys: '⌘,' }

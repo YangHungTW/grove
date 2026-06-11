@@ -3,10 +3,12 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { CanvasAddon } from '@xterm/addon-canvas'
+import { SearchAddon } from '@xterm/addon-search'
 import { useStore } from './useStore'
 import { store } from './store'
 import { ViewerPane } from './ViewerPane'
 import { DiffPane } from './DiffPane'
+import { SearchBar } from './SearchBar'
 import type { SessionSnapshot } from '../main/ipc'
 
 export function PaneGrid(): JSX.Element {
@@ -97,6 +99,7 @@ export function PaneGrid(): JSX.Element {
             column={colOf.get(sess.id) ?? 1}
             focused={sess.id === s.focusedSessionId}
             transparent={s.settings.transparent}
+            searching={sess.id === s.searchSessionId}
           />
         )
       )}
@@ -110,13 +113,15 @@ function Pane({
   visible,
   column,
   focused,
-  transparent
+  transparent,
+  searching
 }: {
   session: SessionSnapshot
   visible: boolean
   column: number
   focused: boolean
   transparent: boolean
+  searching: boolean
 }): JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
@@ -143,6 +148,8 @@ function Pane({
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
+    const search = new SearchAddon()
+    term.loadAddon(search)
     term.open(el)
     term.onData((d) => window.api.sessionInput(session.id, d))
     // Shift+Enter inserts a newline instead of submitting. xterm sends plain CR
@@ -159,7 +166,7 @@ function Pane({
       })
     }
     termRef.current = term
-    store.registerPane(session.id, term, fit)
+    store.registerPane(session.id, term, fit, search)
 
     // Fit whenever this pane actually has a box — fires on display:none→block
     // (worktree/tab switch, split), grid drag, and window resize. The resize
@@ -255,6 +262,8 @@ function Pane({
       style={visible ? { display: 'block', gridColumn: column } : { display: 'none' }}
       ref={ref}
       onMouseDown={() => store.focusSession(session.id)}
-    />
+    >
+      {searching && <SearchBar sessionId={session.id} />}
+    </div>
   )
 }

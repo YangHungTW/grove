@@ -130,6 +130,28 @@ try {
   assert.ok(after[0] > before[0] + 20, `drag-resize: col0 should widen (${before[0]}→${after[0]})`)
   const dragResize = true
 
+  // 3c) ZOOM — ⌘⇧Enter maximizes the focused pane (1 visible), toggles back.
+  await win.keyboard.press('Meta+Shift+Enter')
+  await win.waitForFunction(
+    () => [...document.querySelectorAll('.pane')].filter((p) => getComputedStyle(p).display !== 'none').length === 1,
+    { timeout: 5000 }
+  )
+  await win.keyboard.press('Meta+Shift+Enter')
+  await win.waitForFunction(
+    () => [...document.querySelectorAll('.pane')].filter((p) => getComputedStyle(p).display !== 'none').length >= 2,
+    { timeout: 5000 }
+  )
+  const zoomToggle = true
+
+  // 3d) FIND IN TERMINAL — ⌘F opens the search bar; Esc closes it.
+  await win.locator('.pane.focused .xterm-helper-textarea').focus()
+  await win.keyboard.press('Meta+f')
+  await win.waitForSelector('.term-search input', { timeout: 5000 })
+  await win.locator('.term-search input').fill('hello')
+  await win.keyboard.press('Escape')
+  await win.waitForFunction(() => !document.querySelector('.term-search'), { timeout: 5000 })
+  const termSearch = true
+
   // 4) ROUND-TRIP — typed command creates a real file under repoA.
   await win.locator('.pane.focused .xterm-helper-textarea').focus()
   await win.keyboard.type(`touch '${marker}' && echo CCM_DONE\r`)
@@ -278,6 +300,36 @@ try {
   assert.ok(delLines >= 1, `diff: expected removed lines, got ${delLines}`)
   const diffReview = true
 
+  // 7e) SPLIT DIFF — toggling to side-by-side renders paired rows, and back.
+  await win.locator('.diff-view-toggle button', { hasText: 'Split' }).click()
+  await win.waitForSelector('.pane[data-kind="diff"] .diff-srow', { timeout: 5000 })
+  const splitDel = await win.locator('.pane[data-kind="diff"] .diff-scell-del').count()
+  const splitAdd = await win.locator('.pane[data-kind="diff"] .diff-scell-add').count()
+  assert.ok(splitDel >= 1 && splitAdd >= 1, `split diff: del=${splitDel} add=${splitAdd}`)
+  await win.locator('.diff-view-toggle button', { hasText: 'Unified' }).click()
+  await win.waitForSelector('.pane[data-kind="diff"] .diff-line-add', { timeout: 5000 })
+  const splitDiff = true
+
+  // 7f) FINISH WORKTREE — commit the dirty change, merge feat into main, and
+  //     remove the worktree (the full one-click wrap-up).
+  await groupA
+    .locator('.card', { hasText: 'feat' })
+    .getByRole('button', { name: 'Finish worktree' })
+    .click()
+  await win.waitForSelector('.dialog-field input', { timeout: 5000 })
+  await win.locator('.dialog-field input').fill('finish: diffme beta')
+  await win.getByRole('button', { name: 'Finish', exact: true }).click()
+  await win.waitForFunction(
+    () => ![...document.querySelectorAll('.card-title')].some((t) => t.textContent?.includes('feat')),
+    { timeout: 15000 }
+  )
+  const mainLog = execFileSync('git', ['-C', repoA, 'log', '-1', '--format=%s', 'main'], {
+    encoding: 'utf8'
+  })
+  assert.ok(mainLog.includes('finish: diffme beta'), `finish: main log got "${mainLog.trim()}"`)
+  assert.ok(!existsSync(join(wtPath, '.git')), 'finish: worktree folder should be removed')
+  const finishFlow = true
+
   await win.screenshot({ path: join(process.cwd(), 'e2e', 'smoke.png') })
 
   // 8) PERSISTENCE — close, relaunch with the same stores; sessions are restored.
@@ -293,10 +345,11 @@ try {
 
   console.log(
     `SMOKE_OK fontLoaded=${fontLoaded} noClip=${noClip} projects=${projectCount} split=${visible} dragResize=${dragResize} roundTrip=true ` +
+      `zoom=${zoomToggle} termSearch=${termSearch} ` +
       `worktreeCreated=true agentLaunched=true multiAgent=${agentRows === 2} ` +
       `agentAfterSwitch=${agentAfterSwitch} kbdNav=${kbdNav} fileViewer=${fileViewer} ` +
       `viewerPanes=${viewerPanes} htmlIframe=${htmlIframe} diffReview=${diffReview} ` +
-      `diffAdd=${addLines} diffDel=${delLines} restored=${restored}`
+      `diffAdd=${addLines} diffDel=${delLines} splitDiff=${splitDiff} finish=${finishFlow} restored=${restored}`
   )
 } catch (err) {
   failed = true

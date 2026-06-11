@@ -1,5 +1,7 @@
 import type { SessionKind, SessionState, ViewerKind } from '../core/types'
 import type { WorktreeInfo, CreateWorktreeOptions, WorktreeStatus } from '../core/worktree'
+import type { WorktreeUsage } from '../core/claudeUsage'
+import type { PrInfo } from '../core/gh'
 import type { ProjectEntry, ProjectPatch } from '../core/projectStore'
 import type { SessionDescriptor } from '../core/layoutStore'
 import type { ClosedAgent } from '../core/closedAgentsStore'
@@ -26,6 +28,14 @@ export const Channels = {
   worktreeRemove: 'worktree:remove',
   worktreeStatus: 'worktree:status',
   worktreeDiff: 'worktree:diff',
+  worktreeCommitAll: 'worktree:commit-all',
+  worktreeMergeToDefault: 'worktree:merge-default',
+  worktreePush: 'worktree:push',
+  worktreeDefaultBranch: 'worktree:default-branch',
+  prCreate: 'pr:create',
+  prStatus: 'pr:status',
+  openExternal: 'shell:open-external',
+  claudeUsage: 'claude:usage',
   sessionCreate: 'session:create',
   sessionInput: 'session:input',
   sessionResize: 'session:resize',
@@ -127,6 +137,24 @@ export interface RendererApi {
   worktreeStatus(worktreePath: string): Promise<WorktreeStatus>
   /** Unified diff of everything a worktree changed (committed vs base + uncommitted). */
   worktreeDiff(worktreePath: string, baseRef?: string): Promise<string>
+  /** Today's Claude Code token/cost usage for sessions launched in a worktree
+   * (read from `~/.claude/projects` transcripts; null when there are none). */
+  claudeUsage(worktreePath: string): Promise<WorktreeUsage | null>
+  /** Stage everything in a worktree and commit (throws on a clean tree). */
+  worktreeCommitAll(worktreePath: string, message: string): Promise<void>
+  /** Merge a worktree's branch into the repo's default branch (run from the
+   * primary worktree, which must be clean and on the default branch). Returns
+   * the target branch name. */
+  worktreeMergeToDefault(repoRoot: string, branch: string): Promise<string>
+  /** `git push -u origin HEAD` for a worktree. */
+  worktreePush(worktreePath: string): Promise<void>
+  worktreeDefaultBranch(repoRoot: string): Promise<string>
+  /** `gh pr create --fill`; returns the PR URL. Throws when gh is missing. */
+  prCreate(worktreePath: string): Promise<string>
+  /** PR + CI summary for the worktree's branch (null: no PR / no gh). */
+  prStatus(worktreePath: string): Promise<PrInfo | null>
+  /** Open an http(s) URL in the default browser. */
+  openExternal(url: string): void
   worktreeRemove(req: WorktreeRemoveRequest): Promise<void>
   sessionCreate(req: CreateSessionRequest): Promise<SessionSnapshot>
   sessionInput(id: string, data: string): void

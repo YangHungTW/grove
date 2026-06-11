@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useStore } from './useStore'
 import { store, type ProjectView } from './store'
 
@@ -24,6 +24,9 @@ export function Dialog(): JSX.Element | null {
         {d.kind === 'projectSettings' && <ProjectSettings name={d.name} repoRoot={d.repoRoot} />}
         {d.kind === 'renameSession' && <RenameSession id={d.id} title={d.title} />}
         {d.kind === 'openFile' && <OpenFile worktreeId={d.worktreeId} />}
+        {d.kind === 'finishWorktree' && (
+          <FinishWorktree repoRoot={d.repoRoot} wtId={d.wtId} branch={d.branch} />
+        )}
       </div>
     </div>
   )
@@ -72,6 +75,128 @@ function OpenFile({ worktreeId }: { worktreeId: string }): JSX.Element {
         </button>
         <button className="btn-primary" disabled={!path.trim()} onClick={submit}>
           Open
+        </button>
+      </div>
+    </>
+  )
+}
+
+function FinishWorktree({
+  repoRoot,
+  wtId,
+  branch
+}: {
+  repoRoot: string
+  wtId: string
+  branch: string
+}): JSX.Element {
+  const [message, setMessage] = useState('')
+  const [action, setAction] = useState<'merge' | 'pr' | 'commit'>('merge')
+  const [removeAfter, setRemoveAfter] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [target, setTarget] = useState('main')
+  // Fetch fresh values on open — the store's cached status can lag the agent's
+  // latest writes by a polling interval.
+  const [dirty, setDirty] = useState(store.wtStatus.get(wtId)?.dirty ?? 0)
+  useEffect(() => {
+    window.api
+      .worktreeDefaultBranch(repoRoot)
+      .then(setTarget)
+      .catch(() => {})
+    window.api
+      .worktreeStatus(wtId)
+      .then((st) => setDirty(st.dirty))
+      .catch(() => {})
+  }, [repoRoot, wtId])
+  const canSubmit = !busy && (dirty === 0 || message.trim().length > 0)
+  const submit = async (): Promise<void> => {
+    if (!canSubmit) return
+    setBusy(true)
+    const ok = await store.finishWorktree({ repoRoot, wtId, branch, message, action, removeAfter })
+    setBusy(false)
+    if (ok) store.closeDialog()
+  }
+  return (
+    <>
+      <h3 className="dialog-title">Finish worktree</h3>
+      <p className="dialog-body">
+        Wrap up <b>{branch}</b>
+        {dirty > 0 ? (
+          <>
+            : commit its <b>{dirty}</b> uncommitted change{dirty > 1 ? 's' : ''}, then
+          </>
+        ) : (
+          ' —'
+        )}{' '}
+        merge it into <b>{target}</b> or push it and open a pull request.
+      </p>
+      {dirty > 0 && (
+        <label className="dialog-field">
+          <span>Commit message</span>
+          <input
+            autoFocus
+            value={message}
+            placeholder="e.g. feat: add login flow"
+            spellCheck={false}
+            onChange={(e) => setMessage(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void submit()
+              else if (e.key === 'Escape') store.closeDialog()
+            }}
+          />
+        </label>
+      )}
+      <label className="dialog-check">
+        <input
+          type="radio"
+          name="finish-action"
+          checked={action === 'merge'}
+          onChange={() => setAction('merge')}
+        />
+        <span>
+          Merge into <b>{target}</b> <em>(local merge from the primary worktree)</em>
+        </span>
+      </label>
+      <label className="dialog-check">
+        <input
+          type="radio"
+          name="finish-action"
+          checked={action === 'pr'}
+          onChange={() => setAction('pr')}
+        />
+        <span>
+          Push + create PR <em>(via the gh CLI)</em>
+        </span>
+      </label>
+      <label className="dialog-check">
+        <input
+          type="radio"
+          name="finish-action"
+          checked={action === 'commit'}
+          onChange={() => setAction('commit')}
+        />
+        <span>
+          Commit only <em>(leave merging for later)</em>
+        </span>
+      </label>
+      {action === 'merge' && (
+        <label className="dialog-check">
+          <input
+            type="checkbox"
+            checked={removeAfter}
+            onChange={(e) => setRemoveAfter(e.target.checked)}
+          />
+          <span>
+            Remove the worktree after merging <em>(deletes the merged branch too)</em>
+          </span>
+        </label>
+      )}
+      <div className="dialog-actions">
+        <button className="btn-ghost" disabled={busy} onClick={() => store.closeDialog()}>
+          Cancel
+        </button>
+        <button className="btn-primary" disabled={!canSubmit} onClick={() => void submit()}>
+          {busy ? 'Working…' : 'Finish'}
         </button>
       </div>
     </>
