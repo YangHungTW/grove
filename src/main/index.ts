@@ -431,9 +431,10 @@ function registerIpc(): void {
   })
 
   ipcMain.on(Channels.sessionInput, (_e, id: string, data: string) => ptys.get(id)?.write(data))
-  ipcMain.on(Channels.sessionResize, (_e, id: string, cols: number, rows: number) =>
+  ipcMain.on(Channels.sessionResize, (_e, id: string, cols: number, rows: number) => {
+    if (process.env.CCM_DEBUG_RESIZE) console.log(`[resize] ${id} ${cols}x${rows}`)
     ptys.get(id)?.resize(cols, rows)
-  )
+  })
   ipcMain.on(Channels.sessionKill, (_e, id: string) => {
     ptys.get(id)?.kill()
     registry.removeSession(id)

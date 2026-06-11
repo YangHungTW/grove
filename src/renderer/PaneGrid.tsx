@@ -144,7 +144,13 @@ function Pane({
       // Solid theme background + foreground so agents that don't paint a full
       // background (e.g. agy/antigravity) show the theme colour, not a flat fill.
       allowTransparency: store.settings.transparent,
-      theme: store.terminalTheme()
+      theme: store.terminalTheme(),
+      // Disable reflow on resize (Terminal.app-style truncation). Re-wrapping
+      // the buffer desyncs zsh's cursor-row bookkeeping for multi-line / right
+      // prompts, so every split/zoom width change left a stale prompt copy
+      // behind. TUI agents repaint themselves on SIGWINCH, so they're
+      // unaffected; old scrollback simply keeps its original wrap points.
+      windowsMode: true
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
@@ -190,12 +196,21 @@ function Pane({
     const refit = (): void => {
       if (el.clientHeight < 2 || el.clientWidth < 2) return
       try {
-        fit.fit()
-        // Reserve one row so an agent's bottom line (claude's status / auto-mode
-        // row) isn't flush against the pane edge. The canvas sits at top:0, so a
-        // shorter terminal just leaves a clean margin at the bottom.
-        if (term.rows > 4) term.resize(term.cols, term.rows - 1)
-        term.refresh(0, term.rows - 1) // force a full repaint (new/reshown pane)
+        // Compute the target size and resize ONCE. (fit.fit() followed by a
+        // shrink would reflow the buffer twice per layout change — the row
+        // bounce desyncs zsh's cursor-row bookkeeping, so its SIGWINCH prompt
+        // redraw clears the wrong region and stale prompt copies pile up.)
+        const dims = fit.proposeDimensions()
+        if (dims && dims.cols >= 2 && dims.rows >= 2) {
+          // Reserve one row so an agent's bottom line (claude's status /
+          // auto-mode row) isn't flush against the pane edge. The canvas sits
+          // at top:0, so a shorter terminal just leaves a clean bottom margin.
+          const rows = dims.rows > 4 ? dims.rows - 1 : dims.rows
+          if (term.cols !== dims.cols || term.rows !== rows) {
+            term.resize(dims.cols, rows)
+            term.refresh(0, term.rows - 1) // full repaint (new/reshown pane)
+          }
+        }
       } catch {
         /* ignore transient measure errors */
       }
