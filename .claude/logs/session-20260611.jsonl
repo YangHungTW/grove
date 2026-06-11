@@ -397,3 +397,9 @@
 {"ts":"2026-06-11T14:29:47Z","tool":"Bash","params":{"command":"rm -f e2e/probe-after-3-toggles.png e2e/probe-after-6-toggles.png && npm run typecheck 2>&1 | tail -3 && npx vitest run ","timeout":420000,"description":"清理截圖 + 完整驗證"}}
 {"ts":"2026-06-11T14:35:11Z","tool":"Skill","params":{"skill":"commit-commands:commit"}}
 {"ts":"2026-06-11T14:35:25Z","tool":"Bash","params":{"command":"git add -A && git commit -m \"$(cat <<'EOF'\nfix: stale prompt copies on pane resize — disable xterm reflow, single-step r","description":"Stage all changes and create the commit"}}
+{"ts":"2026-06-11T14:36:02Z","tool":"Bash","params":{"command":"cd /Users/yanghungtw/Tools/grove\necho \"=== tags ===\" ; git tag --sort=-creatordate | head -10\necho \"=== Release commits ","description":"檢查 release 慣例：tag 與 commit 內容"}}
+{"ts":"2026-06-11T14:36:11Z","tool":"Bash","params":{"command":"cd /Users/yanghungtw/Tools/grove\necho \"=== what does v0.3.2 tag point at? ===\" ; git rev-list -n1 v0.3.2 ; echo \"(183e72","description":"確認 tag 指向、是否 annotated、remote 設定"}}
+{"ts":"2026-06-11T14:36:31Z","tool":"Bash","params":{"command":"cd /Users/yanghungtw/Tools/grove\necho \"=== current version ===\" ; node -p \"require('./package.json').version\"\necho \"=== ","description":"確認版號、GitHub releases、待推送 commit"}}
+{"ts":"2026-06-11T14:36:42Z","tool":"Bash","params":{"command":"cd /Users/yanghungtw/Tools/grove\necho \"=== 0.3.2 release assets ===\" ; gh release view v0.3.2 --json assets,body 2>&1 | ","description":"看 0.3.2 release 是否附 build 產物與 release notes 格式"}}
+{"ts":"2026-06-11T14:37:14Z","tool":"Bash","params":{"command":"cd /Users/yanghungtw/Tools/grove\ngit status -sb","description":"查看目前完整工作區狀態"}}
+{"ts":"2026-06-11T14:37:33Z","tool":"Bash","params":{"command":"cd /Users/yanghungtw/Tools/grove\ngit add .claude && git commit -q -m \"chore: update Claude Code session logs\" && echo \"c","description":"提交 session log、bump 至 0.4.0、建立 Release commit"}}
