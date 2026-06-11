@@ -32,6 +32,9 @@
   --muted: #8a8a93;
   --accent: #4f9cff;
   --danger: #ff6b6b;
+  /* "needs your input" — deliberately a warm amber, NOT the blue accent, so an
+     attention highlight is never mistaken for the active/selected state. */
+  --attention: #ffb224;
   --radius: 7px;
   --pane-bg: #1b1b1f;
   color-scheme: dark;
@@ -187,9 +190,22 @@ button {
   background: rgba(79, 156, 255, 0.16);
   border-color: rgba(79, 156, 255, 0.55);
 }
+/* Needs-input: amber pulsing outline — distinct from the blue .active fill, so
+   a worktree that both is selected AND needs input still reads as both. */
 .card.attention {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
+  border-color: var(--attention);
+  animation: card-attention 1.4s ease-in-out infinite;
+}
+@keyframes card-attention {
+  0%,
+  100% {
+    box-shadow: 0 0 0 1px var(--attention);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px var(--attention),
+      0 0 9px 1px color-mix(in srgb, var(--attention) 50%, transparent);
+  }
 }
 .card-top {
   display: flex;
@@ -303,8 +319,8 @@ button {
   line-height: 16px;
 }
 .wt-count.attention {
-  background: var(--accent);
-  color: #fff;
+  background: var(--attention);
+  color: #1a1a1a;
 }
 
 .project-title,
@@ -372,7 +388,7 @@ button {
   background: rgba(79, 156, 255, 0.2);
 }
 .session-row.attention {
-  box-shadow: inset 0 0 0 1px var(--accent);
+  box-shadow: inset 0 0 0 1px var(--attention);
 }
 .session-top {
   display: flex;
@@ -570,16 +586,16 @@ button {
   box-shadow: inset 0 2px 0 var(--accent);
 }
 .tab.attention {
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
-  box-shadow: inset 0 -2px 0 var(--accent);
+  color: var(--attention);
+  background: color-mix(in srgb, var(--attention) 16%, transparent);
+  box-shadow: inset 0 -2px 0 var(--attention);
 }
 .tab.attention::after {
   content: "";
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--attention);
   animation: attention-pulse 1.3s ease-in-out infinite;
 }
 @keyframes attention-pulse {
