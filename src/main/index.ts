@@ -27,6 +27,7 @@ import {
   pushBranch
 } from '../core/worktree'
 import { prCreate, prStatus } from '../core/gh'
+import { shellQuote } from '../core/shellQuote'
 import { worktreeClaudeUsage } from '../core/claudeUsage'
 import { ProjectStore, type ProjectEntry, type ProjectPatch } from '../core/projectStore'
 import { LayoutStore, type SessionDescriptor } from '../core/layoutStore'
@@ -123,11 +124,6 @@ function resolveWorktreePath(repoRoot: string, branch: string): string {
   return resolve(repoRoot, sub)
 }
 
-/** Single-quote a value for safe interpolation into a shell command. */
-function shQuote(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`
-}
-
 /**
  * Run a user hook (fire-and-forget) in a login shell. The command can be any
  * shell command, a script path, or an agent invocation (e.g. `agy -p "/setup"`).
@@ -141,9 +137,9 @@ function shQuote(s: string): string {
 function runHook(cmd: string, cwd: string, extraEnv: Record<string, string>): void {
   if (!cmd || !cmd.trim()) return
   const expanded = cmd
-    .replace(/\{worktree\}/g, shQuote(extraEnv.CCM_WORKTREE_PATH ?? ''))
-    .replace(/\{branch\}/g, shQuote(extraEnv.CCM_BRANCH ?? ''))
-    .replace(/\{repo\}/g, shQuote(extraEnv.CCM_REPO ?? ''))
+    .replace(/\{worktree\}/g, shellQuote(extraEnv.CCM_WORKTREE_PATH ?? ''))
+    .replace(/\{branch\}/g, shellQuote(extraEnv.CCM_BRANCH ?? ''))
+    .replace(/\{repo\}/g, shellQuote(extraEnv.CCM_REPO ?? ''))
   const shell = process.env.SHELL || '/bin/zsh'
   try {
     execFile(shell, ['-lc', expanded], { cwd, env: { ...process.env, ...extraEnv } }, () => {})

@@ -81,6 +81,24 @@ try {
   await groupA.locator('.card', { hasText: 'main' }).first().click()
   await win.waitForSelector('.card.active', { timeout: 10000 })
 
+  // 2b) SIDEBAR RESIZE — drag the divider right; the sidebar column widens.
+  const appCol0 = async () =>
+    parseFloat(
+      (await win.evaluate(
+        () => getComputedStyle(document.getElementById('app')).gridTemplateColumns
+      )).split(' ')[0]
+    )
+  const sbBefore = await appCol0()
+  const rb = await win.locator('.sidebar-resizer').boundingBox()
+  await win.mouse.move(rb.x + rb.width / 2, rb.y + 200)
+  await win.mouse.down()
+  await win.mouse.move(rb.x + 120, rb.y + 200, { steps: 6 })
+  await win.mouse.up()
+  await win.waitForTimeout(200)
+  const sbAfter = await appCol0()
+  assert.ok(sbAfter > sbBefore + 40, `sidebar resize: col0 should widen (${sbBefore}→${sbAfter})`)
+  const sidebarResize = true
+
   const visCount = () =>
     win.evaluate(
       () => [...document.querySelectorAll('.pane')].filter((p) => getComputedStyle(p).display !== 'none').length
@@ -345,7 +363,7 @@ try {
 
   console.log(
     `SMOKE_OK fontLoaded=${fontLoaded} noClip=${noClip} projects=${projectCount} split=${visible} dragResize=${dragResize} roundTrip=true ` +
-      `zoom=${zoomToggle} termSearch=${termSearch} ` +
+      `sidebarResize=${sidebarResize} zoom=${zoomToggle} termSearch=${termSearch} ` +
       `worktreeCreated=true agentLaunched=true multiAgent=${agentRows === 2} ` +
       `agentAfterSwitch=${agentAfterSwitch} kbdNav=${kbdNav} fileViewer=${fileViewer} ` +
       `viewerPanes=${viewerPanes} htmlIframe=${htmlIframe} diffReview=${diffReview} ` +

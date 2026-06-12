@@ -89,6 +89,14 @@ describe('worktree git operations', () => {
     expect(s.behind).toBe(0)
   })
 
+  it('worktreeStatus reports the current branch, tracking a checkout, empty when detached', async () => {
+    expect((await worktreeStatus(repo)).branch).toBe('main')
+    git(['checkout', '-q', '-b', 'feature/login'])
+    expect((await worktreeStatus(repo)).branch).toBe('feature/login')
+    git(['checkout', '-q', '--detach'])
+    expect((await worktreeStatus(repo)).branch).toBe('')
+  })
+
   it('worktreeDiff reports a modified tracked file with the new line and path', async () => {
     writeFileSync(join(repo, 'README.md'), '# changed line\n')
     const diff = await worktreeDiff(repo)

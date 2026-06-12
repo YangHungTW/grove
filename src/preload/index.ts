@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
+import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 import {
   Channels,
   type CreateSessionRequest,
@@ -72,6 +72,15 @@ const api: RendererApi = {
   fileOpenDialog: (defaultPath?: string): Promise<string | null> =>
     ipcRenderer.invoke(Channels.fileOpenDialog, defaultPath),
   fileRead: (filePath: string): Promise<string> => ipcRenderer.invoke(Channels.fileRead, filePath),
+  // Absolute path of a dragged-in File. webUtils.getPathForFile replaces the
+  // deprecated File.path; returns '' if the path can't be resolved.
+  pathForFile: (file: File): string => {
+    try {
+      return webUtils.getPathForFile(file)
+    } catch {
+      return ''
+    }
+  },
   notifyAttention: (id: string, title: string): void => {
     ipcRenderer.send(Channels.notifyAttention, id, title)
   },

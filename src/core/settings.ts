@@ -113,6 +113,8 @@ export interface AppSettings {
   transparent: boolean
   /** Whether the sidebar is collapsed. */
   sidebarCollapsed: boolean
+  /** Sidebar width in px (drag-resizable; clamped on apply). */
+  sidebarWidth: number
   /** Configured agents for the "+" menu. */
   agents: AgentDef[]
   /** Worktree folder template, relative to the project (supports {branch}, {repo}, {timestamp}). */
@@ -161,6 +163,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   fontSize: 13,
   transparent: false,
   sidebarCollapsed: false,
+  sidebarWidth: 248,
   agents: AGENT_PRESETS,
   worktreeFolder: '../{repo}-wt-{branch}',
   keybindings: DEFAULT_KEYBINDINGS,

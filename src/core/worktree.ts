@@ -65,32 +65,33 @@ export interface WorktreeStatus {
   dirty: number
   ahead: number
   behind: number
+  /** Current branch short name; '' when detached (lets the card track an
+   * in-terminal `git checkout` / branch rename without a full reload). */
+  branch: string
 }
 
-/** Working-tree status: dirty file count and ahead/behind vs upstream (0 if none). */
+/** Working-tree status: branch, dirty file count, and ahead/behind vs upstream.
+ * The three git queries are independent, so they run concurrently (a git spawn
+ * dominates the cost) and each fails soft — a missing answer (e.g. no upstream)
+ * never sinks the others. */
 export async function worktreeStatus(path: string): Promise<WorktreeStatus> {
-  let dirty = 0
-  let ahead = 0
-  let behind = 0
-  try {
+  const [branch, dirty, [behind, ahead]] = await Promise.all([
+    // Empty for a detached HEAD — the card falls back to '(detached)'.
+    git(path, ['branch', '--show-current'])
+      .then((s) => s.trim())
+      .catch(() => ''),
     // -uall counts each untracked FILE (porcelain otherwise collapses a whole
     // untracked directory into one entry), so the card's dirty count matches
     // the file count in the diff/review pane.
-    const porcelain = await git(path, ['status', '--porcelain', '-uall'])
-    dirty = porcelain.split('\n').filter((l) => l.trim().length > 0).length
-  } catch {
-    /* not a repo */
-  }
-  try {
-    // left-right counts vs upstream; throws if no upstream configured.
-    const lr = (await git(path, ['rev-list', '--count', '--left-right', '@{upstream}...HEAD'])).trim()
-    const [b, a] = lr.split(/\s+/).map((n) => parseInt(n, 10) || 0)
-    behind = b
-    ahead = a
-  } catch {
-    /* no upstream */
-  }
-  return { dirty, ahead, behind }
+    git(path, ['status', '--porcelain', '-uall'])
+      .then((p) => p.split('\n').filter((l) => l.trim().length > 0).length)
+      .catch(() => 0),
+    // left-right counts vs upstream; rejects (→ [0, 0]) when no upstream is set.
+    git(path, ['rev-list', '--count', '--left-right', '@{upstream}...HEAD'])
+      .then((lr) => lr.trim().split(/\s+/).map((n) => parseInt(n, 10) || 0) as [number, number])
+      .catch(() => [0, 0] as [number, number])
+  ])
+  return { dirty, ahead, behind, branch }
 }
 
 /** True if `path` is inside a git working tree (used to validate opened folders). */

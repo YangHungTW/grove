@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, type CSSProperties, type MouseEvent } from 'react'
 import { Sidebar } from './Sidebar'
 import { TabBar } from './TabBar'
 import { GroupTabs } from './GroupTabs'
@@ -106,9 +106,33 @@ export function App(): JSX.Element {
     return () => window.removeEventListener('keydown', onKey, { capture: true })
   }, [])
 
+  // A file dropped anywhere Grove doesn't explicitly handle would make Electron
+  // navigate the window to that file (blanking the app). Swallow stray drag/drop
+  // at the window level; the terminal panes + "file" button handle their own.
+  useEffect(() => {
+    const swallow = (e: globalThis.DragEvent): void => {
+      if (e.dataTransfer?.types.includes('Files')) e.preventDefault()
+    }
+    window.addEventListener('dragover', swallow)
+    window.addEventListener('drop', swallow)
+    return () => {
+      window.removeEventListener('dragover', swallow)
+      window.removeEventListener('drop', swallow)
+    }
+  }, [])
+
+  const appStyle = {
+    '--sidebar-w': `${s.settings.sidebarWidth || 248}px`
+  } as CSSProperties
+
   return (
-    <div id="app" className={s.settings.sidebarCollapsed ? 'sidebar-collapsed' : ''}>
+    <div
+      id="app"
+      className={s.settings.sidebarCollapsed ? 'sidebar-collapsed' : ''}
+      style={appStyle}
+    >
       {!s.settings.sidebarCollapsed && <Sidebar />}
+      {!s.settings.sidebarCollapsed && <SidebarResizer />}
       <main id="content">
         <TabBar />
         <GroupTabs />
@@ -118,4 +142,33 @@ export function App(): JSX.Element {
       <Dialog />
     </div>
   )
+}
+
+/** Drag handle on the sidebar's right edge. Updates the width live via the CSS
+ * variable during the drag (cheap, no React churn) and persists it on release. */
+const SIDEBAR_MIN = 180
+const SIDEBAR_MAX = 560
+function SidebarResizer(): JSX.Element {
+  const onDown = (e: MouseEvent): void => {
+    e.preventDefault()
+    const app = document.getElementById('app')
+    if (!app) return
+    const startX = e.clientX
+    const startW = store.settings.sidebarWidth || 248
+    const widthAt = (ev: globalThis.MouseEvent): number =>
+      Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, startW + ev.clientX - startX))
+    app.classList.add('resizing-sidebar')
+    const onMove = (ev: globalThis.MouseEvent): void => {
+      app.style.setProperty('--sidebar-w', `${widthAt(ev)}px`)
+    }
+    const onUp = (ev: globalThis.MouseEvent): void => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      app.classList.remove('resizing-sidebar')
+      void store.updateSettings({ sidebarWidth: widthAt(ev) })
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }
+  return <div className="sidebar-resizer" onMouseDown={onDown} title="Drag to resize sidebar" />
 }

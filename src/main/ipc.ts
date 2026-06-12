@@ -166,6 +166,8 @@ export interface RendererApi {
   fileOpenDialog(defaultPath?: string): Promise<string | null>
   /** Read a UTF-8 file's contents (used by viewer panes). */
   fileRead(filePath: string): Promise<string>
+  /** Absolute path of a dragged-in File (preload-only; no IPC round-trip). */
+  pathForFile(file: File): string
   /** Fire an OS notification that a session needs input (no-op if Grove is focused). */
   notifyAttention(id: string, title: string): void
   /** Set the Dock/taskbar badge to the pending-session count (0 clears it). */

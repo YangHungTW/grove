@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useStore } from './useStore'
 import { store } from './store'
+import { filePathsFrom } from './fileDrop'
 import {
   AgentTabIcon,
   BellIcon,
@@ -21,6 +22,7 @@ export function TabBar(): JSX.Element {
     (a) => a.installed && !s.settings.disabledAgents.includes(a.id)
   )
   const [menuOpen, setMenuOpen] = useState(false)
+  const [fileDragOver, setFileDragOver] = useState(false)
   const wt = s.activeWorktreeId
 
   return (
@@ -85,10 +87,25 @@ export function TabBar(): JSX.Element {
           <PlusIcon size={12} /> shell
         </button>
         <button
-          className="add-session"
+          className={'add-session' + (fileDragOver ? ' drag-over' : '')}
           aria-label="Open file"
           disabled={!wt}
+          title="Open a file in a viewer pane — or drop a file here"
           onClick={() => wt && store.promptOpenFile(wt)}
+          onDragOver={(e) => {
+            if (wt && e.dataTransfer.types.includes('Files')) {
+              e.preventDefault()
+              e.dataTransfer.dropEffect = 'copy'
+              setFileDragOver(true)
+            }
+          }}
+          onDragLeave={() => setFileDragOver(false)}
+          onDrop={(e) => {
+            e.preventDefault()
+            setFileDragOver(false)
+            const [path] = wt ? filePathsFrom(e.dataTransfer) : []
+            if (path) void store.openFile(wt!, path)
+          }}
         >
           <PlusIcon size={12} /> file
         </button>

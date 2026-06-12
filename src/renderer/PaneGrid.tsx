@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState, type CSSProperties, type MouseEvent } from 'react'
+import {
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type DragEvent,
+  type MouseEvent
+} from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
@@ -9,6 +16,8 @@ import { store } from './store'
 import { ViewerPane } from './ViewerPane'
 import { DiffPane } from './DiffPane'
 import { SearchBar } from './SearchBar'
+import { filePathsFrom } from './fileDrop'
+import { shellQuote } from '../core/shellQuote'
 import type { SessionSnapshot } from '../main/ipc'
 
 export function PaneGrid(): JSX.Element {
@@ -125,12 +134,25 @@ function Pane({
 }): JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
+  const [dragOver, setDragOver] = useState(false)
 
   // Move keyboard focus to this terminal whenever it becomes the focused
   // session — covers both newly-created sessions and tab switches.
   useEffect(() => {
     if (focused) requestAnimationFrame(() => termRef.current?.focus())
   }, [focused])
+
+  // Drag a file from Finder onto the terminal → type its (shell-quoted) path,
+  // like Terminal.app/iTerm. Electron would otherwise try to open the dropped
+  // file and navigate the window away; preventDefault stops that.
+  const onDrop = (e: DragEvent): void => {
+    e.preventDefault()
+    setDragOver(false)
+    const paths = filePathsFrom(e.dataTransfer).map(shellQuote)
+    if (!paths.length) return
+    window.api.sessionInput(session.id, paths.join(' ') + ' ')
+    store.focusSession(session.id)
+  }
 
   useEffect(() => {
     const el = ref.current
@@ -294,13 +316,27 @@ function Pane({
 
   return (
     <div
-      className={'pane' + (focused ? ' focused' : '')}
+      className={'pane' + (focused ? ' focused' : '') + (dragOver ? ' drag-over' : '')}
       data-session-id={session.id}
       style={visible ? { display: 'block', gridColumn: column } : { display: 'none' }}
       ref={ref}
       onMouseDown={() => store.focusSession(session.id)}
+      onDragOver={(e) => {
+        // Must preventDefault on dragover or the drop event never fires.
+        if (e.dataTransfer?.types.includes('Files')) {
+          e.preventDefault()
+          e.dataTransfer.dropEffect = 'copy'
+          setDragOver(true)
+        }
+      }}
+      onDragLeave={(e) => {
+        // Ignore leaves into child nodes (xterm layers); only clear on real exit.
+        if (!ref.current?.contains(e.relatedTarget as Node)) setDragOver(false)
+      }}
+      onDrop={onDrop}
     >
       {searching && <SearchBar sessionId={session.id} />}
+      {dragOver && <div className="pane-drop-hint">Drop to paste file path</div>}
     </div>
   )
 }

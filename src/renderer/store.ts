@@ -317,12 +317,25 @@ class Store {
     }
   }
 
-  /** Refresh a worktree card's live metadata: git status + Claude usage. */
+  /** The WorktreeView for an id (= path), across all projects. */
+  private worktreeOf(wtId: string): WorktreeView | undefined {
+    for (const p of this.projects.values()) {
+      const wt = p.worktrees.get(wtId)
+      if (wt) return wt
+    }
+    return undefined
+  }
+
+  /** Refresh a worktree card's live metadata: branch + git status + Claude usage. */
   private refreshWorktreeMeta(wtId: string): void {
     window.api
       .worktreeStatus(wtId)
       .then((s) => {
         this.wtStatus.set(wtId, s)
+        // Track an in-terminal `git checkout` / branch rename so the card name
+        // stays current (it was otherwise only set on the initial load).
+        const wt = this.worktreeOf(wtId)
+        if (wt && s.branch && wt.branch !== s.branch) wt.branch = s.branch
         this.notify()
       })
       .catch(() => {})
