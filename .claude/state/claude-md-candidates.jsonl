@@ -1,6 +1,6 @@
 {"ts":"2026-06-09T14:42:55Z","dir":"src/renderer/assets","signals":["edit-touch","recent-activity","depth>=2","not-in-ancestor"],"score":0.667,"status":"pending"}
-{"ts":"2026-06-11T13:21:53Z","dir":"src/preload","signals":["edit-touch","recent-activity","depth>=2"],"score":0.556,"status":"pending"}
-{"ts":"2026-06-11T14:13:08Z","dir":"src/core","signals":["size>=4","edit-touch","recent-activity","bounded-context-name","depth>=2"],"score":0.889,"status":"pending"}
-{"ts":"2026-06-11T14:23:47Z","dir":"src/main","signals":["edit-touch","recent-activity","depth>=2"],"score":0.556,"status":"pending"}
-{"ts":"2026-06-11T14:24:55Z","dir":"e2e","signals":["edit-touch","recent-activity"],"score":0.500,"status":"pending"}
-{"ts":"2026-06-11T14:28:52Z","dir":"src/renderer","signals":["size>=4","edit-touch","recent-activity","depth>=2"],"score":0.778,"status":"pending"}
+{"ts":"2026-06-12T03:03:37Z","dir":"e2e","signals":["edit-touch","recent-activity"],"score":0.500,"status":"pending"}
+{"ts":"2026-06-12T03:05:32Z","dir":"src/preload","signals":["edit-touch","recent-activity","depth>=2"],"score":0.556,"status":"pending"}
+{"ts":"2026-06-12T03:21:09Z","dir":"src/main","signals":["edit-touch","recent-activity","depth>=2"],"score":0.556,"status":"pending"}
+{"ts":"2026-06-12T03:22:16Z","dir":"src/renderer","signals":["size>=4","edit-touch","recent-activity","depth>=2"],"score":0.778,"status":"pending"}
+{"ts":"2026-06-12T03:22:32Z","dir":"src/core","signals":["size>=4","edit-touch","recent-activity","bounded-context-name","depth>=2"],"score":0.889,"status":"pending"}

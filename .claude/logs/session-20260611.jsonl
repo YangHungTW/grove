@@ -403,3 +403,11 @@
 {"ts":"2026-06-11T14:36:42Z","tool":"Bash","params":{"command":"cd /Users/yanghungtw/Tools/grove\necho \"=== 0.3.2 release assets ===\" ; gh release view v0.3.2 --json assets,body 2>&1 | ","description":"看 0.3.2 release 是否附 build 產物與 release notes 格式"}}
 {"ts":"2026-06-11T14:37:14Z","tool":"Bash","params":{"command":"cd /Users/yanghungtw/Tools/grove\ngit status -sb","description":"查看目前完整工作區狀態"}}
 {"ts":"2026-06-11T14:37:33Z","tool":"Bash","params":{"command":"cd /Users/yanghungtw/Tools/grove\ngit add .claude && git commit -q -m \"chore: update Claude Code session logs\" && echo \"c","description":"提交 session log、bump 至 0.4.0、建立 Release commit"}}
+{"ts":"2026-06-11T14:37:56Z","tool":"Bash","params":{"command":"cd /Users/yanghungtw/Tools/grove\nnpm run typecheck 2>&1 | tail -2 && npx vitest run 2>&1 | tail -3","description":"最終 typecheck + 單元測試"}}
+{"ts":"2026-06-11T14:38:21Z","tool":"Bash","params":{"command":"cd /Users/yanghungtw/Tools/grove\nnpx vitest run 2>&1 | grep -E \"Test Files|Tests \"","description":"確認測試通過數"}}
+{"ts":"2026-06-11T14:38:43Z","tool":"Bash","params":{"command":"cd /Users/yanghungtw/Tools/grove\nnpm run dist 2>&1 | tail -25","timeout":600000,"description":"build 並打包 macOS dmg/zip"}}
+{"ts":"2026-06-11T14:39:15Z","tool":"Bash","params":{"command":"cd /Users/yanghungtw/Tools/grove\nls -lh release/Grove-0.4.0-arm64.dmg release/Grove-0.4.0-arm64-mac.zip","description":"確認 build 產物存在"}}
+{"ts":"2026-06-11T14:39:25Z","tool":"Bash","params":{"command":"cd /Users/yanghungtw/Tools/grove\ngit tag v0.4.0 && echo \"tagged v0.4.0\"\ngit push origin main 2>&1 | tail -3\ngit push ori","description":"建立 v0.4.0 tag 並 push main 與 tag"}}
+{"ts":"2026-06-11T14:39:49Z","tool":"Bash","params":{"command":"cd /Users/yanghungtw/Tools/grove\ncat > /tmp/grove-0.4.0-notes.md <<'EOF'\nThe biggest feature release yet — terminal sear","timeout":300000,"description":"建立 GitHub release 並上傳 dmg/zip"}}
+{"ts":"2026-06-11T14:40:14Z","tool":"Bash","params":{"command":"cd /Users/yanghungtw/Tools/grove\ngh release view v0.4.0 --json name,tagName,assets,isLatest --jq '{name,tagName,isLatest","description":"確認 release 與附件已上線"}}
+{"ts":"2026-06-11T14:40:22Z","tool":"Bash","params":{"command":"cd /Users/yanghungtw/Tools/grove\ngh release view v0.4.0 --json name,tagName,isDraft,assets --jq '{name,tagName,isDraft,a","description":"確認 release 與附件"}}
