@@ -13,6 +13,10 @@ export interface SessionDescriptor {
   /** Pinned agent session id (claude) — restored via `--resume` so the agent
    * reopens its previous conversation instead of starting fresh. */
   resumeId?: string
+  /** Durable (tmux control-mode) agent: on restore, reattach to the still-live
+   * tmux session instead of respawning. The tmux name is derived deterministically
+   * from the worktree path (see `tmuxSessionName`), so only this marker is stored. */
+  durable?: boolean
 }
 
 /**

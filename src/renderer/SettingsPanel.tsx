@@ -159,6 +159,19 @@ export function SettingsPanel(): JSX.Element | null {
           />
         </label>
 
+        <div className="settings-section">Sessions</div>
+        <label
+          className="settings-row"
+          title="Run agents inside tmux (control mode) so they survive a Grove restart and reattach to the live process. Requires tmux on PATH; falls back to a normal session when tmux is missing."
+        >
+          <span>Durable sessions (tmux)</span>
+          <input
+            type="checkbox"
+            checked={cfg.durableSessions}
+            onChange={(e) => void store.updateSettings({ durableSessions: e.target.checked })}
+          />
+        </label>
+
         <div className="settings-section">Agents</div>
         {cfg.agents.map((a, i) => {
           const isInstalled = installedById.get(a.id)

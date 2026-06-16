@@ -36,6 +36,8 @@ import { SettingsStore, type AppSettings } from '../core/settingsStore'
 import type { ResolvedAgent } from '../core/settings'
 import { execFileSync } from 'node:child_process'
 import { detectState } from '../core/stateDetection'
+import { TmuxControlParser, toSendKeysHex } from '../core/tmuxControl'
+import { buildTmuxControlLaunch, tmuxSessionName, durableEnabled } from '../core/tmuxLaunch'
 import type { CreateWorktreeOptions } from '../core/worktree'
 import {
   Channels,
@@ -49,6 +51,10 @@ import type { Session } from '../core/types'
 /** Main owns the single source of truth: the registry + live pty processes. */
 const registry = new SessionRegistry()
 const ptys = new Map<string, PtySession>()
+// Control-mode (CCM_TMUX=control) sessions: the pty runs `tmux -CC`, so its
+// stdin/out is the tmux protocol, not raw terminal I/O. Input/resize must be
+// translated to tmux commands instead of written to the pty directly.
+const control = new Map<string, { name: string }>()
 let mainWindow: BrowserWindow | null = null
 let projectStore: ProjectStore | null = null
 let layoutStore: LayoutStore | null = null
@@ -183,8 +189,23 @@ function snapshot(s: Session): SessionSnapshot {
     state: s.state,
     pid: s.pid,
     filePath: s.filePath,
-    viewerKind: s.viewerKind
+    viewerKind: s.viewerKind,
+    durable: control.has(s.id) || undefined
   }
+}
+
+/**
+ * The deterministic tmux session name for a worktree's durable agent, or
+ * undefined when this session should NOT run under tmux. Durable mode is on when
+ * the user opted in AND tmux is installed (falls back to a direct spawn when it
+ * is missing), or when forced via CCM_TMUX=control (used in dev/e2e). One source
+ * of truth for both launchSpecFor and createSession's control wiring.
+ */
+function durableAgentName(req: CreateSessionRequest): string | undefined {
+  if (req.kind !== 'agent') return undefined
+  const forced = process.env.CCM_TMUX === 'control'
+  const on = forced || durableEnabled(settings().load().durableSessions, commandExists('tmux'))
+  return on ? tmuxSessionName(req.worktreeId) : undefined
 }
 
 /**
@@ -219,6 +240,15 @@ function launchSpecFor(req: CreateSessionRequest): {
     const ok =
       allowed.length === 0 || allowed.some((ac) => agentCmd === ac || agentCmd.startsWith(`${ac} `))
     if (!ok) throw new Error(`agent command not allowed: ${agentCmd.split(/\s+/)[0]}`)
+    // Durable sessions: when enabled (+ tmux installed) the agent runs under tmux
+    // CONTROL MODE so it survives a Grove restart and reattaches to the live
+    // process. tmux emits a text protocol instead of drawing — createSession parses
+    // %output and renders pane bytes in xterm natively (the single renderer, so
+    // scroll/search/selection stay native and there is no repaint ghosting).
+    const name = durableAgentName(req)
+    if (name) {
+      return buildTmuxControlLaunch(shell, name, req.cols ?? 120, req.rows ?? 40, agentCmd)
+    }
     return { command: shell, args: ['-lc', agentCmd] }
   }
   // A shell pane is an interactive login shell (p10k prompt expected).
@@ -258,7 +288,7 @@ function createSession(req: CreateSessionRequest): SessionSnapshot {
     title: req.title
   })
 
-  pty.onData((data) => {
+  const forwardOutput = (data: string): void => {
     send(Channels.sessionData, { id: record.id, data })
     if (agent) {
       const next = detectState(data, agent)
@@ -267,7 +297,30 @@ function createSession(req: CreateSessionRequest): SessionSnapshot {
         pty.setState(next)
       }
     }
-  })
+  }
+
+  const tmuxName = durableAgentName(req)
+
+  if (tmuxName) {
+    // Control mode: the pty stream is the tmux protocol. Only %output carries the
+    // pane's real bytes — and they're clean (no tmux chrome), so state detection
+    // runs on exactly what xterm renders.
+    const parser = new TmuxControlParser({
+      onOutput: (_pane, data) => forwardOutput(data),
+      onExit: () => {
+        if (record.state === 'exited') return
+        record.state = 'exited'
+        send(Channels.sessionExit, { id: record.id, exitCode: 0 })
+        ptys.delete(record.id)
+        control.delete(record.id)
+      },
+      onOther: process.env.CCM_TMUX_DEBUG ? (l) => console.error('[tmux]', l) : undefined
+    })
+    pty.onData((d) => parser.feed(d))
+    control.set(record.id, { name: tmuxName })
+  } else {
+    pty.onData(forwardOutput)
+  }
   pty.onStateChange((state) => {
     record.state = state
     send(Channels.sessionStateChange, { id: record.id, state })
@@ -276,6 +329,7 @@ function createSession(req: CreateSessionRequest): SessionSnapshot {
     record.state = 'exited'
     send(Channels.sessionExit, { id: record.id, exitCode, signal })
     ptys.delete(record.id)
+    control.delete(record.id)
   })
 
   ptys.set(record.id, pty)
@@ -284,9 +338,13 @@ function createSession(req: CreateSessionRequest): SessionSnapshot {
   } catch (err) {
     // Spawn failed (e.g. shell not found) — roll back the registry record.
     ptys.delete(record.id)
+    control.delete(record.id)
     registry.removeSession(record.id)
     throw err
   }
+  // A control client is inert at tmux's default 80x23 until told its size; set it
+  // (the renderer's first FitAddon resize will refine it moments later).
+  if (tmuxName) pty.write(`refresh-client -C ${req.cols ?? 120}x${req.rows ?? 40}\n`)
   record.pid = pty.pid
   return snapshot(record)
 }
@@ -426,13 +484,31 @@ function registerIpc(): void {
     return readFileAsync(filePath, 'utf8')
   })
 
-  ipcMain.on(Channels.sessionInput, (_e, id: string, data: string) => ptys.get(id)?.write(data))
+  ipcMain.on(Channels.sessionInput, (_e, id: string, data: string) => {
+    const c = control.get(id)
+    if (c) {
+      // Control mode: deliver keystrokes as hex via send-keys, not raw pty write.
+      if (data.length) ptys.get(id)?.write(`send-keys -t ${c.name} -H ${toSendKeysHex(data)}\n`)
+      return
+    }
+    ptys.get(id)?.write(data)
+  })
   ipcMain.on(Channels.sessionResize, (_e, id: string, cols: number, rows: number) => {
     if (process.env.CCM_DEBUG_RESIZE) console.log(`[resize] ${id} ${cols}x${rows}`)
+    const c = control.get(id)
+    if (c) {
+      // Size the tmux window via the control client (auto-released on detach —
+      // never resize-window, which freezes window-size to manual).
+      ptys.get(id)?.write(`refresh-client -C ${cols}x${rows}\n`)
+      return
+    }
     ptys.get(id)?.resize(cols, rows)
   })
   ipcMain.on(Channels.sessionKill, (_e, id: string) => {
+    // For a control session, killing the pty exits the -CC client; the tmux
+    // session (and its agent) persists detached — that's the durability we want.
     ptys.get(id)?.kill()
+    control.delete(id)
     registry.removeSession(id)
   })
 

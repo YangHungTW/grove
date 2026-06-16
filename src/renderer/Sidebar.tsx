@@ -2,7 +2,7 @@ import type { MouseEvent } from 'react'
 import { useStore } from './useStore'
 import { store, type ProjectView, type WorktreeView } from './store'
 import { formatTokens, formatUsd, shortModel } from './usageFormat'
-import { RepoIcon, PlusIcon, GearIcon, XIcon, DiffIcon, MergeIcon } from './Icons'
+import { RepoIcon, PlusIcon, GearIcon, XIcon, DiffIcon, MergeIcon, AnchorIcon } from './Icons'
 import type { PrInfo } from '../core/gh'
 import groveLogo from './assets/grove-logo.svg'
 
@@ -99,6 +99,7 @@ function WorktreeCard({
   const cnt = s.sessionsOf(wt.id).length
   const stateDot = s.worktreeState(wt.id)
   const attention = s.worktreePending(wt.id)
+  const durable = s.worktreeDurable(wt.id)
   const folder = wt.path.split('/').filter(Boolean).pop() ?? ''
 
   const statusParts: string[] = []
@@ -119,6 +120,14 @@ function WorktreeCard({
           />
         )}
         <span className="card-title">{wt.branch || '(detached)'}</span>
+        {durable && (
+          <span
+            className="card-durable"
+            title="Durable — agent runs in tmux and survives a Grove restart"
+          >
+            <AnchorIcon size={11} />
+          </span>
+        )}
         {cnt > 0 && (
           <span className="card-count" title={`${cnt} session${cnt > 1 ? 's' : ''} open`}>
             {cnt}

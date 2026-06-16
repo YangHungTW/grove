@@ -131,6 +131,14 @@ export const DiffIcon = ({ size = 16, className }: P): JSX.Element =>
     <path d="M4 2h2v2h2v1.6H6v2H4v-2H2V4h2V2Zm-2 9h6v1.6H2V11Zm8-7.5 4 2.5-4 2.5V3.5Zm-1.5 8.1 1.1-1.1 1 1 2.4-2.4 1.1 1.1L11.6 14 8.5 11.6Z" />
   )
 
+/** An anchor — marks a durable (tmux-backed) worktree whose agent survives restarts. */
+export const AnchorIcon = ({ size = 16, className }: P): JSX.Element =>
+  svg(
+    size,
+    className,
+    <path d="M8 1.5a1.7 1.7 0 0 1 .85 3.17V6h1.9v1.6h-1.9v4.9a4.6 4.6 0 0 0 3.5-3.1l1.45.5A6.1 6.1 0 0 1 8 14.2 6.1 6.1 0 0 1 2.2 9.9l1.45-.5a4.6 4.6 0 0 0 3.5 3.1V7.6h-1.9V6h1.9V4.67A1.7 1.7 0 0 1 8 1.5Z" />
+  )
+
 /** Tab icon for an agent, chosen by its configured icon char (presets) with a
  * generic fallback so custom agents still get a solid icon (never an emoji). */
 export function AgentTabIcon({ icon, size = 13 }: { icon?: string; size?: number }): JSX.Element {
