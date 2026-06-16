@@ -18,6 +18,9 @@ export function Dialog(): JSX.Element | null {
         {d.kind === 'createWorktree' && (
           <CreateWorktree projectName={d.projectName} getProject={project} />
         )}
+        {d.kind === 'branchExists' && (
+          <BranchExists projectName={d.projectName} branch={d.branch} getProject={project} />
+        )}
         {d.kind === 'removeWorktree' && (
           <RemoveWorktree branch={d.branch} folder={d.folder} wtId={d.wtId} getProject={project} />
         )}
@@ -353,6 +356,44 @@ function CreateWorktree({
         </button>
         <button className="btn-primary" disabled={!branch.trim()} onClick={submit}>
           Create worktree
+        </button>
+      </div>
+    </>
+  )
+}
+
+function BranchExists({
+  projectName,
+  branch,
+  getProject
+}: {
+  projectName: string
+  branch: string
+  getProject: () => ProjectView | undefined
+}): JSX.Element {
+  const use = (): void => {
+    const p = getProject()
+    store.closeDialog()
+    if (p) void store.createWorktree(p, branch, true)
+  }
+  const rename = (): void => {
+    const p = getProject()
+    store.closeDialog()
+    if (p) store.openDialog({ kind: 'createWorktree', repoRoot: p.repoRoot, projectName })
+  }
+  return (
+    <>
+      <h3 className="dialog-title">Branch already exists</h3>
+      <p className="dialog-body">
+        A branch named <b>{branch}</b> already exists in <b>{projectName}</b>. Open it as a new
+        worktree, or pick a different name?
+      </p>
+      <div className="dialog-actions">
+        <button className="btn-ghost" onClick={rename}>
+          Choose another name
+        </button>
+        <button className="btn-primary" onClick={use}>
+          Use existing branch
         </button>
       </div>
     </>

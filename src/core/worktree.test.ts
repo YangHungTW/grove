@@ -14,7 +14,9 @@ import {
   defaultBranch,
   commitAll,
   mergeIntoDefault,
-  isLinkedWorktree
+  isLinkedWorktree,
+  branchExists,
+  BranchExistsError
 } from './worktree'
 
 let repo: string
@@ -48,6 +50,32 @@ describe('worktree git operations', () => {
     expect(found).toBeDefined()
     expect(found!.path).toContain('wt-')
 
+    rmSync(wtPath, { recursive: true, force: true })
+  })
+
+  it('branchExists reflects whether a local branch is present', async () => {
+    expect(await branchExists(repo, 'main')).toBe(true)
+    expect(await branchExists(repo, 'nope')).toBe(false)
+  })
+
+  it('createWorktree with newBranch throws BranchExistsError on a name collision', async () => {
+    git(['branch', 'dup'])
+    const wtPath = join(repo, '..', `wt-dup-${Date.now()}`)
+    await expect(
+      createWorktree(repo, { path: wtPath, branch: 'dup', newBranch: true })
+    ).rejects.toBeInstanceOf(BranchExistsError)
+    // The collision is detected up front — no partial worktree is left behind.
+    const list = await listWorktrees(repo)
+    expect(list.find((w) => w.branch === 'dup')).toBeUndefined()
+  })
+
+  it('createWorktree with newBranch:false checks out the existing branch (the use-existing path)', async () => {
+    git(['branch', 'existing'])
+    const wtPath = join(repo, '..', `wt-existing-${Date.now()}`)
+    const info = await createWorktree(repo, { path: wtPath, branch: 'existing', newBranch: false })
+    expect(info.branch).toBe('existing')
+    const list = await listWorktrees(repo)
+    expect(list.find((w) => w.branch === 'existing')).toBeDefined()
     rmSync(wtPath, { recursive: true, force: true })
   })
 

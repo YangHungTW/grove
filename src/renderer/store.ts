@@ -42,6 +42,7 @@ export interface WtStatus {
 export type DialogState =
   | { kind: 'closeProject'; repoRoot: string; name: string }
   | { kind: 'createWorktree'; repoRoot: string; projectName: string }
+  | { kind: 'branchExists'; repoRoot: string; projectName: string; branch: string }
   | { kind: 'removeWorktree'; repoRoot: string; wtId: string; branch: string; folder: string }
   | { kind: 'projectSettings'; repoRoot: string; name: string }
   | { kind: 'renameSession'; id: string; title: string }
@@ -317,6 +318,37 @@ class Store {
     }
   }
 
+  /**
+   * Re-list worktrees from disk and ADD any not already in the sidebar — so a
+   * worktree created outside the New-worktree dialog (an external terminal, an
+   * agent/shell pane running `git worktree add`, etc.) shows up without an app
+   * restart. Non-destructive (unlike loadWorktrees, which clears the map) and
+   * add-only, so it never disturbs existing cards/sessions. Returns true if it
+   * added anything.
+   */
+  private async reconcileWorktrees(project: ProjectView): Promise<boolean> {
+    if (!project.loaded) return false
+    const list = await window.api.worktreeList(project.repoRoot).catch(() => null)
+    if (!list) return false
+    let added = false
+    list.forEach((w, i) => {
+      if (project.worktrees.has(w.path)) return
+      const primary = i === 0 || w.path === project.repoRoot
+      project.worktrees.set(w.path, { id: w.path, path: w.path, branch: w.branch, primary })
+      this.refreshWorktreeMeta(w.path)
+      if (!primary) this.refreshPr(w.path)
+      added = true
+    })
+    return added
+  }
+
+  /** Reconcile every loaded project; notify the UI if any new worktree appeared. */
+  async reconcileAllWorktrees(): Promise<void> {
+    let added = false
+    for (const p of this.projects.values()) if (await this.reconcileWorktrees(p)) added = true
+    if (added) this.notify()
+  }
+
   /** The WorktreeView for an id (= path), across all projects. */
   private worktreeOf(wtId: string): WorktreeView | undefined {
     for (const p of this.projects.values()) {
@@ -369,6 +401,8 @@ class Store {
   private startMetaPolling(): void {
     setInterval(() => {
       if (document.hidden) return
+      // Pick up worktrees created outside the sidebar, then refresh live meta.
+      void this.reconcileAllWorktrees()
       for (const p of this.projects.values())
         for (const wt of p.worktrees.values()) this.refreshWorktreeMeta(wt.id)
     }, 20_000)
@@ -488,10 +522,14 @@ class Store {
   }
 
   // --- worktrees ---------------------------------------------------------
-  async createWorktree(project: ProjectView, branch: string): Promise<void> {
+  async createWorktree(project: ProjectView, branch: string, useExisting = false): Promise<void> {
     try {
       // Path is computed by main from the worktreeFolder setting (+ runs hooks).
-      const info = await window.api.worktreeCreate(project.repoRoot, { branch, newBranch: true })
+      // useExisting=false creates a new branch (-b); true checks out an existing one.
+      const info = await window.api.worktreeCreate(project.repoRoot, {
+        branch,
+        newBranch: !useExisting
+      })
       project.worktrees.set(info.path, {
         id: info.path,
         path: info.path,
@@ -503,6 +541,16 @@ class Store {
       this.refreshWorktreeMeta(info.path)
       this.syncFocus()
     } catch (err) {
+      // A new-branch name that already exists: offer to open it instead of failing.
+      if (!useExisting && errMsg(err).includes('BRANCH_EXISTS')) {
+        this.openDialog({
+          kind: 'branchExists',
+          repoRoot: project.repoRoot,
+          projectName: project.name,
+          branch
+        })
+        return
+      }
       this.toast(errMsg(err))
     }
     this.notify()
@@ -1165,6 +1213,9 @@ class Store {
     if (first) await this.setActiveProject(first)
     else this.notify()
     this.startMetaPolling()
+    // Refocusing Grove (e.g. after creating a worktree in another terminal)
+    // reconciles immediately, so it appears without waiting for the poll.
+    window.addEventListener('focus', () => void this.reconcileAllWorktrees())
   }
 }
 

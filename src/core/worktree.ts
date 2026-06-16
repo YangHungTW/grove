@@ -103,6 +103,30 @@ export async function isGitRepo(path: string): Promise<boolean> {
   }
 }
 
+/** True when a local branch of this name already exists. */
+export async function branchExists(repoRoot: string, branch: string): Promise<boolean> {
+  try {
+    await git(repoRoot, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`])
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Thrown by {@link createWorktree} when a NEW branch was requested but one of
+ * that name already exists. The `BRANCH_EXISTS` sentinel survives Electron IPC
+ * (which flattens errors to their message), so the renderer can offer to open
+ * the existing branch instead of showing a raw git fatal.
+ */
+export class BranchExistsError extends Error {
+  readonly code = 'BRANCH_EXISTS'
+  constructor(readonly branch: string) {
+    super(`BRANCH_EXISTS: a branch named "${branch}" already exists`)
+    this.name = 'BranchExistsError'
+  }
+}
+
 /** `git worktree add` — returns the resulting worktree's parsed info. */
 export async function createWorktree(
   repoRoot: string,
@@ -112,6 +136,9 @@ export async function createWorktree(
   if (!path) throw new Error('createWorktree: path is required')
   const args = ['worktree', 'add']
   if (opts.newBranch) {
+    // Pre-flight so a collision is a typed, actionable error (use existing /
+    // rename) instead of git's bare `fatal: a branch named 'X' already exists`.
+    if (await branchExists(repoRoot, opts.branch)) throw new BranchExistsError(opts.branch)
     args.push('-b', opts.branch, path)
     if (opts.base) args.push(opts.base)
   } else {
