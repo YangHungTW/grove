@@ -81,3 +81,8 @@
 {"ts":"2026-06-12T03:23:07Z","tool":"Bash","params":{"command":"cd /Users/yanghungtw/Tools/grove\nnpm run e2e 2>&1 | tail -2","timeout":420000,"description":"e2e 回歸"}}
 {"ts":"2026-06-12T03:31:11Z","tool":"Bash","params":{"command":"cd /Users/yanghungtw/Tools/grove\ngit status -sb","description":"查看完整工作區狀態"}}
 {"ts":"2026-06-12T03:31:23Z","tool":"Bash","params":{"command":"cd /Users/yanghungtw/Tools/grove\ngit add src/ e2e/smoke.mjs e2e/smoke.png\ngit commit -q -m \"$(cat <<'EOF'\nfeat: live bra","description":"提交功能/修正 commit + .claude chore"}}
+{"ts":"2026-06-12T03:31:29Z","tool":"Bash","params":{"command":"cd /Users/yanghungtw/Tools/grove\nnpm version 0.4.1 --no-git-tag-version >/dev/null && echo \"version -> $(node -p \"requir","description":"bump 至 0.4.1 並建立 Release commit"}}
+{"ts":"2026-06-12T03:31:36Z","tool":"Bash","params":{"command":"cd /Users/yanghungtw/Tools/grove\nnpm run dist 2>&1 | tail -8\necho \"=== artifacts ===\"\nls -lh release/Grove-0.4.1-arm64.d","timeout":600000,"description":"build + 打包 macOS dmg/zip"}}
+{"ts":"2026-06-12T03:32:14Z","tool":"Bash","params":{"command":"cd /Users/yanghungtw/Tools/grove\ngit tag v0.4.1 && echo \"tagged v0.4.1\"\ngit push origin main 2>&1 | tail -2\ngit push ori","description":"建立 tag 並 push main + tag"}}
+{"ts":"2026-06-12T03:32:34Z","tool":"Bash","params":{"command":"cd /Users/yanghungtw/Tools/grove\ncat > /tmp/grove-0.4.1-notes.md <<'EOF'\nA follow-up to 0.4.0 with three workflow improv","timeout":300000,"description":"建立 GitHub release 並上傳產物"}}
+{"ts":"2026-06-12T03:32:57Z","tool":"Bash","params":{"command":"cd /Users/yanghungtw/Tools/grove\ngh release view v0.4.1 --json name,tagName,isDraft,assets --jq '{name,tagName,isDraft,a","description":"確認 release 與附件、分支狀態"}}
