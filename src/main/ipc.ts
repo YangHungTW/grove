@@ -66,6 +66,8 @@ export interface SessionSnapshot {
   filePath?: string
   /** Viewer sessions: how to render `filePath`. */
   viewerKind?: ViewerKind
+  /** Durable (tmux control-mode) agent: survives a Grove restart and reattaches. */
+  durable?: boolean
 }
 
 export interface CreateSessionRequest {

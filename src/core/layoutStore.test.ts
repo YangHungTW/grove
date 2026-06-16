@@ -51,6 +51,19 @@ describe('LayoutStore — session layout (persisted)', () => {
     expect(store.load()).toEqual(withIcon)
   })
 
+  it('round-trips the optional durable marker (reattach to tmux on restore)', () => {
+    const store = new LayoutStore(file)
+    const withDurable: SessionDescriptor[] = [
+      { repoRoot: '/a', worktreePath: '/a', kind: 'agent', title: 'claude', icon: '★', durable: true }
+    ]
+    store.save(withDurable)
+    expect(store.load()).toEqual(withDurable)
+    // Back-compat: a descriptor without the marker loads unchanged (durable undefined).
+    store.save(sample)
+    expect(store.load()).toEqual(sample)
+    expect(store.load()[0].durable).toBeUndefined()
+  })
+
   it('round-trips the optional resumeId (so an agent reopens via --resume)', () => {
     const store = new LayoutStore(file)
     const withResume: SessionDescriptor[] = [

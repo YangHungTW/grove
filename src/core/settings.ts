@@ -123,6 +123,10 @@ export interface AppSettings {
   keybindings: Keybindings
   /** Agent ids the user has turned off (hidden from the "+" menu even if installed). */
   disabledAgents: string[]
+  /** Run agent sessions inside tmux (control mode) so they survive a Grove
+   * restart and reattach to the live process. Requires tmux on PATH; when tmux
+   * is missing this silently falls back to a direct spawn. */
+  durableSessions: boolean
 }
 
 /** Built-in agent presets shown in the "+" menu (filtered to installed ones). */
@@ -167,5 +171,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   agents: AGENT_PRESETS,
   worktreeFolder: '../{repo}-wt-{branch}',
   keybindings: DEFAULT_KEYBINDINGS,
-  disabledAgents: []
+  disabledAgents: [],
+  durableSessions: false
 }

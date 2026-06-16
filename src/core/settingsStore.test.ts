@@ -18,6 +18,13 @@ describe('SettingsStore', () => {
     expect(new SettingsStore(file).load()).toEqual(DEFAULT_SETTINGS)
   })
 
+  it('durableSessions defaults off and round-trips when enabled', () => {
+    expect(DEFAULT_SETTINGS.durableSessions).toBe(false)
+    expect(new SettingsStore(file).load().durableSessions).toBe(false)
+    new SettingsStore(file).save({ durableSessions: true })
+    expect(new SettingsStore(file).load().durableSessions).toBe(true)
+  })
+
   it('save merges a partial patch and persists', () => {
     const store = new SettingsStore(file)
     const next = store.save({ background: '#101014', transparent: true })

@@ -69,6 +69,15 @@ function lastNonEmptyLine(data: string): string | null {
   return lines.length ? lines[lines.length - 1] : null
 }
 
+/** Grove's terminal search (xterm SearchAddon) traverses the full buffer
+ * INCLUDING scrollback — but only the 'normal' buffer HAS scrollback. An app on
+ * the 'alternate' buffer owns its screen and scroll (so its history is not in
+ * xterm's buffer), meaning search there can only reach what is currently visible.
+ * This is a property of the running app/terminal, not of Grove's search wiring. */
+export function searchCoversScrollback(bufferType?: string): boolean {
+  return bufferType !== 'alternate'
+}
+
 /**
  * Single source of truth for the renderer. Holds all UI state + actions + the
  * pty/IPC wiring. React subscribes via `useSyncExternalStore(subscribe,
@@ -146,6 +155,11 @@ class Store {
   }
   worktreePending(wtId: string): boolean {
     return this.sessionsOf(wtId).some((s) => this.pending.has(s.id))
+  }
+  /** True when the worktree's agent is durable (tmux-backed) — survives a Grove
+   * restart. Drives the sidebar's durable badge. */
+  worktreeDurable(wtId: string): boolean {
+    return this.sessionsOf(wtId).some((s) => s.kind === 'agent' && s.durable)
   }
   /** Worst session state in a worktree, for the card's status dot. */
   worktreeState(wtId: string): SessionState | 'none' {
@@ -260,7 +274,10 @@ class Store {
             icon: s.icon,
             // Persist the agent's pinned resume id so a relaunch can `--resume`
             // back into the same conversation. undefined → omitted by JSON.
-            resumeId: this.resumeMeta.get(s.id)?.resumeId
+            resumeId: this.resumeMeta.get(s.id)?.resumeId,
+            // Mark durable agents so the card can show it; on restore the agent
+            // relaunches durable and tmux reattaches to the still-live process.
+            durable: s.durable
           })
         }
     return out
@@ -841,6 +858,16 @@ class Store {
     if (!id || !this.panes.has(id)) return
     this.searchSessionId = id
     this.notify()
+  }
+  /** Whether terminal search can only reach the visible screen for the pane whose
+   * search bar is open: true when the app has put xterm on the ALTERNATE buffer
+   * (a full-screen TUI like Claude Code that paints + scrolls its own transcript),
+   * which has no xterm scrollback for SearchAddon to traverse. Lets the UI say so
+   * rather than silently finding only on-screen matches. */
+  searchLimitedToScreen(): boolean {
+    const id = this.searchSessionId
+    const term = id ? this.panes.get(id)?.term : undefined
+    return !searchCoversScrollback(term?.buffer.active.type)
   }
   closeSearch(refocus = true): void {
     const id = this.searchSessionId
