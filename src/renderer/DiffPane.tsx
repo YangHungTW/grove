@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { store } from './store'
 import { parseUnifiedDiff, splitHunkRows, type DiffFile, type DiffHunk } from './diffParse'
+import { extToLang, highlightDiffLine } from './diffHighlight'
 import type { SessionSnapshot } from '../main/ipc'
 
 function basename(p: string): string {
@@ -19,22 +20,23 @@ function counts(f: DiffFile): { add: number; del: number } {
   return { add, del }
 }
 
-/** One hunk rendered side-by-side: old text left, new text right. */
-function SplitHunk({ hunk }: { hunk: DiffHunk }): JSX.Element {
+/** One hunk rendered side-by-side: old text left, new text right. Cell text is
+ * syntax-highlighted via highlightDiffLine, which always escapes (safe to inject). */
+function SplitHunk({ hunk, lang }: { hunk: DiffHunk; lang?: string }): JSX.Element {
   const rows = useMemo(() => splitHunkRows(hunk.lines), [hunk])
   return (
     <div className="diff-hunk">
       <div className="diff-line diff-line-hunk">{hunk.header}</div>
       {rows.map((r, ri) => (
         <div className="diff-srow" key={ri}>
-          <span className={'diff-scell' + (r.left ? ` diff-scell-${r.left.type}` : ' diff-scell-empty')}>
-            {r.left?.text ?? ''}
-          </span>
+          <span
+            className={'diff-scell' + (r.left ? ` diff-scell-${r.left.type}` : ' diff-scell-empty')}
+            dangerouslySetInnerHTML={{ __html: highlightDiffLine(r.left?.text ?? '', lang) }}
+          />
           <span
             className={'diff-scell' + (r.right ? ` diff-scell-${r.right.type}` : ' diff-scell-empty')}
-          >
-            {r.right?.text ?? ''}
-          </span>
+            dangerouslySetInnerHTML={{ __html: highlightDiffLine(r.right?.text ?? '', lang) }}
+          />
         </div>
       ))}
     </div>
@@ -158,6 +160,9 @@ export function DiffPane({
     : { display: 'none' }
 
   const hasFiles = files != null && files.length > 0
+  // Open-in-IDE is enabled only when an editor is configured (settings are seeded
+  // at launch; the pane re-renders on the auto-refresh so this stays current).
+  const ideEnabled = store.canOpenInIde()
 
   return (
     <div
@@ -249,30 +254,51 @@ export function DiffPane({
             files.map((f, fi) => {
               const m = metas[fi]
               const isCollapsed = collapsed.has(m.name)
+              const lang = extToLang(m.name)
+              // Absolute path for the "open in IDE" action (worktree path + rel path).
+              const abs = session.filePath ? `${session.filePath}/${m.name}` : m.name
               return (
                 <div
                   className="diff-file"
                   key={fi}
                   ref={(el) => (fileRefs.current[fi] = el)}
                 >
-                  <button
-                    className={'diff-file-header' + (isCollapsed ? ' collapsed' : '')}
-                    onClick={() => toggle(m.name)}
-                    aria-expanded={!isCollapsed}
-                  >
-                    <span className="diff-file-chevron">{isCollapsed ? '▸' : '▾'}</span>
-                    <span className="diff-file-path">{m.name}</span>
-                    <span className="diff-file-stats">
-                      {m.binary ? (
-                        <span className="diff-bin-badge">bin</span>
-                      ) : (
-                        <>
-                          <span className="diff-add-count">+{m.add}</span>
-                          <span className="diff-del-count">−{m.del}</span>
-                        </>
-                      )}
-                    </span>
-                  </button>
+                  <div className="diff-file-headrow">
+                    <button
+                      className={'diff-file-header' + (isCollapsed ? ' collapsed' : '')}
+                      onClick={() => toggle(m.name)}
+                      aria-expanded={!isCollapsed}
+                    >
+                      <span className="diff-file-chevron">{isCollapsed ? '▸' : '▾'}</span>
+                      <span className="diff-file-path">{m.name}</span>
+                      <span className="diff-file-stats">
+                        {m.binary ? (
+                          <span className="diff-bin-badge">bin</span>
+                        ) : (
+                          <>
+                            <span className="diff-add-count">+{m.add}</span>
+                            <span className="diff-del-count">−{m.del}</span>
+                          </>
+                        )}
+                      </span>
+                    </button>
+                    <button
+                      className="diff-open-ide"
+                      aria-label="Open in IDE"
+                      disabled={!ideEnabled}
+                      title={
+                        ideEnabled
+                          ? 'Open the whole file in your editor'
+                          : 'Set an editor in Settings to enable'
+                      }
+                      onClick={() => void store.openInIde(session.worktreeId, abs)}
+                    >
+                      <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                        <path d="M6.5 2H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V9.5h-1.5V12.5H3.5v-9H6.5V2Z" />
+                        <path d="M9 2h5v5h-1.5V4.56l-4.22 4.22-1.06-1.06L11.44 3.5H9V2Z" />
+                      </svg>
+                    </button>
+                  </div>
                   {!isCollapsed && (
                     <div className="diff-file-body">
                       {f.binary && (
@@ -280,7 +306,7 @@ export function DiffPane({
                       )}
                       {f.hunks.map((h, hi) =>
                         view === 'split' ? (
-                          <SplitHunk key={hi} hunk={h} />
+                          <SplitHunk key={hi} hunk={h} lang={lang} />
                         ) : (
                           <div className="diff-hunk" key={hi}>
                             <div className="diff-line diff-line-hunk">{h.header}</div>
@@ -289,7 +315,10 @@ export function DiffPane({
                                 <span className="diff-gutter">
                                   {l.type === 'add' ? '+' : l.type === 'del' ? '-' : ' '}
                                 </span>
-                                <span className="diff-text">{l.text}</span>
+                                <span
+                                  className="diff-text"
+                                  dangerouslySetInnerHTML={{ __html: highlightDiffLine(l.text, lang) }}
+                                />
                               </div>
                             ))}
                           </div>

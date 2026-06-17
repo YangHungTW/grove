@@ -43,6 +43,7 @@ export const Channels = {
   sessionList: 'session:list',
   fileOpenDialog: 'file:open-dialog',
   fileRead: 'file:read',
+  ideOpen: 'ide:open',
   notifyAttention: 'notify:attention',
   notifyBadge: 'notify:badge',
   // events (main -> renderer)
@@ -85,6 +86,17 @@ export interface CreateSessionRequest {
   /** Viewer sessions: file to open + how to render it (no pty is spawned). */
   filePath?: string
   viewerKind?: ViewerKind
+  /** Input written into the shell pty after spawn (e.g. `vim <file>\r` for the
+   * open-in-IDE terminal-editor path). Honored for `shell` sessions. */
+  bootstrap?: string
+}
+
+/** Context the renderer supplies when opening a file in the configured IDE. */
+export interface IdeOpenRequest {
+  worktreeId: string
+  /** Working directory for the launched editor / shell (the worktree path). */
+  cwd: string
+  cols?: number
 }
 
 export interface SessionDataEvent {
@@ -168,6 +180,10 @@ export interface RendererApi {
   fileOpenDialog(defaultPath?: string): Promise<string | null>
   /** Read a UTF-8 file's contents (used by viewer panes). */
   fileRead(filePath: string): Promise<string>
+  /** Open `filePath` in the user's configured IDE. A terminal editor (vim) opens
+   * in a new in-app shell pane (returns its snapshot to place); a GUI editor is
+   * launched as a process (returns null). Throws when no IDE is configured. */
+  ideOpen(filePath: string, ctx: IdeOpenRequest): Promise<SessionSnapshot | null>
   /** Absolute path of a dragged-in File (preload-only; no IPC round-trip). */
   pathForFile(file: File): string
   /** Fire an OS notification that a session needs input (no-op if Grove is focused). */

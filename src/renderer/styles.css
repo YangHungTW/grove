@@ -1743,6 +1743,109 @@ button {
 .diff-text {
   flex: 1 1 auto;
 }
+/* Header row wraps the (sticky) file header button plus the open-in-IDE icon, so
+   the icon sits beside the header without nesting a button inside a button. */
+.diff-file-headrow {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: stretch;
+  background: var(--panel-2);
+  border-top: 1px solid var(--panel-2);
+}
+.diff-file-headrow .diff-file-header {
+  position: static;
+  flex: 1 1 auto;
+  width: auto;
+  border-top: 0;
+}
+.diff-open-ide {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  background: transparent;
+  border: 0;
+  color: var(--fg);
+  opacity: 0.6;
+  cursor: pointer;
+}
+.diff-open-ide:hover:not(:disabled) {
+  opacity: 1;
+  background: color-mix(in srgb, var(--panel-2) 80%, var(--fg) 12%);
+}
+.diff-open-ide:disabled {
+  opacity: 0.22;
+  cursor: default;
+}
+/* Syntax-highlight token colours (highlight.js classes) for diff line content.
+   One Dark palette — readable over the add/del background tints. */
+.diff-text .hljs-keyword,
+.diff-scell .hljs-keyword,
+.diff-text .hljs-built_in,
+.diff-scell .hljs-built_in {
+  color: #c678dd;
+}
+.diff-text .hljs-string,
+.diff-scell .hljs-string,
+.diff-text .hljs-regexp,
+.diff-scell .hljs-regexp {
+  color: #98c379;
+}
+.diff-text .hljs-number,
+.diff-scell .hljs-number,
+.diff-text .hljs-literal,
+.diff-scell .hljs-literal {
+  color: #d19a66;
+}
+.diff-text .hljs-comment,
+.diff-scell .hljs-comment {
+  color: #7f848e;
+  font-style: italic;
+}
+.diff-text .hljs-title,
+.diff-scell .hljs-title,
+.diff-text .hljs-section,
+.diff-scell .hljs-section {
+  color: #61afef;
+}
+.diff-text .hljs-attr,
+.diff-scell .hljs-attr,
+.diff-text .hljs-attribute,
+.diff-scell .hljs-attribute,
+.diff-text .hljs-property,
+.diff-scell .hljs-property,
+.diff-text .hljs-variable,
+.diff-scell .hljs-variable,
+.diff-text .hljs-name,
+.diff-scell .hljs-name {
+  color: #e06c75;
+}
+.diff-text .hljs-type,
+.diff-scell .hljs-type {
+  color: #e5c07b;
+}
+.diff-text .hljs-tag,
+.diff-scell .hljs-tag {
+  color: #abb2bf;
+}
+.diff-text .hljs-meta,
+.diff-scell .hljs-meta {
+  color: #7f848e;
+}
+.diff-text .hljs-symbol,
+.diff-scell .hljs-symbol,
+.diff-text .hljs-bullet,
+.diff-scell .hljs-bullet {
+  color: #56b6c2;
+}
+.diff-text .hljs-emphasis {
+  font-style: italic;
+}
+.diff-text .hljs-strong {
+  font-weight: 600;
+}
 .diff-line-add {
   background: color-mix(in srgb, #2ea043 22%, transparent);
 }

@@ -28,6 +28,7 @@ import {
 } from '../core/worktree'
 import { prCreate, prStatus } from '../core/gh'
 import { shellQuote } from '../core/shellQuote'
+import { buildIdeOpenAction } from '../core/ideLaunch'
 import { worktreeClaudeUsage } from '../core/claudeUsage'
 import { ProjectStore, type ProjectEntry, type ProjectPatch } from '../core/projectStore'
 import { LayoutStore, type SessionDescriptor } from '../core/layoutStore'
@@ -42,6 +43,7 @@ import type { CreateWorktreeOptions } from '../core/worktree'
 import {
   Channels,
   type CreateSessionRequest,
+  type IdeOpenRequest,
   type RendererApi,
   type SessionSnapshot,
   type WorktreeRemoveRequest
@@ -251,8 +253,27 @@ function launchSpecFor(req: CreateSessionRequest): {
     }
     return { command: shell, args: ['-lc', agentCmd] }
   }
-  // A shell pane is an interactive login shell (p10k prompt expected).
-  return { command: shell, args: ['-il'] }
+  // A shell pane is an interactive login shell (p10k prompt expected). An optional
+  // bootstrap (e.g. `vim <file>` from open-in-IDE) is typed in after the pty sizes.
+  return { command: shell, args: ['-il'], bootstrap: req.bootstrap }
+}
+
+/**
+ * Launch a GUI editor on `filePath` via a LOGIN shell, so it inherits the user's
+ * real PATH — Electron started from Finder/Dock gets a stripped PATH and would
+ * otherwise fail to find `code`/`cursor`/`subl`. The file path is passed as a
+ * positional `"$1"` (never interpolated) so it can't inject; the editor command
+ * comes from the trusted `ide` setting. CCM_IDE_CMD overrides the command in
+ * tests (stands in for a real editor, like CCM_AGENT_CMD).
+ */
+function openInEditor(command: string, filePath: string, cwd: string): void {
+  const shell = process.env.SHELL || '/bin/zsh'
+  const editor = process.env.CCM_IDE_CMD || command
+  try {
+    execFile(shell, ['-lc', `${editor} "$1"`, '--', filePath], { cwd }, () => {})
+  } catch {
+    /* ignore launch errors — best-effort, like runHook */
+  }
 }
 
 function createSession(req: CreateSessionRequest): SessionSnapshot {
@@ -342,8 +363,10 @@ function createSession(req: CreateSessionRequest): SessionSnapshot {
     registry.removeSession(record.id)
     throw err
   }
-  // A control client is inert at tmux's default 80x23 until told its size; set it
-  // (the renderer's first FitAddon resize will refine it moments later).
+  // A control client is inert at tmux's default 80x23 until told its size; this
+  // initial sizing also makes tmux replay the pane so reattach shows content. The
+  // renderer's first FitAddon resize is a different size → the resulting SIGWINCH
+  // makes the agent repaint (needed because a bare replay does not).
   if (tmuxName) pty.write(`refresh-client -C ${req.cols ?? 120}x${req.rows ?? 40}\n`)
   record.pid = pty.pid
   return snapshot(record)
@@ -483,6 +506,23 @@ function registerIpc(): void {
     }
     return readFileAsync(filePath, 'utf8')
   })
+  ipcMain.handle(
+    Channels.ideOpen,
+    (_e: IpcMainInvokeEvent, filePath: string, ctx: IdeOpenRequest): SessionSnapshot | null => {
+      const ide = settings().load().ide
+      if (!ide || !ide.command.trim()) throw new Error('No IDE configured — set one in Settings')
+      const action = buildIdeOpenAction(ide, filePath, {
+        worktreeId: ctx.worktreeId,
+        cwd: ctx.cwd,
+        cols: ctx.cols
+      })
+      // Terminal editor: open an in-app shell pane that runs `<editor> <file>`.
+      if (action.mode === 'session') return createSession(action.request)
+      // GUI editor: launch the process; no pane is created.
+      openInEditor(action.command, action.filePath, ctx.cwd)
+      return null
+    }
+  )
 
   ipcMain.on(Channels.sessionInput, (_e, id: string, data: string) => {
     const c = control.get(id)
@@ -498,7 +538,8 @@ function registerIpc(): void {
     const c = control.get(id)
     if (c) {
       // Size the tmux window via the control client (auto-released on detach —
-      // never resize-window, which freezes window-size to manual).
+      // never resize-window, which freezes window-size to manual). This first
+      // resize is also what makes tmux replay the screen at the correct geometry.
       ptys.get(id)?.write(`refresh-client -C ${cols}x${rows}\n`)
       return
     }

@@ -72,6 +72,7 @@ const api: RendererApi = {
   fileOpenDialog: (defaultPath?: string): Promise<string | null> =>
     ipcRenderer.invoke(Channels.fileOpenDialog, defaultPath),
   fileRead: (filePath: string): Promise<string> => ipcRenderer.invoke(Channels.fileRead, filePath),
+  ideOpen: (filePath, ctx) => ipcRenderer.invoke(Channels.ideOpen, filePath, ctx),
   // Absolute path of a dragged-in File. webUtils.getPathForFile replaces the
   // deprecated File.path; returns '' if the path can't be resolved.
   pathForFile: (file: File): string => {

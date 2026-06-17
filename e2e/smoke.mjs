@@ -13,7 +13,7 @@
  */
 import { _electron as electron } from 'playwright'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, existsSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, existsSync, writeFileSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, basename } from 'node:path'
 import assert from 'node:assert/strict'
@@ -31,9 +31,11 @@ const repoA = makeRepo('ccm-e2e-a-')
 const repoB = makeRepo('ccm-e2e-b-')
 const storeDir = mkdtempSync(join(tmpdir(), 'ccm-store-'))
 const storeFile = join(storeDir, 'projects.json')
+const settingsFile = join(storeDir, 'settings.json')
 const wtPath = `${repoA}-wt-feat`
 const marker = join(repoA, `marker_${Date.now()}`)
 const agentMarker = join(repoA, `agent_${Date.now()}`)
+const ideMarker = join(repoA, `ide_${Date.now()}`)
 const layoutFile = join(storeDir, 'layout.json')
 let app
 let failed = false
@@ -45,17 +47,24 @@ const launchOpts = {
     ...process.env,
     CCM_STORE: storeFile,
     CCM_LAYOUT: layoutFile,
-    CCM_SETTINGS: join(storeDir, 'settings.json'),
+    CCM_SETTINGS: settingsFile,
     CCM_REPO_ROOT: repoA,
     // Stand in for the real `claude` CLI so the agent-launch path is testable
     // without auth: typing this into the login shell creates a marker file.
-    CCM_AGENT_CMD: `touch '${agentMarker}'; sleep 30`
+    CCM_AGENT_CMD: `touch '${agentMarker}'; sleep 30`,
+    // Stand in for a real GUI editor (like CCM_AGENT_CMD): records the opened file
+    // path (passed as "$1" by openInEditor) into a marker we can assert on.
+    CCM_IDE_CMD: `node -e "require('fs').writeFileSync(process.argv[1], process.argv[2])" '${ideMarker}'`
   }
 }
 
 try {
   // Seed the recent-projects store with repoB (simulates a previously-opened project).
   writeFileSync(storeFile, JSON.stringify([{ repoRoot: repoB, name: basename(repoB) }]))
+  // Seed a configured GUI editor so the diff view's open-in-IDE icon is enabled.
+  // The real command ('code') is overridden by CCM_IDE_CMD; this only flips the
+  // canOpenInIde gate on.
+  writeFileSync(settingsFile, JSON.stringify({ ide: { command: 'code', terminal: false } }))
 
   app = await electron.launch(launchOpts)
   const win = await app.firstWindow()
@@ -318,6 +327,28 @@ try {
   assert.ok(delLines >= 1, `diff: expected removed lines, got ${delLines}`)
   const diffReview = true
 
+  // 7d-ii) OPEN IN IDE — the per-file icon is enabled (an editor is configured),
+  //        and clicking it launches the editor on that file. CCM_IDE_CMD stands in
+  //        for the GUI editor and records the opened path to a marker.
+  const ideBtn = win.locator('.pane[data-kind="diff"] .diff-open-ide').first()
+  assert.equal(await ideBtn.isDisabled(), false, 'open-in-IDE: icon should be enabled when configured')
+  await ideBtn.click()
+  let ideOpened = false
+  for (let i = 0; i < 40; i++) {
+    if (existsSync(ideMarker)) {
+      ideOpened = true
+      break
+    }
+    await new Promise((r) => setTimeout(r, 250))
+  }
+  assert.ok(ideOpened, 'open-in-IDE: CCM_IDE_CMD marker should appear on disk')
+  const ideTarget = readFileSync(ideMarker, 'utf8')
+  assert.ok(
+    ideTarget.includes('diffme.txt'),
+    `open-in-IDE: marker should name the opened file, got "${ideTarget}"`
+  )
+  const ideOpen = true
+
   // 7e) SPLIT DIFF — toggling to side-by-side renders paired rows, and back.
   await win.locator('.diff-view-toggle button', { hasText: 'Split' }).click()
   await win.waitForSelector('.pane[data-kind="diff"] .diff-srow', { timeout: 5000 })
@@ -367,7 +398,7 @@ try {
       `worktreeCreated=true agentLaunched=true multiAgent=${agentRows === 2} ` +
       `agentAfterSwitch=${agentAfterSwitch} kbdNav=${kbdNav} fileViewer=${fileViewer} ` +
       `viewerPanes=${viewerPanes} htmlIframe=${htmlIframe} diffReview=${diffReview} ` +
-      `diffAdd=${addLines} diffDel=${delLines} splitDiff=${splitDiff} finish=${finishFlow} restored=${restored}`
+      `diffAdd=${addLines} diffDel=${delLines} splitDiff=${splitDiff} ideOpen=${ideOpen} finish=${finishFlow} restored=${restored}`
   )
 } catch (err) {
   failed = true
@@ -376,6 +407,7 @@ try {
   if (app) await app.close()
   for (const d of [repoA, repoB, wtPath, storeDir]) rmSync(d, { recursive: true, force: true })
   rmSync(agentMarker, { force: true })
+  rmSync(ideMarker, { force: true })
 }
 
 process.exit(failed ? 1 : 0)
