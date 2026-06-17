@@ -1207,6 +1207,16 @@ button {
   /* No padding/border: FitAddon measures the pane height directly, so any
      box-model inset would make it overcount rows and clip the bottom line. */
 }
+/* While a durable agent's tmux session (re)attaches, cover the pane with its own
+   background so the half-painted reattach frames settle underneath, then reveal
+   (the .settling class is removed once it has repainted cleanly). */
+.pane.settling::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  background: var(--pane-bg);
+}
 /* Focus is shown on the group's tab strip (VS Code style), not as a pane ring —
    a full inset ring read as jarring. */
 /* Keep xterm's hidden input invisible (it can otherwise show an outline/box at
