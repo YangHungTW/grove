@@ -1,0 +1,15 @@
+src/main/index.ts
+src/core/settings.ts
+src/core/ideLaunch.ts
+src/renderer/diffHighlight.ts
+src/main/ipc.ts
+src/preload/index.ts
+src/renderer/store.ts
+src/renderer/DiffPane.tsx
+src/renderer/SettingsPanel.tsx
+src/core/session.ts
+src/core/tmuxControl.ts
+src/renderer/PaneGrid.tsx
+src/renderer/termKeys.ts
+src/renderer/App.tsx
+src/renderer/TabBar.tsx
