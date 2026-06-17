@@ -109,6 +109,7 @@ export function PaneGrid(): JSX.Element {
             focused={sess.id === s.focusedSessionId}
             transparent={s.settings.transparent}
             searching={sess.id === s.searchSessionId}
+            settling={s.isSettling(sess.id)}
           />
         )
       )}
@@ -123,7 +124,8 @@ function Pane({
   column,
   focused,
   transparent,
-  searching
+  searching,
+  settling
 }: {
   session: SessionSnapshot
   visible: boolean
@@ -131,6 +133,7 @@ function Pane({
   focused: boolean
   transparent: boolean
   searching: boolean
+  settling: boolean
 }): JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
@@ -316,7 +319,12 @@ function Pane({
 
   return (
     <div
-      className={'pane' + (focused ? ' focused' : '') + (dragOver ? ' drag-over' : '')}
+      className={
+        'pane' +
+        (focused ? ' focused' : '') +
+        (dragOver ? ' drag-over' : '') +
+        (settling ? ' settling' : '')
+      }
       data-session-id={session.id}
       style={visible ? { display: 'block', gridColumn: column } : { display: 'none' }}
       ref={ref}

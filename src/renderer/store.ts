@@ -117,6 +117,12 @@ class Store {
   zoomedSessionId: string | null = null
   /** Session whose terminal search bar is open (the focused one), or null. */
   searchSessionId: string | null = null
+  /** Durable agent panes masked while their tmux (re)attach settles (so no
+   * half-painted reattach frame is shown). */
+  private settling = new Set<string>()
+  /** Durable agents that have already done their one-time settle mask (so we
+   * don't re-mask on every worktree switch — only on the first attach). */
+  private settledOnce = new Set<string>()
 
   // Live agents that own a pinned resume id, keyed by session id. On close the
   // entry becomes a ClosedAgent so the agent can be resumed later.
@@ -231,6 +237,12 @@ class Store {
   unregisterPane(id: string): void {
     this.panes.get(id)?.term.dispose()
     this.panes.delete(id)
+    this.settling.delete(id)
+    this.settledOnce.delete(id)
+  }
+  /** True while a durable agent pane is masked during its (re)attach settle. */
+  isSettling(id: string): boolean {
+    return this.settling.has(id)
   }
 
   /** Fit + resize visible panes; nudge newly-shown panes so TUIs repaint. */
@@ -249,12 +261,39 @@ class Store {
         // shells don't need it — for them each extra SIGWINCH just reprints
         // the prompt, stacking stale copies in the scrollback.
         if (newlyShown.includes(id) && rows > 1 && this.sessions.get(id)?.kind === 'agent') {
-          pane.term.resize(cols, rows - 1)
-          window.api.sessionResize(id, cols, rows - 1)
-          requestAnimationFrame(() => {
-            pane.term.resize(cols, rows)
-            window.api.sessionResize(id, cols, rows)
-          })
+          if (this.sessions.get(id)?.durable && !this.settledOnce.has(id)) {
+            // First (re)attach of a durable agent: tmux replays the old screen and
+            // only fully repaints on a real size CHANGE, so the first frames can be
+            // half-painted (left-edge bleed / stale glyphs). Mask the pane, force a
+            // clean repaint underneath (a delayed bounce tmux won't coalesce — the
+            // rAF-adjacent one does), then reveal — the user never sees a bad frame.
+            this.settledOnce.add(id)
+            this.settling.add(id)
+            this.notify()
+            setTimeout(() => {
+              const p = this.panes.get(id)
+              if (!p) return
+              p.term.resize(cols, rows - 1)
+              window.api.sessionResize(id, cols, rows - 1)
+            }, 350)
+            setTimeout(() => {
+              const p = this.panes.get(id)
+              if (!p) return
+              p.term.resize(cols, rows)
+              window.api.sessionResize(id, cols, rows)
+            }, 480)
+            setTimeout(() => {
+              this.settling.delete(id)
+              this.notify()
+            }, 750)
+          } else {
+            pane.term.resize(cols, rows - 1)
+            window.api.sessionResize(id, cols, rows - 1)
+            requestAnimationFrame(() => {
+              pane.term.resize(cols, rows)
+              window.api.sessionResize(id, cols, rows)
+            })
+          }
         }
       }
     })
