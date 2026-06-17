@@ -12,10 +12,11 @@ describe('unescapeOutput', () => {
     expect(unescapeOutput('a\\134b')).toBe('a\\b')
   })
 
-  it('passes literal multibyte UTF-8 through unchanged (tmux does NOT escape it)', () => {
-    // Verified against tmux 3.6a: high bytes are literal; only control/backslash escape.
-    expect(unescapeOutput('你好 ✻ ▰▱ 🔔')).toBe('你好 ✻ ▰▱ 🔔')
-    expect(unescapeOutput('你\\012好')).toBe('你\n好')
+  it('passes raw (latin1) bytes through and only resolves octal escapes', () => {
+    // The parser reads the stream as latin1, so a value is a byte string: high
+    // bytes (multibyte UTF-8) are literal; only control/backslash are escaped.
+    expect(unescapeOutput('\xe4\xbd\xa0')).toBe('\xe4\xbd\xa0') // 你 bytes, untouched
+    expect(unescapeOutput('\xe4\\012')).toBe('\xe4\n') // literal byte + octal LF
   })
 })
 
@@ -33,6 +34,23 @@ describe('TmuxControlParser', () => {
     const p = new TmuxControlParser({ onOutput: (id, d) => out.push([id, d]), onExit: () => {} })
     p.feed('%output %1 hello\\015\\012\n')
     expect(out).toEqual([['%1', 'hello\r\n']])
+  })
+
+  it('decodes a multibyte UTF-8 char delivered whole in one %output', () => {
+    const out: string[] = []
+    const p = new TmuxControlParser({ onOutput: (_id, d) => out.push(d), onExit: () => {} })
+    // 你好 as raw latin1 bytes: E4 BD A0 E5 A5 BD
+    p.feed('%output %1 \xe4\xbd\xa0\xe5\xa5\xbd\n')
+    expect(out.join('')).toBe('你好')
+  })
+
+  it('reassembles a multibyte char that tmux split across two %output messages', () => {
+    const out: string[] = []
+    const p = new TmuxControlParser({ onOutput: (_id, d) => out.push(d), onExit: () => {} })
+    // 你 = E4 BD A0, split after the first two bytes — the bug that showed as "??"
+    p.feed('%output %1 \xe4\xbd\n')
+    p.feed('%output %1 \xa0\n')
+    expect(out.join('')).toBe('你')
   })
 
   it('collects a %begin..%end block as a reply, not as output', () => {

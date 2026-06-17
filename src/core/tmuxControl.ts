@@ -1,3 +1,5 @@
+import { StringDecoder } from 'node:string_decoder'
+
 /**
  * Minimal tmux control-mode (`tmux -CC`) protocol parser.
  *
@@ -24,13 +26,13 @@ export interface TmuxControlEvents {
 }
 
 /**
- * Decode a `%output` value. Verified against tmux 3.6a: only CONTROL bytes and
- * backslash are escaped as octal `\xxx` (e.g. `\033`, `\015`, `\134`) — all of
- * which are < 0x80. Printable UTF-8 (incl. multibyte 你 / emoji / box-drawing)
- * is passed through LITERALLY, and node-pty has already UTF-8-decoded the control
- * stream, so those arrive as real JS chars. So: replace each octal escape with
- * its (single-byte) char and keep every other char as-is. Do NOT rebuild a byte
- * array — that would corrupt the already-decoded multibyte chars.
+ * Octal-unescape a `%output` value, operating on RAW BYTES (the parser reads the
+ * stream as latin1, so each char is one byte 0x00–0xFF). Verified against tmux
+ * 3.6a: only control bytes and backslash are escaped as octal `\xxx` (`\033`,
+ * `\015`, `\134`) — all < 0x80. Printable UTF-8 (multibyte 你 / emoji / box-
+ * drawing) is passed through literally as its raw bytes. This returns a byte
+ * string; the caller runs it through a streaming UTF-8 decoder, which is what
+ * lets a multibyte char that tmux split across two %output messages reassemble.
  */
 export function unescapeOutput(s: string): string {
   let out = ''
@@ -50,6 +52,9 @@ export class TmuxControlParser {
   private inBlock = false
   private blockNum = -1
   private blockLines: string[] = []
+  // Persistent across %output messages: holds an incomplete trailing UTF-8
+  // sequence so a multibyte char split by tmux's chunking reassembles cleanly.
+  private readonly decoder = new StringDecoder('utf8')
 
   constructor(private readonly ev: TmuxControlEvents) {}
 
@@ -97,7 +102,8 @@ export class TmuxControlParser {
       const rest = line.slice('%output '.length)
       const sp = rest.indexOf(' ')
       if (sp < 0) return
-      this.ev.onOutput(rest.slice(0, sp), unescapeOutput(rest.slice(sp + 1)))
+      const bytes = Buffer.from(unescapeOutput(rest.slice(sp + 1)), 'latin1')
+      this.ev.onOutput(rest.slice(0, sp), this.decoder.write(bytes))
       return
     }
     if (line.startsWith('%exit')) {

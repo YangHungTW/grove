@@ -16,6 +16,12 @@ export interface PtySessionOptions {
   title?: string
   /** Input written into the pty immediately after spawn (e.g. `claude\r`). */
   bootstrap?: string
+  /** node-pty read encoding. Default 'utf8'. Control-mode (tmux -CC) sessions use
+   * 'latin1' so node-pty does NOT UTF-8-decode the stream — the tmux protocol can
+   * split a pane's multibyte char across two %output messages, which a premature
+   * UTF-8 decode would turn into replacement chars. The control parser decodes the
+   * reassembled pane bytes itself. */
+  encoding?: string
 }
 
 export interface ExitInfo {
@@ -76,6 +82,7 @@ export class PtySession {
       cols: this.opts.cols ?? 80,
       rows: this.opts.rows ?? 24,
       cwd: this.cwd,
+      encoding: this.opts.encoding ?? 'utf8',
       env: { ...process.env, ...this.opts.env } as { [key: string]: string }
     })
 

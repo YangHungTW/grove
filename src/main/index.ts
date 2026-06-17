@@ -296,6 +296,7 @@ function createSession(req: CreateSessionRequest): SessionSnapshot {
 
   const agent = req.agent ?? (req.kind === 'agent' ? 'claude' : '')
   const spec = launchSpecFor(req)
+  const tmuxName = durableAgentName(req)
   const pty = new PtySession({
     id: record.id,
     worktreeId: req.worktreeId,
@@ -306,7 +307,10 @@ function createSession(req: CreateSessionRequest): SessionSnapshot {
     cwd: req.cwd,
     cols: req.cols,
     rows: req.rows,
-    title: req.title
+    title: req.title,
+    // Control mode: read raw bytes (latin1) so the parser can reassemble a
+    // multibyte char that tmux split across two %output messages.
+    encoding: tmuxName ? 'latin1' : undefined
   })
 
   const forwardOutput = (data: string): void => {
@@ -319,8 +323,6 @@ function createSession(req: CreateSessionRequest): SessionSnapshot {
       }
     }
   }
-
-  const tmuxName = durableAgentName(req)
 
   if (tmuxName) {
     // Control mode: the pty stream is the tmux protocol. Only %output carries the
