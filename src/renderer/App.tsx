@@ -13,6 +13,7 @@ import type { KeybindAction } from '../core/settings'
 const KEYBIND_ACTIONS: Record<KeybindAction, () => void> = {
   splitToggle: () => store.toggleSplit(),
   newShell: () => store.newShellInActive(),
+  newAgent: () => store.openAgentChooser(),
   closeSession: () => store.closeFocused(),
   nextSession: () => store.cycleSession(1),
   prevSession: () => store.cycleSession(-1),

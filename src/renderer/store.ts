@@ -109,6 +109,9 @@ class Store {
   rowFr: number[] = []
   settings: AppSettings = { ...DEFAULT_SETTINGS }
   settingsOpen = false
+  /** Whether the TabBar's agent-chooser menu is open (driven by the button AND
+   * the New-agent keyboard shortcut). */
+  agentMenuOpen = false
   availableAgents: ResolvedAgent[] = []
   dialog: DialogState | null = null
   /** Recently-closed resumable agents (most-recent-first), persisted to disk. */
@@ -1021,6 +1024,33 @@ class Store {
   }
   newShellInActive(): void {
     if (this.activeWorktreeId) void this.addSession(this.activeWorktreeId, 'shell')
+  }
+  /** Installed, non-disabled agents — the ones offered in the "+ agent" menu. */
+  installedAgents(): ResolvedAgent[] {
+    return this.availableAgents.filter(
+      (a) => a.installed && !this.settings.disabledAgents.includes(a.id)
+    )
+  }
+  /** Keyboard "New agent": add the single installed agent directly, or open the
+   * chooser menu when several are installed (toast when none). */
+  openAgentChooser(): void {
+    const wt = this.activeWorktreeId
+    if (!wt) return
+    const agents = this.installedAgents()
+    if (agents.length === 0) {
+      this.toast('No agents installed — add one in Settings')
+      return
+    }
+    if (agents.length === 1) {
+      void this.addSession(wt, 'agent', agents[0])
+      return
+    }
+    this.setAgentMenuOpen(true)
+  }
+  setAgentMenuOpen(open: boolean): void {
+    if (this.agentMenuOpen === open) return
+    this.agentMenuOpen = open
+    this.notify()
   }
   private syncFocus(): void {
     const visible = new Set(

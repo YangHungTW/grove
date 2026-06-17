@@ -259,6 +259,21 @@ try {
   const agentAfterSwitch = await win.locator('.tab[data-kind="agent"]').count()
   assert.equal(agentAfterSwitch, 2, `worktree switch lost agents (count=${agentAfterSwitch})`)
 
+  // 7b-ii) NEW AGENT SHORTCUT — Ctrl+Shift+A adds an agent: it opens the chooser
+  //        menu when several agents are installed (click the first), or adds the
+  //        only installed one directly. Either way an agent tab is created.
+  const agentsBeforeKey = await win.locator('.tab[data-kind="agent"]').count()
+  await win.locator('.pane.focused .xterm-helper-textarea').focus()
+  await win.keyboard.press('Control+Shift+A')
+  const agentChooserMenu = win.locator('.agent-menu')
+  if (await agentChooserMenu.count()) await agentChooserMenu.locator('button').first().click()
+  await win.waitForFunction(
+    (n) => document.querySelectorAll('.tab[data-kind="agent"]').length > n,
+    agentsBeforeKey,
+    { timeout: 5000 }
+  )
+  const newAgentShortcut = true
+
   // 7c) FILE VIEWER — open a Markdown and an HTML file in read-only viewer panes
   //     (driven through the in-app dialog so no native OS picker is needed).
   const mdFile = join(repoA, 'VIEWME.md')
@@ -396,7 +411,7 @@ try {
     `SMOKE_OK fontLoaded=${fontLoaded} noClip=${noClip} projects=${projectCount} split=${visible} dragResize=${dragResize} roundTrip=true ` +
       `sidebarResize=${sidebarResize} zoom=${zoomToggle} termSearch=${termSearch} ` +
       `worktreeCreated=true agentLaunched=true multiAgent=${agentRows === 2} ` +
-      `agentAfterSwitch=${agentAfterSwitch} kbdNav=${kbdNav} fileViewer=${fileViewer} ` +
+      `agentAfterSwitch=${agentAfterSwitch} newAgentShortcut=${newAgentShortcut} kbdNav=${kbdNav} fileViewer=${fileViewer} ` +
       `viewerPanes=${viewerPanes} htmlIframe=${htmlIframe} diffReview=${diffReview} ` +
       `diffAdd=${addLines} diffDel=${delLines} splitDiff=${splitDiff} ideOpen=${ideOpen} finish=${finishFlow} restored=${restored}`
   )
