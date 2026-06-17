@@ -1205,11 +1205,18 @@ class Store {
     void this.updateSettings({ sidebarCollapsed: !this.settings.sidebarCollapsed })
   }
   async updateSettings(patch: Partial<AppSettings>): Promise<void> {
-    this.settings = await window.api.settingsSave(patch)
+    // Apply optimistically + synchronously so controlled inputs (e.g. the folder
+    // template) keep their caret. Previously this awaited the IPC save FIRST, so
+    // the controlled value lagged a tick and the cursor jumped to the end on every
+    // keystroke (and fast typing dropped chars).
+    this.settings = { ...this.settings, ...patch }
     this.applyAppearance()
     // Font changes alter the cell size → re-fit visible panes (rows/cols change).
     if ('fontFamily' in patch || 'fontSize' in patch) this.fitVisible()
     this.notify()
+    // Persist in the background. The local merge is authoritative — don't reassign
+    // from the result, or an out-of-order save during fast typing would revert it.
+    await window.api.settingsSave(patch)
   }
   /**
    * Apply background colour / transparency. Only sets CSS variables — terminals
