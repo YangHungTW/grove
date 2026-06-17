@@ -14,6 +14,28 @@ export interface AgentDef {
 /** An AgentDef plus whether its command is currently on PATH. */
 export type ResolvedAgent = AgentDef & { installed: boolean }
 
+/** External editor/IDE used by the Changes view's "open whole file" action.
+ * `command` empty = no IDE configured (the open-file icon shows but is disabled).
+ * `terminal` true = a TUI editor (vim/nvim/…) that needs a real TTY, so it opens
+ * inside an in-app shell session instead of being launched as a GUI process. */
+export interface IdeConfig {
+  command: string
+  terminal: boolean
+}
+
+/** Built-in editor presets for the settings picker. GUI editors launch via their
+ * CLI; terminal editors open in an in-app shell. */
+export const IDE_PRESETS: { id: string; name: string; command: string; terminal: boolean }[] = [
+  { id: 'vscode', name: 'VS Code', command: 'code', terminal: false },
+  { id: 'cursor', name: 'Cursor', command: 'cursor', terminal: false },
+  { id: 'sublime', name: 'Sublime Text', command: 'subl', terminal: false },
+  { id: 'zed', name: 'Zed', command: 'zed', terminal: false },
+  { id: 'webstorm', name: 'WebStorm', command: 'webstorm', terminal: false },
+  { id: 'vim', name: 'Vim', command: 'vim', terminal: true },
+  { id: 'nvim', name: 'Neovim', command: 'nvim', terminal: true },
+  { id: 'helix', name: 'Helix', command: 'hx', terminal: true }
+]
+
 /** Actions that can be bound to a keyboard shortcut. */
 export type KeybindAction =
   | 'splitToggle'
@@ -127,6 +149,9 @@ export interface AppSettings {
    * restart and reattach to the live process. Requires tmux on PATH; when tmux
    * is missing this silently falls back to a direct spawn. */
   durableSessions: boolean
+  /** Editor for the Changes view's "open whole file" action. command empty =
+   * unset (icon disabled). */
+  ide: IdeConfig
 }
 
 /** Built-in agent presets shown in the "+" menu (filtered to installed ones). */
@@ -172,5 +197,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   worktreeFolder: '../{repo}-wt-{branch}',
   keybindings: DEFAULT_KEYBINDINGS,
   disabledAgents: [],
-  durableSessions: false
+  durableSessions: false,
+  ide: { command: '', terminal: false }
 }

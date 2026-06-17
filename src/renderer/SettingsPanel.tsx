@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { AgentDef } from '../core/settings'
 import { useStore } from './useStore'
 import { store } from './store'
@@ -6,14 +7,38 @@ import {
   FIXED_SHORTCUTS,
   FONT_OPTIONS,
   AGENT_PRESETS,
+  IDE_PRESETS,
   THEMES
 } from '../core/settings'
 
 export function SettingsPanel(): JSX.Element | null {
   const s = useStore()
+  // Force the custom editor inputs open even when the command is still empty.
+  const [ideCustom, setIdeCustom] = useState(false)
   if (!s.settingsOpen) return null
   const cfg = s.settings
   const installedById = new Map(s.availableAgents.map((a) => [a.id, a.installed]))
+
+  // Editor / IDE picker: a preset dropdown (None / presets / Custom…). A custom
+  // selection reveals a command field + a "terminal editor" toggle.
+  const ide = cfg.ide ?? { command: '', terminal: false }
+  const idePreset = IDE_PRESETS.find((p) => p.command === ide.command && p.terminal === ide.terminal)
+  const ideIsCustom = ideCustom || (ide.command.trim() !== '' && !idePreset)
+  const ideSelect = ideIsCustom ? 'custom' : ide.command.trim() === '' ? 'none' : idePreset!.id
+  const onIdeSelect = (v: string): void => {
+    if (v === 'custom') {
+      setIdeCustom(true)
+      return
+    }
+    setIdeCustom(false)
+    if (v === 'none') void store.updateSettings({ ide: { command: '', terminal: false } })
+    else {
+      const p = IDE_PRESETS.find((x) => x.id === v)
+      if (p) void store.updateSettings({ ide: { command: p.command, terminal: p.terminal } })
+    }
+  }
+  const updateIde = (patch: Partial<typeof ide>): void =>
+    void store.updateSettings({ ide: { ...ide, ...patch } })
 
   // Font picker: curated monospace fonts that are actually installed (document.
   // fonts.check needs no permission), plus a "Custom…" path where the user types
@@ -171,6 +196,53 @@ export function SettingsPanel(): JSX.Element | null {
             onChange={(e) => void store.updateSettings({ durableSessions: e.target.checked })}
           />
         </label>
+
+        <div className="settings-section">Editor</div>
+        <label className="settings-row">
+          <span>Open files in</span>
+          <select
+            className="key-input"
+            style={{ width: 184 }}
+            value={ideSelect}
+            onChange={(e) => onIdeSelect(e.target.value)}
+          >
+            <option value="none">None</option>
+            {IDE_PRESETS.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+            <option value="custom">Custom…</option>
+          </select>
+        </label>
+        {ideIsCustom && (
+          <>
+            <label className="settings-row">
+              <span>Editor command</span>
+              <input
+                type="text"
+                className="key-input"
+                style={{ width: 184 }}
+                value={ide.command}
+                spellCheck={false}
+                placeholder="e.g. code, subl, nvim"
+                onChange={(e) => updateIde({ command: e.target.value })}
+              />
+            </label>
+            <label className="settings-row">
+              <span>Terminal editor (open in a shell)</span>
+              <input
+                type="checkbox"
+                checked={ide.terminal}
+                onChange={(e) => updateIde({ terminal: e.target.checked })}
+              />
+            </label>
+          </>
+        )}
+        <small className="settings-note">
+          Adds an “open whole file” icon to the Changes view. GUI editors launch directly; terminal
+          editors (vim, nvim…) open the file in an in-app shell.
+        </small>
 
         <div className="settings-section">Agents</div>
         {cfg.agents.map((a, i) => {

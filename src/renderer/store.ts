@@ -9,6 +9,7 @@ import type { SessionDescriptor } from '../core/layoutStore'
 import type { ClosedAgent } from '../core/closedAgentsStore'
 import { buildAgentLaunch } from '../core/resume'
 import { wrapIndex } from '../core/cycle'
+import { canOpenInIde } from '../core/ideLaunch'
 import {
   DEFAULT_SETTINGS,
   SHELL_ICON,
@@ -769,6 +770,31 @@ class Store {
         viewerKind
       })
       this.placePane(worktreeId, snap)
+    } catch (err) {
+      this.toast(errMsg(err))
+    }
+    this.notify()
+  }
+  /** Whether the open-in-IDE action is available (an IDE is configured). */
+  canOpenInIde(): boolean {
+    return canOpenInIde(this.settings)
+  }
+  /** Open `filePath` (absolute) in the configured IDE. A terminal editor opens in
+   * a new in-app shell pane; a GUI editor launches as a process. No-op (toast)
+   * when no IDE is configured. */
+  async openInIde(worktreeId: string, filePath: string): Promise<void> {
+    if (!this.canOpenInIde()) {
+      this.toast('No editor configured — set one in Settings')
+      return
+    }
+    const wt = this.activeProject()?.worktrees.get(worktreeId)
+    if (!wt) return
+    const root = document.getElementById('panes')
+    const cols = root ? Math.max(20, Math.floor(root.clientWidth / 7.8)) : 80
+    try {
+      const snap = await window.api.ideOpen(filePath, { worktreeId, cwd: wt.path, cols })
+      // Terminal editors come back as a shell pane to place; GUI editors return null.
+      if (snap) this.placePane(worktreeId, snap)
     } catch (err) {
       this.toast(errMsg(err))
     }
