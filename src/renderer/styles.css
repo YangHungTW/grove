@@ -1375,6 +1375,74 @@ button {
   box-shadow: 0 16px 50px rgba(0, 0, 0, 0.55);
   animation: toast-in 0.13s ease-out;
 }
+/* ⌘T new-session picker (shell + installed agents). */
+.picker-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 16vh;
+  background: rgba(0, 0, 0, 0.4);
+}
+.picker {
+  width: 340px;
+  max-width: 80vw;
+  background: var(--panel);
+  border: 1px solid #000;
+  border-radius: 12px;
+  box-shadow: 0 16px 50px rgba(0, 0, 0, 0.55);
+  padding: 6px;
+  animation: toast-in 0.12s ease-out;
+}
+.picker-title {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+  padding: 6px 10px 4px;
+}
+.picker-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.picker-item:hover,
+.picker-item.active {
+  background: var(--accent);
+  color: #fff;
+}
+.picker-icon {
+  display: inline-flex;
+  opacity: 0.9;
+}
+.picker-cmd {
+  margin-left: auto;
+  font-size: 11px;
+  opacity: 0.55;
+  font-family: var(--mono);
+}
+.picker-item.active .picker-cmd,
+.picker-item:hover .picker-cmd {
+  opacity: 0.85;
+}
+.picker-hint {
+  font-size: 11px;
+  color: var(--muted);
+  padding: 7px 10px 4px;
+  margin-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
 .dialog-title {
   margin: 0 0 8px;
   font-size: 15px;

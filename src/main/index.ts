@@ -104,16 +104,22 @@ const installedCache = new Map<string, boolean>()
 function commandExists(cmd: string): boolean {
   const first = cmd.trim().split(/\s+/)[0]
   if (installedCache.has(first)) return installedCache.get(first)!
-  let ok = false
-  try {
-    const shell = process.env.SHELL || '/bin/zsh'
-    // Pass the command name as a positional arg, not interpolated into the
-    // shell string, so a setting like `claude; rm -rf ~` can't inject.
-    execFileSync(shell, ['-lc', 'command -v "$1"', '--', first], { stdio: 'ignore' })
-    ok = true
-  } catch {
-    ok = false
+  const shell = process.env.SHELL || '/bin/zsh'
+  // Pass the command name as a positional arg, not interpolated into the shell
+  // string, so a setting like `claude; rm -rf ~` can't inject.
+  const found = (flags: string): boolean => {
+    try {
+      execFileSync(shell, [flags, 'command -v "$1"', '--', first], { stdio: 'ignore' })
+      return true
+    } catch {
+      return false
+    }
   }
+  // Login non-interactive first (fast, no .zshrc). Fall back to interactive so an
+  // agent installed as a shell ALIAS/function or only on the .zshrc PATH (e.g. a
+  // `claude` alias) is still detected instead of showing as not-installed — the
+  // picker only lists installed agents, so a false negative would hide it.
+  const ok = found('-lc') || found('-ic')
   installedCache.set(first, ok)
   return ok
 }

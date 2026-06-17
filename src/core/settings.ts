@@ -39,8 +39,6 @@ export const IDE_PRESETS: { id: string; name: string; command: string; terminal:
 /** Actions that can be bound to a keyboard shortcut. */
 export type KeybindAction =
   | 'splitToggle'
-  | 'newShell'
-  | 'newAgent'
   | 'closeSession'
   | 'nextSession'
   | 'prevSession'
@@ -56,8 +54,6 @@ export type Keybindings = Record<KeybindAction, string>
 /** Accelerator strings use '+': e.g. 'Ctrl+Shift+B', 'Meta+T'. */
 export const DEFAULT_KEYBINDINGS: Keybindings = {
   splitToggle: 'Ctrl+Shift+E',
-  newShell: 'Ctrl+Shift+Enter',
-  newAgent: 'Ctrl+Shift+A',
   closeSession: 'Ctrl+Shift+W',
   nextSession: 'Ctrl+Shift+N',
   prevSession: 'Ctrl+Shift+P',
@@ -72,8 +68,6 @@ export const DEFAULT_KEYBINDINGS: Keybindings = {
 /** Human labels for the settings UI, in display order. */
 export const KEYBIND_LABELS: { action: KeybindAction; label: string }[] = [
   { action: 'splitToggle', label: 'Split / merge' },
-  { action: 'newShell', label: 'New shell' },
-  { action: 'newAgent', label: 'New agent (chooser)' },
   { action: 'closeSession', label: 'Close tab' },
   { action: 'nextSession', label: 'Next tab' },
   { action: 'prevSession', label: 'Previous tab' },
@@ -94,7 +88,7 @@ export const FIXED_SHORTCUTS: { label: string; keys: string }[] = [
   { label: 'Previous / next project', keys: '⌘⇧← / ⌘⇧→  (⌘⇧H / ⌘⇧L)' },
   { label: 'Jump to worktree 1–9', keys: '⌘1 … ⌘9' },
   { label: 'Jump to project 1–9', keys: '⌘⌥1 … ⌘⌥9' },
-  { label: 'New shell', keys: '⌘T' },
+  { label: 'New session (shell / agent picker)', keys: '⌘T' },
   { label: 'Close tab', keys: '⌘W' },
   { label: 'Split / merge', keys: '⌘D' },
   { label: 'Find in terminal', keys: '⌘F' },

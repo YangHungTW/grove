@@ -111,7 +111,9 @@ class Store {
   settingsOpen = false
   /** Whether the TabBar's agent-chooser menu is open (driven by the button AND
    * the New-agent keyboard shortcut). */
-  agentMenuOpen = false
+  /** New-session picker (⌘T): open state + highlighted index. */
+  pickerOpen = false
+  pickerIndex = 0
   availableAgents: ResolvedAgent[] = []
   dialog: DialogState | null = null
   /** Recently-closed resumable agents (most-recent-first), persisted to disk. */
@@ -1031,26 +1033,41 @@ class Store {
       (a) => a.installed && !this.settings.disabledAgents.includes(a.id)
     )
   }
-  /** Keyboard "New agent": add the single installed agent directly, or open the
-   * chooser menu when several are installed (toast when none). */
-  openAgentChooser(): void {
-    const wt = this.activeWorktreeId
-    if (!wt) return
-    const agents = this.installedAgents()
-    if (agents.length === 0) {
-      this.toast('No agents installed — add one in Settings')
-      return
-    }
-    if (agents.length === 1) {
-      void this.addSession(wt, 'agent', agents[0])
-      return
-    }
-    this.setAgentMenuOpen(true)
+  // --- new-session picker (⌘T): Shell + installed agents, keyboard-navigable --
+  /** Picker entries: a Shell option followed by each installed agent. */
+  pickerItems(): Array<{ kind: 'shell' } | { kind: 'agent'; agent: ResolvedAgent }> {
+    return [
+      { kind: 'shell' },
+      ...this.installedAgents().map((agent) => ({ kind: 'agent' as const, agent }))
+    ]
   }
-  setAgentMenuOpen(open: boolean): void {
-    if (this.agentMenuOpen === open) return
-    this.agentMenuOpen = open
+  /** Open the new-session picker for the active worktree (⌘T / toolbar +). */
+  openPicker(): void {
+    if (!this.activeWorktreeId) return
+    this.pickerIndex = 0
+    this.pickerOpen = true
     this.notify()
+  }
+  closePicker(): void {
+    if (!this.pickerOpen) return
+    this.pickerOpen = false
+    this.notify()
+  }
+  /** Move the highlight (↑/↓/j/k), wrapping. */
+  movePicker(delta: number): void {
+    if (!this.pickerOpen) return
+    const n = this.pickerItems().length
+    if (n > 0) this.pickerIndex = wrapIndex(this.pickerIndex, delta, n)
+    this.notify()
+  }
+  /** Open the selected entry (Enter / click) and close the picker. */
+  confirmPicker(index = this.pickerIndex): void {
+    const wt = this.activeWorktreeId
+    const item = this.pickerItems()[index]
+    this.closePicker()
+    if (!wt || !item) return
+    if (item.kind === 'shell') void this.addSession(wt, 'shell')
+    else void this.addSession(wt, 'agent', item.agent)
   }
   private syncFocus(): void {
     const visible = new Set(
@@ -1058,6 +1075,13 @@ class Store {
     )
     if (this.focusedSessionId && !visible.has(this.focusedSessionId)) this.focusedSessionId = null
     if (!this.focusedSessionId && visible.size) this.focusedSessionId = [...visible][0]
+    // Switching to a worktree (keyboard OR click) puts its panes on screen, so
+    // clear their needs-attention highlight here too — focusSession already does
+    // this on a direct click, but keyboard nav goes through syncFocus, which
+    // previously left the sidebar block highlighted until a manual click.
+    let cleared = false
+    for (const { id } of this.visiblePanes()) if (this.pending.delete(id)) cleared = true
+    if (cleared) this.syncBadge()
   }
 
   // --- split (VS Code editor groups) / notifications --------------------
