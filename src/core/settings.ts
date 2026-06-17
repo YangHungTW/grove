@@ -40,6 +40,7 @@ export const IDE_PRESETS: { id: string; name: string; command: string; terminal:
 export type KeybindAction =
   | 'splitToggle'
   | 'newShell'
+  | 'newAgent'
   | 'closeSession'
   | 'nextSession'
   | 'prevSession'
@@ -56,6 +57,7 @@ export type Keybindings = Record<KeybindAction, string>
 export const DEFAULT_KEYBINDINGS: Keybindings = {
   splitToggle: 'Ctrl+Shift+E',
   newShell: 'Ctrl+Shift+Enter',
+  newAgent: 'Ctrl+Shift+A',
   closeSession: 'Ctrl+Shift+W',
   nextSession: 'Ctrl+Shift+N',
   prevSession: 'Ctrl+Shift+P',
@@ -71,6 +73,7 @@ export const DEFAULT_KEYBINDINGS: Keybindings = {
 export const KEYBIND_LABELS: { action: KeybindAction; label: string }[] = [
   { action: 'splitToggle', label: 'Split / merge' },
   { action: 'newShell', label: 'New shell' },
+  { action: 'newAgent', label: 'New agent (chooser)' },
   { action: 'closeSession', label: 'Close tab' },
   { action: 'nextSession', label: 'Next tab' },
   { action: 'prevSession', label: 'Previous tab' },

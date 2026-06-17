@@ -17,6 +17,7 @@ import { ViewerPane } from './ViewerPane'
 import { DiffPane } from './DiffPane'
 import { SearchBar } from './SearchBar'
 import { filePathsFrom } from './fileDrop'
+import { shiftEnterByte } from './termKeys'
 import { shellQuote } from '../core/shellQuote'
 import type { SessionSnapshot } from '../main/ipc'
 
@@ -186,14 +187,15 @@ function Pane({
     // Shift+Enter inserts a newline instead of submitting. xterm sends plain CR
     // (\r = submit) for both Enter and Shift+Enter; send LF (\x0a) instead, which
     // is exactly what agents like claude treat as "newline" (its chat:newline is
-    // Ctrl+J = LF). Returning false stops xterm from also sending the CR.
-    if (session.kind === 'agent') {
+    // Ctrl+J = LF). Returning false stops xterm from also sending the CR. Attached
+    // for shell panes too, so it keeps working when an agent is launched by hand
+    // inside a shell (a plain shell binds both CR and LF to accept-line anyway).
+    if (session.kind === 'agent' || session.kind === 'shell') {
       term.attachCustomKeyEventHandler((e) => {
-        if (e.key === 'Enter' && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
-          if (e.type === 'keydown') window.api.sessionInput(session.id, '\x0a')
-          return false
-        }
-        return true
+        const byte = shiftEnterByte(e)
+        if (byte === null) return true
+        if (byte) window.api.sessionInput(session.id, byte)
+        return false
       })
     }
     termRef.current = term

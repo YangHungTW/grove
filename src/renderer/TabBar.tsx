@@ -21,7 +21,9 @@ export function TabBar(): JSX.Element {
   const agents = s.availableAgents.filter(
     (a) => a.installed && !s.settings.disabledAgents.includes(a.id)
   )
-  const [menuOpen, setMenuOpen] = useState(false)
+  // Menu open-state lives in the store so the New-agent keyboard shortcut can open
+  // it too (not just this button).
+  const menuOpen = s.agentMenuOpen
   const [fileDragOver, setFileDragOver] = useState(false)
   const wt = s.activeWorktreeId
 
@@ -56,18 +58,26 @@ export function TabBar(): JSX.Element {
             <button
               className="add-session"
               aria-label="New agent"
+              title={`New agent (${s.settings.keybindings.newAgent})`}
               disabled={!wt}
-              onClick={() => setMenuOpen((o) => !o)}
+              onClick={() => store.setAgentMenuOpen(!menuOpen)}
             >
               <PlusIcon size={12} /> agent <ChevronDownIcon size={12} />
             </button>
             {menuOpen && (
-              <div className="agent-menu" onMouseLeave={() => setMenuOpen(false)}>
-                {agents.map((a) => (
+              <div
+                className="agent-menu"
+                onMouseLeave={() => store.setAgentMenuOpen(false)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') store.setAgentMenuOpen(false)
+                }}
+              >
+                {agents.map((a, i) => (
                   <button
                     key={a.id}
+                    autoFocus={i === 0}
                     onClick={() => {
-                      setMenuOpen(false)
+                      store.setAgentMenuOpen(false)
                       if (wt) void store.addSession(wt, 'agent', a)
                     }}
                   >
