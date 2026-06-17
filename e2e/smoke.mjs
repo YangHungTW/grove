@@ -113,11 +113,19 @@ try {
       () => [...document.querySelectorAll('.pane')].filter((p) => getComputedStyle(p).display !== 'none').length
     )
 
+  // New-session picker (⌘T, or the toolbar "+ new" button): pick "Shell" or an
+  // agent by name. Replaces the old separate +shell / +agent buttons + chooser.
+  const pickSession = async (label) => {
+    await win.getByRole('button', { name: 'New session' }).click()
+    await win.waitForSelector('.picker', { timeout: 5000 })
+    await win.locator('.picker-item', { hasText: label }).first().click()
+  }
+
   // 3) TABS + ON-DEMAND SPLIT — two shells become two tabs; single by default,
-  //    both visible after toggling split. '+ shell' lives in the top toolbar.
-  await win.getByRole('button', { name: 'New shell' }).click()
+  //    both visible after toggling split.
+  await pickSession('Shell')
   await win.waitForSelector('.xterm', { timeout: 10000 })
-  await win.getByRole('button', { name: 'New shell' }).click()
+  await pickSession('Shell')
   await win.waitForFunction(() => document.querySelectorAll('.tab').length >= 2, { timeout: 10000 })
   const tabs = await win.locator('.tab').count()
   assert.ok(tabs >= 2, `tabs: expected >= 2 tabs, got ${tabs}`)
@@ -222,12 +230,9 @@ try {
   )
   const kbdNav = (await activeCard()).includes('main')
 
-  // Add a Claude agent — '+ agent' is a dropdown when multiple agents are
-  // installed; pick Claude (icon ★). CCM_AGENT_CMD overrides the launch command.
+  // Add a Claude agent via the picker (CCM_AGENT_CMD overrides the launch command).
   const addClaudeAgent = async () => {
-    await win.getByRole('button', { name: 'New agent' }).click()
-    const menu = win.locator('.agent-menu')
-    if (await menu.count()) await menu.getByRole('button', { name: 'Claude' }).click()
+    await pickSession('Claude')
   }
 
   // 6) AGENT LAUNCH — creates the CCM_AGENT_CMD marker on disk.
@@ -259,14 +264,14 @@ try {
   const agentAfterSwitch = await win.locator('.tab[data-kind="agent"]').count()
   assert.equal(agentAfterSwitch, 2, `worktree switch lost agents (count=${agentAfterSwitch})`)
 
-  // 7b-ii) NEW AGENT SHORTCUT — Ctrl+Shift+A adds an agent: it opens the chooser
-  //        menu when several agents are installed (click the first), or adds the
-  //        only installed one directly. Either way an agent tab is created.
+  // 7b-ii) NEW-SESSION PICKER SHORTCUT — ⌘T opens the picker; arrow down off
+  //        "Shell" to the first agent and Enter adds it. Replaces Ctrl+Shift+A.
   const agentsBeforeKey = await win.locator('.tab[data-kind="agent"]').count()
   await win.locator('.pane.focused .xterm-helper-textarea').focus()
-  await win.keyboard.press('Control+Shift+A')
-  const agentChooserMenu = win.locator('.agent-menu')
-  if (await agentChooserMenu.count()) await agentChooserMenu.locator('button').first().click()
+  await win.keyboard.press('Meta+T')
+  await win.waitForSelector('.picker', { timeout: 5000 })
+  await win.keyboard.press('ArrowDown')
+  await win.keyboard.press('Enter')
   await win.waitForFunction(
     (n) => document.querySelectorAll('.tab[data-kind="agent"]').length > n,
     agentsBeforeKey,

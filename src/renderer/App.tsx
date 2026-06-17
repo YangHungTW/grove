@@ -5,6 +5,7 @@ import { GroupTabs } from './GroupTabs'
 import { PaneGrid } from './PaneGrid'
 import { SettingsPanel } from './SettingsPanel'
 import { Dialog } from './Dialog'
+import { SessionPicker } from './SessionPicker'
 import { useStore } from './useStore'
 import { store } from './store'
 import { matchesAccel } from './keymatch'
@@ -12,8 +13,6 @@ import type { KeybindAction } from '../core/settings'
 
 const KEYBIND_ACTIONS: Record<KeybindAction, () => void> = {
   splitToggle: () => store.toggleSplit(),
-  newShell: () => store.newShellInActive(),
-  newAgent: () => store.openAgentChooser(),
   closeSession: () => store.closeFocused(),
   nextSession: () => store.cycleSession(1),
   prevSession: () => store.cycleSession(-1),
@@ -37,12 +36,27 @@ export function App(): JSX.Element {
       // terminal uses a <textarea>, so terminal-focused shortcuts still work.
       if (e.target instanceof HTMLInputElement) return
 
+      // The new-session picker (⌘T) captures navigation while open.
+      if (store.pickerOpen) {
+        const pk = e.key.toLowerCase()
+        if (pk === 'escape') store.closePicker()
+        else if (pk === 'enter') store.confirmPicker()
+        else if (pk === 'arrowdown' || pk === 'j') store.movePicker(1)
+        else if (pk === 'arrowup' || pk === 'k') store.movePicker(-1)
+        else return // let other keys through (e.g. ⌘ shortcuts) without closing
+        e.preventDefault()
+        e.stopPropagation()
+        return
+      }
+
       // Configurable shortcuts (default ⌃⇧, kitty-style) take priority.
       for (const [action, accel] of Object.entries(store.settings.keybindings)) {
         if (matchesAccel(e, accel)) {
           e.preventDefault()
           e.stopPropagation()
-          KEYBIND_ACTIONS[action as KeybindAction]()
+          // Defensive: a settings.json persisted before an action was removed may
+          // still carry it; ignore unknown actions instead of crashing.
+          KEYBIND_ACTIONS[action as KeybindAction]?.()
           return
         }
       }
@@ -92,7 +106,7 @@ export function App(): JSX.Element {
         store.toggleSplit()
       } else if (k === 't' && store.activeWorktreeId) {
         e.preventDefault()
-        void store.addSession(store.activeWorktreeId, 'shell')
+        store.openPicker()
       } else if (k === 'w' && store.focusedSessionId) {
         e.preventDefault()
         store.closeSession(store.focusedSessionId)
@@ -141,6 +155,7 @@ export function App(): JSX.Element {
       </main>
       <SettingsPanel />
       <Dialog />
+      <SessionPicker />
     </div>
   )
 }

@@ -2,28 +2,13 @@ import { useState } from 'react'
 import { useStore } from './useStore'
 import { store } from './store'
 import { filePathsFrom } from './fileDrop'
-import {
-  AgentTabIcon,
-  BellIcon,
-  GearIcon,
-  PlusIcon,
-  SplitIcon,
-  SingleIcon,
-  ChevronDownIcon,
-  ZoomIcon
-} from './Icons'
+import { BellIcon, GearIcon, PlusIcon, SplitIcon, SingleIcon, ZoomIcon } from './Icons'
 
 /** The top bar: sidebar toggle on the left, global actions on the right.
  * Per-group session tabs live in <GroupTabs> (the row below). */
 export function TabBar(): JSX.Element {
   const s = useStore()
   const split = s.isSplit()
-  const agents = s.availableAgents.filter(
-    (a) => a.installed && !s.settings.disabledAgents.includes(a.id)
-  )
-  // Menu open-state lives in the store so the New-agent keyboard shortcut can open
-  // it too (not just this button).
-  const menuOpen = s.agentMenuOpen
   const [fileDragOver, setFileDragOver] = useState(false)
   const wt = s.activeWorktreeId
 
@@ -43,58 +28,14 @@ export function TabBar(): JSX.Element {
       </button>
       <div id="topbar-spacer" />
       <div id="toolbar">
-        {agents.length === 1 && (
-          <button
-            className="add-session"
-            aria-label="New agent"
-            disabled={!wt}
-            onClick={() => wt && void store.addSession(wt, 'agent', agents[0])}
-          >
-            <PlusIcon size={12} /> agent
-          </button>
-        )}
-        {agents.length > 1 && (
-          <div className="agent-add">
-            <button
-              className="add-session"
-              aria-label="New agent"
-              title={`New agent (${s.settings.keybindings.newAgent})`}
-              disabled={!wt}
-              onClick={() => store.setAgentMenuOpen(!menuOpen)}
-            >
-              <PlusIcon size={12} /> agent <ChevronDownIcon size={12} />
-            </button>
-            {menuOpen && (
-              <div
-                className="agent-menu"
-                onMouseLeave={() => store.setAgentMenuOpen(false)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Escape') store.setAgentMenuOpen(false)
-                }}
-              >
-                {agents.map((a, i) => (
-                  <button
-                    key={a.id}
-                    autoFocus={i === 0}
-                    onClick={() => {
-                      store.setAgentMenuOpen(false)
-                      if (wt) void store.addSession(wt, 'agent', a)
-                    }}
-                  >
-                    <AgentTabIcon icon={a.icon} size={14} /> {a.name}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
         <button
           className="add-session"
-          aria-label="New shell"
+          aria-label="New session"
+          title="New session — shell or agent (⌘T)"
           disabled={!wt}
-          onClick={() => wt && void store.addSession(wt, 'shell')}
+          onClick={() => store.openPicker()}
         >
-          <PlusIcon size={12} /> shell
+          <PlusIcon size={12} /> new
         </button>
         <button
           className={'add-session' + (fileDragOver ? ' drag-over' : '')}
