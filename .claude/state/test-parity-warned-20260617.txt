@@ -13,3 +13,5 @@ src/renderer/PaneGrid.tsx
 src/renderer/termKeys.ts
 src/renderer/App.tsx
 src/renderer/TabBar.tsx
+src/renderer/SessionPicker.tsx
+src/renderer/Icons.tsx
