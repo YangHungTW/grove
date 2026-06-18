@@ -35,6 +35,7 @@ export const Channels = {
   prCreate: 'pr:create',
   prStatus: 'pr:status',
   openExternal: 'shell:open-external',
+  urlEmbeddable: 'url:embeddable',
   claudeUsage: 'claude:usage',
   sessionCreate: 'session:create',
   sessionInput: 'session:input',
@@ -173,6 +174,10 @@ export interface RendererApi {
   prStatus(worktreePath: string): Promise<PrInfo | null>
   /** Open an http(s) URL in the default browser. */
   openExternal(url: string): void
+  /** Whether an http(s) URL can be shown in an in-app iframe (no X-Frame-Options
+   * / restrictive CSP frame-ancestors). false → caller should open it externally.
+   * Optimistic: network/timeout errors resolve true. */
+  urlEmbeddable(url: string): Promise<boolean>
   worktreeRemove(req: WorktreeRemoveRequest): Promise<void>
   sessionCreate(req: CreateSessionRequest): Promise<SessionSnapshot>
   sessionInput(id: string, data: string): void

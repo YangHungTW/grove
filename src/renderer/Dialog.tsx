@@ -37,11 +37,11 @@ export function Dialog(): JSX.Element | null {
 
 function OpenFile({ worktreeId }: { worktreeId: string }): JSX.Element {
   const [path, setPath] = useState('')
-  const submit = (): void => {
-    const v = path.trim()
+  const open = (value: string): void => {
+    const v = value.trim()
     if (!v) return
     store.closeDialog()
-    void store.openFile(worktreeId, v)
+    void store.openPathOrUrl(worktreeId, v)
   }
   const browse = async (): Promise<void> => {
     const picked = await store.browseForFile(worktreeId)
@@ -49,21 +49,30 @@ function OpenFile({ worktreeId }: { worktreeId: string }): JSX.Element {
   }
   return (
     <>
-      <h3 className="dialog-title">Open file</h3>
+      <h3 className="dialog-title">Open file or URL</h3>
       <p className="dialog-body">
-        Open a Markdown or HTML file in a read-only viewer pane. Markdown is rendered (and
-        sanitized); HTML is shown in a sandboxed frame.
+        Open a Markdown/HTML file (rendered, sanitized) or an http(s) URL (shown in an in-app frame,
+        or your browser if the site blocks embedding). Paste to open immediately.
       </p>
       <label className="dialog-field">
-        <span>File path</span>
+        <span>File path or URL</span>
         <input
           autoFocus
           value={path}
-          placeholder="/path/to/README.md"
+          placeholder="/path/to/README.md  ·  https://example.com"
           spellCheck={false}
           onChange={(e) => setPath(e.target.value)}
+          onPaste={(e) => {
+            // Paste-to-open: open the pasted value straight away.
+            const text = e.clipboardData.getData('text')
+            if (text.trim()) {
+              e.preventDefault()
+              setPath(text)
+              open(text)
+            }
+          }}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') submit()
+            if (e.key === 'Enter') open(path)
             else if (e.key === 'Escape') store.closeDialog()
           }}
         />
@@ -76,7 +85,7 @@ function OpenFile({ worktreeId }: { worktreeId: string }): JSX.Element {
         <button className="btn-ghost" onClick={() => store.closeDialog()}>
           Cancel
         </button>
-        <button className="btn-primary" disabled={!path.trim()} onClick={submit}>
+        <button className="btn-primary" disabled={!path.trim()} onClick={() => open(path)}>
           Open
         </button>
       </div>

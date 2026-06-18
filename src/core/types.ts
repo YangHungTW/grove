@@ -24,8 +24,9 @@ export interface Worktree {
  */
 export type SessionKind = 'agent' | 'shell' | 'viewer' | 'diff'
 
-/** What a viewer session is rendering. */
-export type ViewerKind = 'markdown' | 'html'
+/** What a viewer session is rendering. `web` loads a live URL in an iframe;
+ * `markdown`/`html` render a local file's contents. */
+export type ViewerKind = 'markdown' | 'html' | 'web'
 
 /** Lifecycle / attention state of a session. */
 export type SessionState = 'starting' | 'idle' | 'busy' | 'waiting' | 'exited'
