@@ -145,6 +145,14 @@ class Store {
   private repoRoot = ''
   private prevVisible: string[] = []
   private lineRefreshScheduled = false
+  // Panes that received output and need a forced repaint. xterm's canvas/WebGL
+  // renderers track dirty rows themselves and skip a redraw when they believe a
+  // row is unchanged — but an agent that repaints its status/cost line IN PLACE
+  // (rewriting the same bottom row) can slip past that tracking on some GPUs,
+  // leaving the row stale until a resize or text selection forces a full redraw.
+  // We coalesce a full refresh per output burst to flush those missed rows.
+  private refreshPanes = new Set<string>()
+  private refreshScheduled = false
 
   private version = 0
   private listeners = new Set<() => void>()
@@ -243,6 +251,23 @@ class Store {
   // --- terminal registration (called by <Pane>) --------------------------
   registerPane(id: string, term: Terminal, fit: FitAddon, search?: SearchAddon): void {
     this.panes.set(id, { term, fit, search })
+  }
+  /** Force a full repaint of panes that just received output, coalesced per
+   * burst. Works around xterm canvas/WebGL renderers skipping an in-place row
+   * rewrite (e.g. an agent's cost/status line) so it stays stale until a manual
+   * resize/selection. A short debounce keeps this to ~one repaint per burst. */
+  private scheduleRepaint(id: string): void {
+    this.refreshPanes.add(id)
+    if (this.refreshScheduled) return
+    this.refreshScheduled = true
+    setTimeout(() => {
+      this.refreshScheduled = false
+      for (const pid of this.refreshPanes) {
+        const term = this.panes.get(pid)?.term
+        if (term) term.refresh(0, term.rows - 1)
+      }
+      this.refreshPanes.clear()
+    }, 80)
   }
   unregisterPane(id: string): void {
     this.panes.get(id)?.term.dispose()
@@ -1315,6 +1340,7 @@ class Store {
   wireEvents(): void {
     window.api.onSessionData(({ id, data }) => {
       this.panes.get(id)?.term.write(data)
+      this.scheduleRepaint(id)
       const line = lastNonEmptyLine(data)
       if (line) {
         this.lastLine.set(id, line)
