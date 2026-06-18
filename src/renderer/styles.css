@@ -1571,6 +1571,17 @@ button {
   background: none;
   padding: 0;
 }
+/* A rendered mermaid diagram: drop the code-block chrome and centre the SVG.
+   Before rendering it briefly shows the source as a normal <pre>. */
+.viewer-markdown pre.mermaid[data-processed] {
+  background: none;
+  padding: 0;
+  text-align: center;
+}
+.viewer-markdown pre.mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
 .viewer-markdown a {
   color: var(--accent);
 }

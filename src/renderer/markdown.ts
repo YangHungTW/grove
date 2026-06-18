@@ -31,22 +31,39 @@ function purifier(): ReturnType<typeof createDOMPurify> {
 export function renderMarkdown(md: string, baseDir?: string): string {
   const raw = marked.parse(md, { async: false }) as string
   const clean = purifier().sanitize(raw)
-  if (!baseDir || typeof document === 'undefined') return clean
+  if (typeof document === 'undefined') return clean
 
   const tpl = document.createElement('template')
   tpl.innerHTML = clean
-  tpl.content.querySelectorAll('img[src]').forEach((img) => {
-    const src = img.getAttribute('src') ?? ''
-    // Leave absolute URLs (scheme:, //, #anchor, data:) untouched.
-    if (!src || /^[a-z][a-z0-9+.-]*:/i.test(src) || src.startsWith('//') || src.startsWith('#')) {
-      return
-    }
-    // encodeURI so spaces / unicode / '#' in the path don't break the file://
-    // URL (Chromium rejects unencoded spaces); it preserves '/' and ':'.
-    const abs = src.startsWith('/')
-      ? `file://${encodeURI(src)}`
-      : `file://${encodeURI(baseDir)}/${encodeURI(src)}`
-    img.setAttribute('src', abs)
+
+  // Turn ```mermaid fences (marked emits `<pre><code class="language-mermaid">`)
+  // into `<pre class="mermaid">SOURCE</pre>` — the shape mermaid.run() looks for.
+  // The diagram source is carried as the element's text (DOMPurify already vetted
+  // the surrounding markup); ViewerPane renders it to SVG after mount.
+  tpl.content.querySelectorAll('code.language-mermaid').forEach((code) => {
+    const pre = code.closest('pre') ?? code
+    const holder = document.createElement('pre')
+    holder.className = 'mermaid'
+    holder.textContent = code.textContent ?? ''
+    pre.replaceWith(holder)
   })
+
+  // Resolve relative image paths against the source file's directory (not the
+  // app HTML) so a README's `![](assets/x.svg)` doesn't 404.
+  if (baseDir) {
+    tpl.content.querySelectorAll('img[src]').forEach((img) => {
+      const src = img.getAttribute('src') ?? ''
+      // Leave absolute URLs (scheme:, //, #anchor, data:) untouched.
+      if (!src || /^[a-z][a-z0-9+.-]*:/i.test(src) || src.startsWith('//') || src.startsWith('#')) {
+        return
+      }
+      // encodeURI so spaces / unicode / '#' in the path don't break the file://
+      // URL (Chromium rejects unencoded spaces); it preserves '/' and ':'.
+      const abs = src.startsWith('/')
+        ? `file://${encodeURI(src)}`
+        : `file://${encodeURI(baseDir)}/${encodeURI(src)}`
+      img.setAttribute('src', abs)
+    })
+  }
   return tpl.innerHTML
 }

@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { store } from './store'
 import { renderMarkdown } from './markdown'
+import { renderMermaidIn } from './mermaidRender'
 import type { SessionSnapshot } from '../main/ipc'
 
 /** The directory portion of an absolute file path (for resolving relative images). */
@@ -29,6 +30,7 @@ export function ViewerPane({
 }): JSX.Element {
   const [content, setContent] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const mdRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     let alive = true
@@ -67,6 +69,14 @@ export function ViewerPane({
     [content, session.viewerKind, session.filePath]
   )
 
+  // Render any mermaid diagrams once the HTML is in the DOM AND the pane is
+  // visible — mermaid measures layout, so a display:none pane would render at
+  // zero size. Re-runs when the pane becomes visible or the content changes.
+  useEffect(() => {
+    if (!visible || !markdownHtml || !mdRef.current) return
+    void renderMermaidIn(mdRef.current, store.settings.background)
+  }, [markdownHtml, visible])
+
   return (
     <div
       className={'pane viewer-pane' + (focused ? ' focused' : '')}
@@ -89,7 +99,11 @@ export function ViewerPane({
           srcDoc={content}
         />
       ) : (
-        <div className="viewer-markdown" dangerouslySetInnerHTML={{ __html: markdownHtml }} />
+        <div
+          ref={mdRef}
+          className="viewer-markdown"
+          dangerouslySetInnerHTML={{ __html: markdownHtml }}
+        />
       )}
     </div>
   )
