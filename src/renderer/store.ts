@@ -8,6 +8,7 @@ import type { SessionSnapshot } from '../main/ipc'
 import type { SessionDescriptor } from '../core/layoutStore'
 import type { ClosedAgent } from '../core/closedAgentsStore'
 import { buildAgentLaunch } from '../core/resume'
+import { classifyExit } from '../core/sessionExit'
 import { wrapIndex } from '../core/cycle'
 import { canOpenInIde } from '../core/ideLaunch'
 import {
@@ -1321,9 +1322,29 @@ class Store {
       }
       this.notify()
     })
-    window.api.onSessionExit(({ id }) => {
-      // The pty ended (shell/agent exited) — auto-close its tab/pane.
-      if (this.sessions.has(id)) this.closeSession(id)
+    window.api.onSessionExit(({ id, exitCode, signal }) => {
+      const sess = this.sessions.get(id)
+      if (!sess) return
+      // A clean exit (the user typed `exit`, or the agent finished) auto-closes
+      // the tab. A FAILED exit (non-zero code, or killed by a signal) used to
+      // close just as silently — so a mis-launched agent (e.g. its CLI isn't on
+      // the login-shell PATH, exit 127) looked like the tab "flashing away" with
+      // no clue why. Instead, keep the tab open, mark it exited, and annotate the
+      // pane so the shell's own error (printed just above) stays readable.
+      const { failed, reason: why } = classifyExit(exitCode, signal)
+      if (!failed) {
+        this.closeSession(id)
+        return
+      }
+      sess.state = 'exited'
+      const term = this.panes.get(id)?.term
+      term?.write(
+        `\r\n\x1b[1;33m⚠ Session exited\x1b[0m \x1b[2m(${why}).\x1b[0m\r\n` +
+          `\x1b[2mThe command above ended immediately. If it's "command not found", the agent CLI\r\n` +
+          `isn't on the PATH of a login shell — add it in ~/.zshenv (not ~/.zshrc). ` +
+          `Close this tab when done.\x1b[0m\r\n`
+      )
+      this.notify()
     })
     // A clicked OS notification: jump to the session that needs input.
     window.api.onNotifyJump(({ id }) => {
