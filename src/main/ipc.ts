@@ -83,6 +83,10 @@ export interface CreateSessionRequest {
   rows?: number
   /** Agent id used for state detection (e.g. 'claude'); defaults from kind. */
   agent?: string
+  /** Stable per-agent id for durable (tmux) sessions. Folded into the tmux
+   * session name so multiple agents in one worktree don't collide onto a single
+   * session; persisted + restored so a relaunch reattaches to the right one. */
+  durableKey?: string
   /** Viewer sessions: file to open + how to render it (no pty is spawned). */
   filePath?: string
   viewerKind?: ViewerKind

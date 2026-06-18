@@ -29,6 +29,21 @@ describe('tmuxSessionName', () => {
   it('gives different worktrees different names', () => {
     expect(tmuxSessionName('/x/one')).not.toBe(tmuxSessionName('/x/two'))
   })
+
+  it('gives two agents in the SAME worktree different names via the key', () => {
+    const wt = '/Users/me/Tools/grove'
+    expect(tmuxSessionName(wt, 'key-a')).not.toBe(tmuxSessionName(wt, 'key-b'))
+  })
+
+  it('is stable for the same (worktree, key) — the basis for reattach', () => {
+    const wt = '/Users/me/Tools/grove'
+    expect(tmuxSessionName(wt, 'abc')).toBe(tmuxSessionName(wt, 'abc'))
+  })
+
+  it('sanitizes the key too (no . : /)', () => {
+    expect(tmuxSessionName('/x', 'a.b/c:d')).toBe('grove__x_a_b_c_d')
+    expect(tmuxSessionName('/x', 'a.b/c:d')).not.toMatch(/[.:/]/)
+  })
 })
 
 describe('buildTmuxControlLaunch', () => {

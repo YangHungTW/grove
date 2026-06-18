@@ -214,7 +214,9 @@ function durableAgentName(req: CreateSessionRequest): string | undefined {
   if (req.kind !== 'agent') return undefined
   const forced = process.env.CCM_TMUX === 'control'
   const on = forced || durableEnabled(settings().load().durableSessions, commandExists('tmux'))
-  return on ? tmuxSessionName(req.worktreeId) : undefined
+  // Key the session name by a stable per-agent id so multiple agents in one
+  // worktree get distinct tmux sessions (and reattach to the right one).
+  return on ? tmuxSessionName(req.worktreeId, req.durableKey) : undefined
 }
 
 /**
