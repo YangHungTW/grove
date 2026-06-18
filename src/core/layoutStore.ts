@@ -14,9 +14,12 @@ export interface SessionDescriptor {
    * reopens its previous conversation instead of starting fresh. */
   resumeId?: string
   /** Durable (tmux control-mode) agent: on restore, reattach to the still-live
-   * tmux session instead of respawning. The tmux name is derived deterministically
-   * from the worktree path (see `tmuxSessionName`), so only this marker is stored. */
+   * tmux session instead of respawning. */
   durable?: boolean
+  /** Stable per-agent id folded into the durable tmux session name (see
+   * `tmuxSessionName`). Persisted so a relaunch reattaches to the SAME tmux
+   * session — and so two agents in one worktree never share one. */
+  durableKey?: string
 }
 
 /**

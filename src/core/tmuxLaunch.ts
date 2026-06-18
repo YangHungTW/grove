@@ -5,13 +5,22 @@
  */
 
 /**
- * Deterministic, tmux-safe session name for a worktree's durable agent. tmux
- * session names may not contain `.` or `:` (and `/` is best avoided), so collapse
- * anything outside `[A-Za-z0-9]` to `_`. There is at most one agent per worktree,
- * so this never collides, and it is stable across restarts (the key to reattach).
+ * Deterministic, tmux-safe session name for a durable agent. tmux session names
+ * may not contain `.` or `:` (and `/` is best avoided), so collapse anything
+ * outside `[A-Za-z0-9]` to `_`.
+ *
+ * A worktree can hold MORE THAN ONE agent (e.g. "claude" + "claude 2"), so the
+ * name must also include a per-agent `key` — otherwise the second agent's
+ * `tmux new-session -A` (create-OR-attach) would attach to the first agent's
+ * session and the two panes would share one terminal. The key is a stable,
+ * persisted per-agent id (see `durableKey`), so the name is reproducible across
+ * restarts — which is what lets a relaunch reattach to the still-live process.
+ * `key` is optional only so old call sites / tests keep compiling.
  */
-export function tmuxSessionName(worktreeId: string): string {
-  return `grove_${worktreeId.replace(/[^a-zA-Z0-9]/g, '_')}`
+export function tmuxSessionName(worktreeId: string, key?: string): string {
+  const wt = worktreeId.replace(/[^a-zA-Z0-9]/g, '_')
+  const suffix = key ? `_${key.replace(/[^a-zA-Z0-9]/g, '_')}` : ''
+  return `grove_${wt}${suffix}`
 }
 
 /**

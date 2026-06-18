@@ -8,6 +8,7 @@ import type { SessionSnapshot } from '../main/ipc'
 import type { SessionDescriptor } from '../core/layoutStore'
 import type { ClosedAgent } from '../core/closedAgentsStore'
 import { buildAgentLaunch } from '../core/resume'
+import { classifyExit } from '../core/sessionExit'
 import { wrapIndex } from '../core/cycle'
 import { canOpenInIde } from '../core/ideLaunch'
 import {
@@ -132,6 +133,10 @@ class Store {
   // Live agents that own a pinned resume id, keyed by session id. On close the
   // entry becomes a ClosedAgent so the agent can be resumed later.
   private resumeMeta = new Map<string, { resumeId: string; baseCommand: string }>()
+  // Stable per-agent durable (tmux) key, keyed by session id. Persisted in the
+  // layout so a relaunch reattaches to the same tmux session; distinct per agent
+  // so two agents in one worktree never share one. See [[tmuxSessionName]].
+  private durableKeyById = new Map<string, string>()
   private savedLayout: SessionDescriptor[] = []
   // Worktree paths whose saved sessions have been respawned this run (lazy
   // restore happens per worktree, on first select — not all at once on launch).
@@ -140,6 +145,14 @@ class Store {
   private repoRoot = ''
   private prevVisible: string[] = []
   private lineRefreshScheduled = false
+  // Panes that received output and need a forced repaint. xterm's canvas/WebGL
+  // renderers track dirty rows themselves and skip a redraw when they believe a
+  // row is unchanged — but an agent that repaints its status/cost line IN PLACE
+  // (rewriting the same bottom row) can slip past that tracking on some GPUs,
+  // leaving the row stale until a resize or text selection forces a full redraw.
+  // We coalesce a full refresh per output burst to flush those missed rows.
+  private refreshPanes = new Set<string>()
+  private refreshScheduled = false
 
   private version = 0
   private listeners = new Set<() => void>()
@@ -239,6 +252,23 @@ class Store {
   registerPane(id: string, term: Terminal, fit: FitAddon, search?: SearchAddon): void {
     this.panes.set(id, { term, fit, search })
   }
+  /** Force a full repaint of panes that just received output, coalesced per
+   * burst. Works around xterm canvas/WebGL renderers skipping an in-place row
+   * rewrite (e.g. an agent's cost/status line) so it stays stale until a manual
+   * resize/selection. A short debounce keeps this to ~one repaint per burst. */
+  private scheduleRepaint(id: string): void {
+    this.refreshPanes.add(id)
+    if (this.refreshScheduled) return
+    this.refreshScheduled = true
+    setTimeout(() => {
+      this.refreshScheduled = false
+      for (const pid of this.refreshPanes) {
+        const term = this.panes.get(pid)?.term
+        if (term) term.refresh(0, term.rows - 1)
+      }
+      this.refreshPanes.clear()
+    }, 80)
+  }
   unregisterPane(id: string): void {
     this.panes.get(id)?.term.dispose()
     this.panes.delete(id)
@@ -323,7 +353,9 @@ class Store {
             resumeId: this.resumeMeta.get(s.id)?.resumeId,
             // Mark durable agents so the card can show it; on restore the agent
             // relaunches durable and tmux reattaches to the still-live process.
-            durable: s.durable
+            durable: s.durable,
+            // The per-agent tmux key, so restore reattaches to the SAME session.
+            durableKey: this.durableKeyById.get(s.id)
           })
         }
     return out
@@ -351,7 +383,7 @@ class Store {
       // themselves (not the default), and keep the saved/renamed title.
       const agentDef =
         d.kind === 'agent' ? this.availableAgents.find((a) => a.icon === d.icon) : undefined
-      await this.addSession(wtId, d.kind, agentDef, d.title, d.resumeId)
+      await this.addSession(wtId, d.kind, agentDef, d.title, d.resumeId, d.durableKey)
     }
     this.restoring = false
     this.persistLayout()
@@ -688,7 +720,8 @@ class Store {
     kind: SessionKind,
     agentDef?: AgentDef,
     titleOverride?: string,
-    resumeId?: string
+    resumeId?: string,
+    durableKey?: string
   ): Promise<void> {
     const wt = this.activeProject()?.worktrees.get(worktreeId)
     if (!wt) return
@@ -704,6 +737,11 @@ class Store {
       ? buildAgentLaunch(baseCommand, () => crypto.randomUUID(), resumeId)
       : { command: baseCommand }
     const command = launch.command
+    // Stable per-agent id for durable (tmux) naming. Distinct from resumeId
+    // (which is claude-only): EVERY agent gets one so two agents in a worktree
+    // can't collide onto one tmux session. Reused on restore so reattach finds
+    // the right live session. Generated once per logical agent here.
+    const dKey = isAgent ? (durableKey ?? crypto.randomUUID()) : undefined
     const n = this.sessionsOf(worktreeId).filter((x) => x.icon === icon).length
     const title = titleOverride ?? (n === 0 ? baseName : `${baseName} ${n + 1}`)
     // Estimate columns so the shell's first prompt renders at ~the right width
@@ -720,10 +758,12 @@ class Store {
         cwd: wt.path,
         title,
         icon,
-        cols
+        cols,
+        durableKey: dKey
       })
       this.sessions.set(snap.id, snap)
       if (launch.resumeId) this.resumeMeta.set(snap.id, { resumeId: launch.resumeId, baseCommand })
+      if (dKey) this.durableKeyById.set(snap.id, dKey)
       this.activeWorktreeId = worktreeId
       // Place the new session in the currently-focused group.
       const groups = this.groupsOf(worktreeId) // reconciles: adds snap.id to group 0
@@ -867,8 +907,9 @@ class Store {
     // A resumable agent closed by the user (not torn down in bulk) goes to the
     // recently-closed list so it can be relaunched with `claude --resume <id>`.
     const meta = this.resumeMeta.get(id)
-    if (!quiet && meta && sess) this.recordClosedAgent(sess, meta)
+    if (!quiet && meta && sess) this.recordClosedAgent(sess, meta, this.durableKeyById.get(id))
     this.resumeMeta.delete(id)
+    this.durableKeyById.delete(id)
     this.sessions.delete(id)
     this.pending.delete(id)
     this.syncBadge()
@@ -896,7 +937,8 @@ class Store {
   }
   private recordClosedAgent(
     sess: SessionSnapshot,
-    meta: { resumeId: string; baseCommand: string }
+    meta: { resumeId: string; baseCommand: string },
+    durableKey?: string
   ): void {
     const entry: ClosedAgent = {
       repoRoot: this.repoRootOf(sess.worktreeId) ?? '',
@@ -905,7 +947,10 @@ class Store {
       baseCommand: meta.baseCommand,
       title: sess.title,
       icon: sess.icon,
-      closedAt: Date.now()
+      closedAt: Date.now(),
+      // Carry the durable key so reopening reattaches to the still-live tmux
+      // process (closing a durable agent kills only the control client).
+      durableKey
     }
     // Dedupe by resume id (resuming then re-closing the same session), newest first.
     this.closedAgents = [entry, ...this.closedAgents.filter((c) => c.resumeId !== entry.resumeId)]
@@ -925,7 +970,7 @@ class Store {
       command: c.baseCommand,
       icon: c.icon ?? '★'
     }
-    void this.addSession(c.worktreePath, 'agent', agentDef, c.title, c.resumeId)
+    void this.addSession(c.worktreePath, 'agent', agentDef, c.title, c.resumeId, c.durableKey)
   }
   /** Drop a closed agent from the list without resuming it. */
   forgetClosedAgent(c: ClosedAgent): void {
@@ -1295,6 +1340,7 @@ class Store {
   wireEvents(): void {
     window.api.onSessionData(({ id, data }) => {
       this.panes.get(id)?.term.write(data)
+      this.scheduleRepaint(id)
       const line = lastNonEmptyLine(data)
       if (line) {
         this.lastLine.set(id, line)
@@ -1321,9 +1367,29 @@ class Store {
       }
       this.notify()
     })
-    window.api.onSessionExit(({ id }) => {
-      // The pty ended (shell/agent exited) — auto-close its tab/pane.
-      if (this.sessions.has(id)) this.closeSession(id)
+    window.api.onSessionExit(({ id, exitCode, signal }) => {
+      const sess = this.sessions.get(id)
+      if (!sess) return
+      // A clean exit (the user typed `exit`, or the agent finished) auto-closes
+      // the tab. A FAILED exit (non-zero code, or killed by a signal) used to
+      // close just as silently — so a mis-launched agent (e.g. its CLI isn't on
+      // the login-shell PATH, exit 127) looked like the tab "flashing away" with
+      // no clue why. Instead, keep the tab open, mark it exited, and annotate the
+      // pane so the shell's own error (printed just above) stays readable.
+      const { failed, reason: why } = classifyExit(exitCode, signal)
+      if (!failed) {
+        this.closeSession(id)
+        return
+      }
+      sess.state = 'exited'
+      const term = this.panes.get(id)?.term
+      term?.write(
+        `\r\n\x1b[1;33m⚠ Session exited\x1b[0m \x1b[2m(${why}).\x1b[0m\r\n` +
+          `\x1b[2mThe command above ended immediately. If it's "command not found", the agent CLI\r\n` +
+          `isn't on the PATH of a login shell — add it in ~/.zshenv (not ~/.zshrc). ` +
+          `Close this tab when done.\x1b[0m\r\n`
+      )
+      this.notify()
     })
     // A clicked OS notification: jump to the session that needs input.
     window.api.onNotifyJump(({ id }) => {

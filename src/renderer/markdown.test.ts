@@ -31,4 +31,18 @@ describe('renderMarkdown', () => {
     expect(out).toContain('https://example.com/x.png')
     expect(out).not.toContain('file://')
   })
+
+  it('converts a ```mermaid fence into a <pre class="mermaid"> holder with the source', () => {
+    const out = renderMarkdown('```mermaid\ngraph TD\n  A --> B\n```')
+    expect(out).toContain('<pre class="mermaid">')
+    expect(out).toContain('graph TD')
+    expect(out).toContain('A --&gt; B') // source preserved as escaped text content
+    expect(out).not.toContain('language-mermaid') // original code block replaced
+  })
+
+  it('leaves a non-mermaid code fence as a normal code block', () => {
+    const out = renderMarkdown('```ts\nconst x = 1\n```')
+    expect(out).toContain('<code')
+    expect(out).not.toContain('class="mermaid"')
+  })
 })

@@ -18,6 +18,7 @@ import { DiffPane } from './DiffPane'
 import { SearchBar } from './SearchBar'
 import { filePathsFrom } from './fileDrop'
 import { shiftEnterByte } from './termKeys'
+import { findFileLinks } from '../core/fileLinks'
 import { shellQuote } from '../core/shellQuote'
 import type { SessionSnapshot } from '../main/ipc'
 
@@ -196,6 +197,21 @@ function Pane({
         if (byte === null) return true
         if (byte) window.api.sessionInput(session.id, byte)
         return false
+      })
+      // Make Markdown/HTML paths an agent prints (e.g. `wrote docs/plan.md`)
+      // clickable → open a viewer tab. The path is resolved against the worktree
+      // in the main process, so a relative path claude prints just works.
+      term.registerLinkProvider({
+        provideLinks(y, callback) {
+          const text = term.buffer.active.getLine(y - 1)?.translateToString(true) ?? ''
+          const links = findFileLinks(text).map((m) => ({
+            text: m.path,
+            range: { start: { x: m.index + 1, y }, end: { x: m.index + m.length, y } },
+            decorations: { pointerCursor: true, underline: true },
+            activate: () => void store.openFile(session.worktreeId, m.path)
+          }))
+          callback(links.length ? links : undefined)
+        }
       })
     }
     termRef.current = term

@@ -20,6 +20,9 @@ export interface ClosedAgent {
   icon?: string
   /** Epoch ms when the agent was closed (for the "x ago" label + ordering). */
   closedAt: number
+  /** Stable per-agent durable (tmux) key, so reopening a durable agent reattaches
+   * to its still-live tmux process instead of spawning a duplicate. */
+  durableKey?: string
 }
 
 /** Cap the list so it can't grow without bound. Most-recent-first. */

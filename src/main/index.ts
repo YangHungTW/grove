@@ -29,6 +29,7 @@ import {
 import { prCreate, prStatus } from '../core/gh'
 import { shellQuote } from '../core/shellQuote'
 import { buildIdeOpenAction } from '../core/ideLaunch'
+import { resolveUserPath } from '../core/userPath'
 import { worktreeClaudeUsage } from '../core/claudeUsage'
 import { ProjectStore, type ProjectEntry, type ProjectPatch } from '../core/projectStore'
 import { LayoutStore, type SessionDescriptor } from '../core/layoutStore'
@@ -213,7 +214,9 @@ function durableAgentName(req: CreateSessionRequest): string | undefined {
   if (req.kind !== 'agent') return undefined
   const forced = process.env.CCM_TMUX === 'control'
   const on = forced || durableEnabled(settings().load().durableSessions, commandExists('tmux'))
-  return on ? tmuxSessionName(req.worktreeId) : undefined
+  // Key the session name by a stable per-agent id so multiple agents in one
+  // worktree get distinct tmux sessions (and reattach to the right one).
+  return on ? tmuxSessionName(req.worktreeId, req.durableKey) : undefined
 }
 
 /**
@@ -283,6 +286,11 @@ function openInEditor(command: string, filePath: string, cwd: string): void {
 }
 
 function createSession(req: CreateSessionRequest): SessionSnapshot {
+  // A user-supplied file path (viewer panes) may be pasted relative, with `~`, or
+  // quoted — resolve it against the worktree cwd now so fileRead/IDE-open (which
+  // run in the main process, NOT cwd'd into the worktree) get an absolute path.
+  const filePath =
+    req.filePath && req.cwd ? resolveUserPath(req.cwd, req.filePath) : req.filePath
   // Registry enforces the single-agent-per-worktree invariant (may throw).
   const record = registry.addSession({
     worktreeId: req.worktreeId,
@@ -290,7 +298,7 @@ function createSession(req: CreateSessionRequest): SessionSnapshot {
     title: req.title,
     icon: req.icon,
     cwd: req.cwd,
-    filePath: req.filePath,
+    filePath,
     viewerKind: req.viewerKind,
     // Non-pty panes (viewer/diff) are inert from the start — no 'starting' state.
     state: req.kind === 'viewer' || req.kind === 'diff' ? 'idle' : undefined
