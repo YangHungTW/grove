@@ -30,6 +30,7 @@ import { prCreate, prStatus } from '../core/gh'
 import { shellQuote } from '../core/shellQuote'
 import { buildIdeOpenAction } from '../core/ideLaunch'
 import { resolveUserPath } from '../core/userPath'
+import { parseFrameability } from '../core/openTarget'
 import { worktreeClaudeUsage } from '../core/claudeUsage'
 import { ProjectStore, type ProjectEntry, type ProjectPatch } from '../core/projectStore'
 import { LayoutStore, type SessionDescriptor } from '../core/layoutStore'
@@ -289,8 +290,12 @@ function createSession(req: CreateSessionRequest): SessionSnapshot {
   // A user-supplied file path (viewer panes) may be pasted relative, with `~`, or
   // quoted — resolve it against the worktree cwd now so fileRead/IDE-open (which
   // run in the main process, NOT cwd'd into the worktree) get an absolute path.
+  // A `web` viewer carries a URL in filePath — leave it untouched; only local
+  // file paths are resolved against the worktree.
   const filePath =
-    req.filePath && req.cwd ? resolveUserPath(req.cwd, req.filePath) : req.filePath
+    req.filePath && req.cwd && req.viewerKind !== 'web'
+      ? resolveUserPath(req.cwd, req.filePath)
+      : req.filePath
   // Registry enforces the single-agent-per-worktree invariant (may throw).
   const record = registry.addSession({
     worktreeId: req.worktreeId,
@@ -469,6 +474,23 @@ function registerIpc(): void {
   ipcMain.on(Channels.openExternal, (_e, url: string) => {
     // Only ever open web URLs — never file:// or custom schemes from the renderer.
     if (/^https?:\/\//i.test(url)) void shell.openExternal(url)
+  })
+  ipcMain.handle(Channels.urlEmbeddable, async (_e: IpcMainInvokeEvent, url: string) => {
+    if (!/^https?:\/\//i.test(url)) return false
+    try {
+      // Read just the headers (cancel the body) to learn if the site refuses
+      // framing. Optimistic on any error — prefer embedding; a genuinely broken
+      // load just shows the site's own error in the pane.
+      const res = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(5000) })
+      const ok = parseFrameability(
+        res.headers.get('x-frame-options'),
+        res.headers.get('content-security-policy')
+      )
+      await res.body?.cancel().catch(() => {})
+      return ok
+    } catch {
+      return true
+    }
   })
   ipcMain.handle(Channels.claudeUsage, (_e: IpcMainInvokeEvent, worktreePath: string) => {
     // "Today" in local time — the card shows what this worktree cost today.

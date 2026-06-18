@@ -54,6 +54,8 @@ const api: RendererApi = {
   openExternal: (url: string): void => {
     ipcRenderer.send(Channels.openExternal, url)
   },
+  urlEmbeddable: (url: string): Promise<boolean> =>
+    ipcRenderer.invoke(Channels.urlEmbeddable, url),
   worktreeRemove: (req: WorktreeRemoveRequest): Promise<void> =>
     ipcRenderer.invoke(Channels.worktreeRemove, req),
   sessionCreate: (req: CreateSessionRequest): Promise<SessionSnapshot> =>

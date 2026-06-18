@@ -9,6 +9,7 @@ import type { SessionDescriptor } from '../core/layoutStore'
 import type { ClosedAgent } from '../core/closedAgentsStore'
 import { buildAgentLaunch } from '../core/resume'
 import { classifyExit } from '../core/sessionExit'
+import { isHttpUrl } from '../core/openTarget'
 import { wrapIndex } from '../core/cycle'
 import { canOpenInIde } from '../core/ideLaunch'
 import {
@@ -827,6 +828,49 @@ class Store {
         filePath: wt.path
       })
       this.placePane(wtId, snap)
+    } catch (err) {
+      this.toast(errMsg(err))
+    }
+    this.notify()
+  }
+  /** Unified entry for the "+ file" box: an http(s) URL opens as a web pane
+   * (falling back to the browser if the site refuses framing); anything else is
+   * treated as a file path. */
+  async openPathOrUrl(worktreeId: string, input: string): Promise<void> {
+    const v = input.trim()
+    if (!v) return
+    if (isHttpUrl(v)) return this.openUrl(worktreeId, v)
+    return this.openFile(worktreeId, v)
+  }
+  /** Open a live URL in an in-app web viewer pane. If the site can't be framed
+   * (X-Frame-Options / CSP frame-ancestors), open it in the external browser. */
+  async openUrl(worktreeId: string, url: string): Promise<void> {
+    const wt = this.activeProject()?.worktrees.get(worktreeId)
+    if (!wt) return
+    const embeddable = await window.api.urlEmbeddable(url).catch(() => true)
+    if (!embeddable) {
+      window.api.openExternal(url)
+      this.toast('Opened in browser (site blocks embedding)')
+      return
+    }
+    let title = url
+    try {
+      title = new URL(url).hostname || url
+    } catch {
+      /* keep raw url as title */
+    }
+    try {
+      const snap = await window.api.sessionCreate({
+        worktreeId,
+        kind: 'viewer',
+        command: '',
+        cwd: wt.path,
+        title,
+        icon: VIEWER_ICON,
+        filePath: url,
+        viewerKind: 'web'
+      })
+      this.placePane(worktreeId, snap)
     } catch (err) {
       this.toast(errMsg(err))
     }

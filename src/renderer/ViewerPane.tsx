@@ -42,6 +42,11 @@ export function ViewerPane({
       setError('No file path')
       return
     }
+    // A web viewer loads its URL directly in the iframe — nothing to read.
+    if (session.viewerKind === 'web') {
+      setContent('')
+      return
+    }
     window.api
       .fileRead(session.filePath)
       .then((text) => {
@@ -89,6 +94,16 @@ export function ViewerPane({
         <div className="viewer-error">Could not open file: {error}</div>
       ) : content == null ? (
         <div className="viewer-loading">Loading…</div>
+      ) : session.viewerKind === 'web' ? (
+        <iframe
+          className="viewer-frame"
+          title={session.title}
+          // External page in its own (cross-)origin — isolated from Grove by the
+          // same-origin policy. Sandbox grants what a normal site needs but NOT
+          // top-navigation, so the page can't navigate Grove away.
+          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
+          src={session.filePath}
+        />
       ) : session.viewerKind === 'html' ? (
         <iframe
           className="viewer-frame"
