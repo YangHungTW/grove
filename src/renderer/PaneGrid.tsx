@@ -181,10 +181,9 @@ function Pane({
       // OSC 8 hyperlinks (claude et al. emit them). xterm's default handler pops
       // a native confirm() warning and then window.open()s — which our
       // setWindowOpenHandler(deny) + will-navigate guard block, so the link
-      // never opens. Route clicks straight through the app's URL opener (in-app
-      // viewer, browser fallback), no warning, matching the + file box.
+      // never opens. Open the URL straight in the external browser, no warning.
       linkHandler: {
-        activate: (_e, uri) => void store.openPathOrUrl(session.worktreeId, uri)
+        activate: (_e, uri) => window.api.openExternal(uri)
       }
     })
     const fit = new FitAddon()
