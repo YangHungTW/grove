@@ -177,7 +177,15 @@ function Pane({
       // prompts, so every split/zoom width change left a stale prompt copy
       // behind. TUI agents repaint themselves on SIGWINCH, so they're
       // unaffected; old scrollback simply keeps its original wrap points.
-      windowsMode: true
+      windowsMode: true,
+      // OSC 8 hyperlinks (claude et al. emit them). xterm's default handler pops
+      // a native confirm() warning and then window.open()s — which our
+      // setWindowOpenHandler(deny) + will-navigate guard block, so the link
+      // never opens. Route clicks straight through the app's URL opener (in-app
+      // viewer, browser fallback), no warning, matching the + file box.
+      linkHandler: {
+        activate: (_e, uri) => void store.openPathOrUrl(session.worktreeId, uri)
+      }
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
