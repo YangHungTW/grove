@@ -3,6 +3,7 @@ import { store } from './store'
 import { renderMarkdown } from './markdown'
 import { renderMermaidIn } from './mermaidRender'
 import type { SessionSnapshot } from '../main/ipc'
+import { htmlViewerSrc } from '../core/htmlViewerUrl'
 
 /** The directory portion of an absolute file path (for resolving relative images). */
 function dirOf(p?: string): string | undefined {
@@ -108,10 +109,13 @@ export function ViewerPane({
         <iframe
           className="viewer-frame"
           title={session.title}
-          // Sandbox WITHOUT allow-same-origin: scripts may run but the frame sits
-          // in an opaque origin, so it cannot touch window.api or the parent DOM.
+          // Served over grove-html:// (NOT srcdoc) so the document has its own
+          // origin and does not inherit the renderer CSP — that inheritance is
+          // what was silently blocking the report's inline <script> (TOC scroll
+          // etc.). Sandbox WITHOUT allow-same-origin still puts it in an opaque
+          // origin, so it cannot touch window.api or the parent DOM.
           sandbox="allow-scripts"
-          srcDoc={content}
+          src={htmlViewerSrc(session.filePath ?? '')}
         />
       ) : (
         <div

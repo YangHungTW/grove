@@ -284,7 +284,15 @@ try {
   const mdFile = join(repoA, 'VIEWME.md')
   const htmlFile = join(repoA, 'VIEWME.html')
   writeFileSync(mdFile, '# HelloViewer\n\nsome **markdown** body\n')
-  writeFileSync(htmlFile, '<!doctype html><html><body><p>HTMLVIEW</p></body></html>')
+  // Inline <script> appends a marker node. It only runs if the viewer document
+  // escapes the renderer's `script-src 'self'` CSP — which is exactly what
+  // serving it over grove-html:// (vs <iframe srcdoc>) buys us.
+  writeFileSync(
+    htmlFile,
+    '<!doctype html><html><body><p>HTMLVIEW</p>' +
+      '<script>document.body.insertAdjacentHTML("beforeend",' +
+      '"<p id=\\"js-ran\\">JSRAN</p>")</script></body></html>'
+  )
 
   const openFileViaDialog = async (path) => {
     await win.getByRole('button', { name: 'Open file' }).click()
@@ -316,6 +324,13 @@ try {
   const htmlIframe = await win.locator('.pane[data-kind="viewer"] iframe').count()
   assert.ok(viewerPanes >= 2, `viewer: expected >= 2 viewer panes, got ${viewerPanes}`)
   assert.ok(htmlIframe >= 1, `viewer: expected an <iframe> in the html pane, got ${htmlIframe}`)
+  // The inline <script> must have run (proving the report escapes the renderer
+  // CSP). Reach into the sandboxed, opaque-origin frame via Playwright's frame
+  // tree — the parent DOM can't, but the CDP-driven frame locator can.
+  const htmlFrame = win.frameLocator('.pane[data-kind="viewer"] iframe.viewer-frame')
+  await htmlFrame.locator('#js-ran').waitFor({ timeout: 10000 })
+  const htmlScriptRan = ((await htmlFrame.locator('#js-ran').textContent()) || '').includes('JSRAN')
+  assert.ok(htmlScriptRan, 'html viewer: inline <script> did not execute')
   const fileViewer = true
 
   // 7d) WORKTREE DIFF / REVIEW — make a committed + uncommitted change in the
@@ -417,7 +432,7 @@ try {
       `sidebarResize=${sidebarResize} zoom=${zoomToggle} termSearch=${termSearch} ` +
       `worktreeCreated=true agentLaunched=true multiAgent=${agentRows === 2} ` +
       `agentAfterSwitch=${agentAfterSwitch} newAgentShortcut=${newAgentShortcut} kbdNav=${kbdNav} fileViewer=${fileViewer} ` +
-      `viewerPanes=${viewerPanes} htmlIframe=${htmlIframe} diffReview=${diffReview} ` +
+      `viewerPanes=${viewerPanes} htmlIframe=${htmlIframe} htmlScriptRan=${htmlScriptRan} diffReview=${diffReview} ` +
       `diffAdd=${addLines} diffDel=${delLines} splitDiff=${splitDiff} ideOpen=${ideOpen} finish=${finishFlow} restored=${restored}`
   )
 } catch (err) {

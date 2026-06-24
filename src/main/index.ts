@@ -4,6 +4,7 @@ import {
   Notification,
   dialog,
   ipcMain,
+  protocol,
   shell,
   type IpcMainInvokeEvent
 } from 'electron'
@@ -31,6 +32,8 @@ import { shellQuote } from '../core/shellQuote'
 import { buildIdeOpenAction } from '../core/ideLaunch'
 import { resolveUserPath } from '../core/userPath'
 import { parseFrameability } from '../core/openTarget'
+import { viewerMime } from '../core/viewerMime'
+import { HTML_VIEWER_SCHEME, htmlViewerPath } from '../core/htmlViewerUrl'
 import { worktreeClaudeUsage } from '../core/claudeUsage'
 import { ProjectStore, type ProjectEntry, type ProjectPatch } from '../core/projectStore'
 import { LayoutStore, type SessionDescriptor } from '../core/layoutStore'
@@ -51,6 +54,18 @@ import {
   type WorktreeRemoveRequest
 } from './ipc'
 import type { Session } from '../core/types'
+
+// Custom scheme for the in-app HTML viewer. An agent-generated report is served
+// from here (not via <iframe srcdoc>) so it lives in its OWN origin: a srcdoc /
+// data: / blob: frame INHERITS the renderer's CSP (`script-src 'self'`), which
+// silently kills the report's inline <script> (TOC scroll, etc.). A document
+// fetched from a real registered scheme carries no inherited CSP, so its
+// scripts run. The frame is still sandboxed without allow-same-origin, so it
+// sits in an opaque origin and can't reach window.api or the parent DOM.
+// (Scheme + URL shape live in core/htmlViewerUrl, shared with the renderer.)
+protocol.registerSchemesAsPrivileged([
+  { scheme: HTML_VIEWER_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } }
+])
 
 /** Main owns the single source of truth: the registry + live pty processes. */
 const registry = new SessionRegistry()
@@ -684,8 +699,33 @@ function createWindow(): void {
   }
 }
 
+/**
+ * Serve a local file to the HTML viewer frame. The URL pathname IS the file's
+ * absolute path (`grove-html://open/Users/me/report.html`), so relative assets
+ * the report references (`./style.css`, `img/x.png`) resolve against the same
+ * scheme and load too. Same 5 MB ceiling as the fileRead IPC.
+ */
+async function serveHtmlViewer(request: Request): Promise<Response> {
+  const MAX = 5 * 1024 * 1024
+  let filePath: string
+  try {
+    filePath = htmlViewerPath(request.url)
+  } catch {
+    return new Response('Bad request', { status: 400 })
+  }
+  try {
+    const { size } = await statAsync(filePath)
+    if (size > MAX) return new Response('File too large to preview', { status: 413 })
+    const buf = await readFileAsync(filePath)
+    return new Response(buf, { headers: { 'content-type': viewerMime(filePath) } })
+  } catch {
+    return new Response('Not found', { status: 404 })
+  }
+}
+
 app.whenReady().then(() => {
   migrateUserData()
+  protocol.handle(HTML_VIEWER_SCHEME, serveHtmlViewer)
   registerIpc()
   createWindow()
   app.on('activate', () => {
