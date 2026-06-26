@@ -1,6 +1,6 @@
 {"ts":"2026-06-09T14:42:55Z","dir":"src/renderer/assets","signals":["edit-touch","recent-activity","depth>=2","not-in-ancestor"],"score":0.667,"status":"pending"}
-{"ts":"2026-06-17T08:16:26Z","dir":"e2e","signals":["edit-touch","recent-activity"],"score":0.500,"status":"pending"}
-{"ts":"2026-06-18T13:33:16Z","dir":"src/core","signals":["size>=4","edit-touch","recent-activity","bounded-context-name","depth>=2"],"score":0.889,"status":"pending"}
 {"ts":"2026-06-18T13:34:04Z","dir":"src/preload","signals":["edit-touch","recent-activity","depth>=2"],"score":0.556,"status":"pending"}
-{"ts":"2026-06-18T13:34:43Z","dir":"src/main","signals":["edit-touch","recent-activity","depth>=2"],"score":0.556,"status":"pending"}
-{"ts":"2026-06-18T13:36:18Z","dir":"src/renderer","signals":["size>=4","edit-touch","recent-activity","depth>=2"],"score":0.778,"status":"pending"}
+{"ts":"2026-06-24T02:08:40Z","dir":"e2e","signals":["edit-touch","recent-activity"],"score":0.500,"status":"pending"}
+{"ts":"2026-06-26T03:22:06Z","dir":"src/main","signals":["edit-touch","recent-activity","depth>=2"],"score":0.556,"status":"pending"}
+{"ts":"2026-06-26T03:22:26Z","dir":"src/renderer","signals":["size>=4","edit-touch","recent-activity","depth>=2"],"score":0.778,"status":"pending"}
+{"ts":"2026-06-26T03:22:47Z","dir":"src/core","signals":["size>=4","edit-touch","recent-activity","bounded-context-name","depth>=2"],"score":0.889,"status":"pending"}

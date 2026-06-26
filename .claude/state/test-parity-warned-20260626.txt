@@ -1,0 +1,3 @@
+src/core/viewerError.ts
+src/main/index.ts
+src/renderer/PaneGrid.tsx
