@@ -33,6 +33,7 @@ import { buildIdeOpenAction } from '../core/ideLaunch'
 import { resolveUserPath } from '../core/userPath'
 import { parseFrameability } from '../core/openTarget'
 import { viewerMime } from '../core/viewerMime'
+import { describeViewerReadError } from '../core/viewerError'
 import { HTML_VIEWER_SCHEME, htmlViewerPath } from '../core/htmlViewerUrl'
 import { worktreeClaudeUsage } from '../core/claudeUsage'
 import { ProjectStore, type ProjectEntry, type ProjectPatch } from '../core/projectStore'
@@ -553,11 +554,23 @@ function registerIpc(): void {
   )
   ipcMain.handle(Channels.fileRead, async (_e: IpcMainInvokeEvent, filePath: string) => {
     const MAX = 5 * 1024 * 1024 // 5 MB — viewer panes are for human-readable files
-    const { size } = await statAsync(filePath)
+    let size: number
+    try {
+      ;({ size } = await statAsync(filePath))
+    } catch (err) {
+      // Surface a clear, path-naming message (the viewer pane shows err.message
+      // verbatim) instead of a bare ENOENT — a clicked link that resolved to the
+      // wrong place is the most common failure, and the path is the answer.
+      throw new Error(describeViewerReadError(err, filePath))
+    }
     if (size > MAX) {
       throw new Error(`File too large to preview (${(size / 1048576).toFixed(1)} MB; limit 5 MB)`)
     }
-    return readFileAsync(filePath, 'utf8')
+    try {
+      return await readFileAsync(filePath, 'utf8')
+    } catch (err) {
+      throw new Error(describeViewerReadError(err, filePath))
+    }
   })
   ipcMain.handle(
     Channels.ideOpen,
@@ -707,19 +720,32 @@ function createWindow(): void {
  */
 async function serveHtmlViewer(request: Request): Promise<Response> {
   const MAX = 5 * 1024 * 1024
+  // A plain-text error body renders as a blank frame; a tiny HTML page makes the
+  // failure visible in the viewer pane (mirrors the markdown viewer's red error).
+  const errorPage = (msg: string, status: number): Response =>
+    new Response(
+      `<!doctype html><meta charset="utf-8"><body style="font:14px system-ui;color:#b00;padding:16px">Could not open file: ${msg
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')}</body>`,
+      { status, headers: { 'content-type': 'text/html; charset=utf-8' } }
+    )
   let filePath: string
   try {
     filePath = htmlViewerPath(request.url)
   } catch {
-    return new Response('Bad request', { status: 400 })
+    return errorPage('bad request', 400)
   }
   try {
     const { size } = await statAsync(filePath)
-    if (size > MAX) return new Response('File too large to preview', { status: 413 })
+    if (size > MAX)
+      return errorPage(
+        `File too large to preview (${(size / 1048576).toFixed(1)} MB; limit 5 MB)`,
+        413
+      )
     const buf = await readFileAsync(filePath)
     return new Response(buf, { headers: { 'content-type': viewerMime(filePath) } })
-  } catch {
-    return new Response('Not found', { status: 404 })
+  } catch (err) {
+    return errorPage(describeViewerReadError(err, filePath), 404)
   }
 }
 

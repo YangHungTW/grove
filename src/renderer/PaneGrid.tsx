@@ -19,6 +19,7 @@ import { SearchBar } from './SearchBar'
 import { filePathsFrom } from './fileDrop'
 import { shiftEnterByte } from './termKeys'
 import { findFileLinks } from '../core/fileLinks'
+import { isHttpUrl } from '../core/openTarget'
 import { shellQuote } from '../core/shellQuote'
 import type { SessionSnapshot } from '../main/ipc'
 
@@ -181,9 +182,15 @@ function Pane({
       // OSC 8 hyperlinks (claude et al. emit them). xterm's default handler pops
       // a native confirm() warning and then window.open()s — which our
       // setWindowOpenHandler(deny) + will-navigate guard block, so the link
-      // never opens. Open the URL straight in the external browser, no warning.
+      // never opens. Route them ourselves, no warning: a web link belongs in the
+      // real browser; a file link (agents emit `file://…/report.md` for files
+      // they wrote) belongs in the in-app viewer — openExternal silently drops
+      // non-http schemes, so sending file:// there made the click a dead end.
       linkHandler: {
-        activate: (_e, uri) => window.api.openExternal(uri)
+        activate: (_e, uri) =>
+          isHttpUrl(uri)
+            ? window.api.openExternal(uri)
+            : void store.openPathOrUrl(session.worktreeId, uri)
       }
     })
     const fit = new FitAddon()
