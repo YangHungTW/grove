@@ -6,6 +6,7 @@ import type { WorktreeUsage } from '../core/claudeUsage'
 import type { PrInfo } from '../core/gh'
 import type { SessionSnapshot } from '../main/ipc'
 import type { SessionDescriptor } from '../core/layoutStore'
+import { dedupeByDurableKey } from '../core/layoutDedupe'
 import type { ClosedAgent } from '../core/closedAgentsStore'
 import { buildAgentLaunch } from '../core/resume'
 import { classifyExit } from '../core/sessionExit'
@@ -89,7 +90,7 @@ export function searchCoversScrollback(bufferType?: string): boolean {
  * Terminal instances are created by the React <Pane> but registered here so the
  * data stream and fit/resize can reach them imperatively.
  */
-class Store {
+export class Store {
   projects = new Map<string, ProjectView>()
   sessions = new Map<string, SessionSnapshot>()
   panes = new Map<string, PaneRef>()
@@ -366,7 +367,9 @@ class Store {
     // Keep saved descriptors for worktrees not yet restored this run; replace the
     // rest with their live sessions.
     const keep = this.savedLayout.filter((d) => !this.restoredWorktrees.has(d.worktreePath))
-    const merged = [...keep, ...this.currentDescriptors()]
+    // De-dupe by durableKey so a layout already corrupted by a past double-spawn
+    // (two descriptors sharing one durable/tmux session) heals as it re-saves.
+    const merged = dedupeByDurableKey([...keep, ...this.currentDescriptors()])
     this.savedLayout = merged
     window.api.layoutSave(merged)
   }
@@ -376,7 +379,10 @@ class Store {
   private async restoreWorktree(wtId: string): Promise<void> {
     if (this.restoredWorktrees.has(wtId)) return
     this.restoredWorktrees.add(wtId)
-    const toRestore = this.savedLayout.filter((d) => d.worktreePath === wtId)
+    // De-dupe defensively: a layout corrupted by a past double-spawn may hold two
+    // descriptors sharing one durableKey; respawning both would re-collide them
+    // onto a single `tmux new-session -A`. Restore only the first per durable key.
+    const toRestore = dedupeByDurableKey(this.savedLayout.filter((d) => d.worktreePath === wtId))
     if (toRestore.length === 0) return
     this.restoring = true
     for (const d of toRestore) {
@@ -633,6 +639,13 @@ class Store {
       })
       this.activeProjectId = project.repoRoot
       this.activeWorktreeId = info.path
+      // A brand-new worktree has nothing to restore, and its sessions are added
+      // live from here on. Mark it restored so a later selectWorktree() doesn't
+      // re-run restoreWorktree() over the descriptors persistLayout() writes for
+      // those live sessions — which would spawn every agent a SECOND time (and,
+      // under durable/tmux, the duplicate's `new-session -A` reattaches to the
+      // live tmux session, collapsing distinct panes onto one terminal).
+      this.restoredWorktrees.add(info.path)
       this.refreshWorktreeMeta(info.path)
       this.syncFocus()
     } catch (err) {
