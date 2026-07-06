@@ -51,7 +51,8 @@ export const Channels = {
   sessionData: 'session:data',
   sessionStateChange: 'session:state-change',
   sessionExit: 'session:exit',
-  notifyJump: 'notify:jump'
+  notifyJump: 'notify:jump',
+  hookFailed: 'hook:failed'
 } as const
 
 /** Serializable view of a session sent across the IPC boundary. */
@@ -116,6 +117,16 @@ export interface SessionExitEvent {
   id: string
   exitCode: number
   signal?: number
+}
+export interface HookFailedEvent {
+  /** Which per-project hook failed. */
+  kind: 'create' | 'remove'
+  /** The configured command (post-placeholder-expansion) that was run. */
+  command: string
+  /** Exit code (null if the shell could not be spawned at all). */
+  code: number | null
+  /** Combined stdout+stderr tail, for the toast/log. */
+  output: string
 }
 
 export interface WorktreeRemoveRequest {
@@ -204,4 +215,6 @@ export interface RendererApi {
   onSessionExit(cb: (e: SessionExitEvent) => void): () => void
   /** A clicked OS notification asks the renderer to focus that session. */
   onNotifyJump(cb: (e: { id: string }) => void): () => void
+  /** A per-project create/remove hook exited non-zero (or failed to spawn). */
+  onHookFailed(cb: (e: HookFailedEvent) => void): () => void
 }

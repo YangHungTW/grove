@@ -49,6 +49,7 @@ import type { CreateWorktreeOptions } from '../core/worktree'
 import {
   Channels,
   type CreateSessionRequest,
+  type HookFailedEvent,
   type IdeOpenRequest,
   type RendererApi,
   type SessionSnapshot,
@@ -157,26 +158,51 @@ function resolveWorktreePath(repoRoot: string, branch: string): string {
 }
 
 /**
- * Run a user hook (fire-and-forget) in a login shell. The command can be any
- * shell command, a script path, or an agent invocation (e.g. `agy -p "/setup"`).
- * {worktree}/{branch}/{repo} placeholders are expanded; the same values are also
- * exposed as $CCM_WORKTREE_PATH / $CCM_BRANCH / $CCM_REPO.
+ * Run a user hook (fire-and-forget) in an interactive login shell. The command
+ * can be any shell command, a script path, or an agent invocation (e.g.
+ * `agy -p "/setup"`). {worktree}/{branch}/{repo} placeholders are expanded; the
+ * same values are also exposed as $CCM_WORKTREE_PATH / $CCM_BRANCH / $CCM_REPO.
+ *
+ * The shell is `$SHELL -ilc` (interactive + login), NOT `-lc`: version managers
+ * like asdf/nvm/rbenv put their shims on PATH from `.zshrc`, which a login-only
+ * non-interactive shell never sources. Without `-i`, a hook such as `npm ci`
+ * fails with "node: command not found" — the exact reason a hook silently does
+ * nothing. (commandExists() relies on the same distinction; see its comment.)
  *
  * Substituted values are SHELL-QUOTED: branch/worktree/repo can contain shell
  * metacharacters (git allows `;` `|` `$()` backticks in branch names), so an
  * unquoted `{branch}` would be a command-injection vector when a hook runs.
+ *
+ * Failures are surfaced to the renderer (toast) instead of being swallowed — a
+ * silently-failing hook is indistinguishable from one that never ran.
  */
-function runHook(cmd: string, cwd: string, extraEnv: Record<string, string>): void {
+function runHook(
+  kind: HookFailedEvent['kind'],
+  cmd: string,
+  cwd: string,
+  extraEnv: Record<string, string>
+): void {
   if (!cmd || !cmd.trim()) return
   const expanded = cmd
     .replace(/\{worktree\}/g, shellQuote(extraEnv.CCM_WORKTREE_PATH ?? ''))
     .replace(/\{branch\}/g, shellQuote(extraEnv.CCM_BRANCH ?? ''))
     .replace(/\{repo\}/g, shellQuote(extraEnv.CCM_REPO ?? ''))
   const shell = process.env.SHELL || '/bin/zsh'
+  const fail = (code: number | null, output: string): void =>
+    send(Channels.hookFailed, { kind, command: cmd, code, output: output.trim().slice(-4000) })
   try {
-    execFile(shell, ['-lc', expanded], { cwd, env: { ...process.env, ...extraEnv } }, () => {})
-  } catch {
-    /* ignore hook errors */
+    execFile(
+      shell,
+      ['-ilc', expanded],
+      { cwd, env: { ...process.env, ...extraEnv }, maxBuffer: 8 * 1024 * 1024 },
+      (err, stdout, stderr) => {
+        // An interactive shell prints prompt/plugin noise to stderr even on
+        // success; only report when the hook itself exited non-zero.
+        if (err) fail((err as { code?: number }).code ?? null, `${stdout}${stderr}`)
+      }
+    )
+  } catch (err) {
+    fail(null, err instanceof Error ? err.message : String(err))
   }
 }
 
@@ -449,7 +475,7 @@ function registerIpc(): void {
     async (_e: IpcMainInvokeEvent, repoRoot: string, opts: CreateWorktreeOptions) => {
       const path = opts.path ?? resolveWorktreePath(repoRoot, opts.branch)
       const info = await createWorktree(repoRoot, { ...opts, path })
-      runHook(store().get(repoRoot)?.hookCreate ?? '', info.path, {
+      runHook('create', store().get(repoRoot)?.hookCreate ?? '', info.path, {
         CCM_WORKTREE_PATH: info.path,
         CCM_BRANCH: info.branch,
         CCM_REPO: repoRoot
@@ -517,7 +543,7 @@ function registerIpc(): void {
   ipcMain.handle(
     Channels.worktreeRemove,
     async (_e: IpcMainInvokeEvent, req: WorktreeRemoveRequest) => {
-      runHook(store().get(req.repoRoot)?.hookRemove ?? '', req.path, {
+      runHook('remove', store().get(req.repoRoot)?.hookRemove ?? '', req.path, {
         CCM_WORKTREE_PATH: req.path,
         CCM_REPO: req.repoRoot
       })

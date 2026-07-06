@@ -7,6 +7,7 @@ import type { PrInfo } from '../core/gh'
 import type { SessionSnapshot } from '../main/ipc'
 import type { SessionDescriptor } from '../core/layoutStore'
 import { dedupeByDurableKey } from '../core/layoutDedupe'
+import { hookFailedMessage } from '../core/hookMessage'
 import type { ClosedAgent } from '../core/closedAgentsStore'
 import { buildAgentLaunch } from '../core/resume'
 import { classifyExit } from '../core/sessionExit'
@@ -1457,6 +1458,7 @@ export class Store {
         this.focusSession(id)
       }
     })
+    window.api.onHookFailed((e) => this.toast(hookFailedMessage(e)))
   }
 
   /** Reflect the pending (needs-attention) count on the Dock/taskbar badge. */

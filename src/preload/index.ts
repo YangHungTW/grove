@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'ele
 import {
   Channels,
   type CreateSessionRequest,
+  type HookFailedEvent,
   type RendererApi,
   type SessionDataEvent,
   type SessionExitEvent,
@@ -94,7 +95,8 @@ const api: RendererApi = {
   onSessionState: (cb: (e: SessionStateEvent) => void) =>
     subscribe(Channels.sessionStateChange, cb),
   onSessionExit: (cb: (e: SessionExitEvent) => void) => subscribe(Channels.sessionExit, cb),
-  onNotifyJump: (cb: (e: { id: string }) => void) => subscribe(Channels.notifyJump, cb)
+  onNotifyJump: (cb: (e: { id: string }) => void) => subscribe(Channels.notifyJump, cb),
+  onHookFailed: (cb: (e: HookFailedEvent) => void) => subscribe(Channels.hookFailed, cb)
 }
 
 contextBridge.exposeInMainWorld('api', api)

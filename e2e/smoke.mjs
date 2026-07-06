@@ -34,6 +34,8 @@ const storeFile = join(storeDir, 'projects.json')
 const settingsFile = join(storeDir, 'settings.json')
 const wtPath = `${repoA}-wt-feat`
 const marker = join(repoA, `marker_${Date.now()}`)
+// Per-project create-worktree hook writes this marker — proves the hook runs.
+const hookMarker = join(storeDir, `hook_${Date.now()}`)
 const agentMarker = join(repoA, `agent_${Date.now()}`)
 const ideMarker = join(repoA, `ide_${Date.now()}`)
 const layoutFile = join(storeDir, 'layout.json')
@@ -200,6 +202,14 @@ try {
   }
   assert.ok(roundTrip, 'round-trip: marker file should appear under project A')
 
+  // 5a) SET A CREATE-WORKTREE HOOK via the project-settings (gear) dialog. It
+  // touches a marker file, so we can prove the hook actually fires on create.
+  await groupA.getByTitle('Project settings (hooks)').click()
+  await win.waitForSelector('.dialog-field input', { timeout: 5000 })
+  await win.locator('.dialog-field input').first().fill(`touch '${hookMarker}'`)
+  await win.getByRole('button', { name: 'Save' }).click()
+  await win.waitForTimeout(200)
+
   // 5) PER-PROJECT WORKTREE — create a real git worktree under A via the dialog.
   await groupA.locator('.proj-btn').first().click() // "+" new worktree
   await win.waitForSelector('.dialog-field input', { timeout: 5000 })
@@ -210,6 +220,15 @@ try {
     { timeout: 10000 }
   )
   assert.ok(existsSync(join(wtPath, '.git')), `worktree should exist at ${wtPath}`)
+
+  // The create hook runs fire-and-forget in a shell after the worktree exists;
+  // poll briefly for its marker.
+  let hookRan = false
+  for (let i = 0; i < 50 && !hookRan; i++) {
+    if (existsSync(hookMarker)) hookRan = true
+    else await win.waitForTimeout(100)
+  }
+  assert.ok(hookRan, 'create-worktree hook should run and write its marker')
 
   // Re-select A's main worktree card.
   await groupA.locator('.card', { hasText: 'main' }).first().click()
