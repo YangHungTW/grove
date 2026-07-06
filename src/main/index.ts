@@ -277,12 +277,16 @@ function launchSpecFor(req: CreateSessionRequest): {
 } {
   const shell = process.env.SHELL || '/bin/zsh'
   if (req.kind === 'agent') {
-    // Login NON-interactive shell: gets PATH from the profile but does NOT load
-    // .zshrc/p10k, so the agent pane shows the CLI directly with no shell prompt.
+    // Interactive login shell (`-ilc`): sources .zshrc, so the agent runs with the
+    // SAME PATH + aliases + version-manager shims as the user's real terminal. This
+    // matters when `claude` is a shell alias (e.g. `claude --plugin-dir …`) or lives
+    // on a `.zshrc`-only PATH — a non-interactive `-lc` shell would launch a bare/
+    // different binary and silently drop the user's plugins/skills. `-c <cmd>` means
+    // no interactive prompt renders, so the pane still shows the CLI directly.
     // CCM_AGENT_CMD (a trusted env override, used by tests) takes precedence.
     const override = process.env.CCM_AGENT_CMD
-    if (override) return { command: shell, args: ['-lc', override] }
-    // Defense-in-depth: the command runs via `$SHELL -lc`, so a compromised
+    if (override) return { command: shell, args: ['-ilc', override] }
+    // Defense-in-depth: the command runs via `$SHELL -ilc`, so a compromised
     // renderer could otherwise request an arbitrary command. The legitimate
     // value (built by buildAgentLaunch) always begins with a CONFIGURED agent
     // command, so require that prefix before handing it to the shell.
@@ -303,7 +307,7 @@ function launchSpecFor(req: CreateSessionRequest): {
     if (name) {
       return buildTmuxControlLaunch(shell, name, req.cols ?? 120, req.rows ?? 40, agentCmd)
     }
-    return { command: shell, args: ['-lc', agentCmd] }
+    return { command: shell, args: ['-ilc', agentCmd] }
   }
   // A shell pane is an interactive login shell (p10k prompt expected). An optional
   // bootstrap (e.g. `vim <file>` from open-in-IDE) is typed in after the pty sizes.

@@ -44,8 +44,11 @@ function shSingleQuote(s: string): string {
  * the host renders pane bytes natively while the agent process lives on in a
  * persistent tmux session. `new-session -A` is create-or-reattach; `-x/-y` give
  * it a sane initial size (the control client is then sized via `refresh-client`).
- * Runs through a login shell so PATH resolves `tmux`; `exec` makes the pty's
- * process BE tmux so its exit cleanly signals the session end.
+ * The OUTER shell is a login shell (`-lc`) so PATH resolves `tmux`; `exec` makes
+ * the pty's process BE tmux so its exit cleanly signals the session end. The INNER
+ * shell that runs the agent is INTERACTIVE (`-ilc`) so it sources .zshrc and the
+ * agent inherits the user's real PATH + aliases (e.g. a `claude` alias that adds
+ * `--plugin-dir`) — matching the non-durable path and the user's own terminal.
  */
 export function buildTmuxControlLaunch(
   shell: string,
@@ -56,6 +59,6 @@ export function buildTmuxControlLaunch(
 ): { command: string; args: string[] } {
   const tmuxCmd =
     `exec tmux -CC new-session -A -s ${name} -x ${cols} -y ${rows} ` +
-    `${shell} -lc ${shSingleQuote(agentCmd)}`
+    `${shell} -ilc ${shSingleQuote(agentCmd)}`
   return { command: shell, args: ['-lc', tmuxCmd] }
 }

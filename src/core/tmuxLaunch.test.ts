@@ -50,16 +50,19 @@ describe('buildTmuxControlLaunch', () => {
   it('runs tmux -CC create-or-attach through a login shell with the sized session', () => {
     const { command, args } = buildTmuxControlLaunch('/bin/zsh', 'grove_x', 120, 40, 'claude')
     expect(command).toBe('/bin/zsh')
+    // Outer shell is a login shell (finds tmux on PATH)...
     expect(args[0]).toBe('-lc')
     expect(args[1]).toContain('tmux -CC new-session -A -s grove_x')
     expect(args[1]).toContain('-x 120 -y 40')
-    expect(args[1]).toContain("/bin/zsh -lc 'claude'")
+    // ...but the INNER shell that runs the agent is interactive (-ilc) so it
+    // sources .zshrc and inherits the user's PATH + aliases.
+    expect(args[1]).toContain("/bin/zsh -ilc 'claude'")
     expect(args[1].startsWith('exec ')).toBe(true)
   })
 
   it('single-quotes the agent command and escapes embedded quotes', () => {
     const { args } = buildTmuxControlLaunch('/bin/zsh', 'g', 80, 24, "claude --resume 'a b'")
     // The embedded single quotes become the '\'' escape sequence.
-    expect(args[1]).toContain("-lc 'claude --resume '\\''a b'\\'''")
+    expect(args[1]).toContain("-ilc 'claude --resume '\\''a b'\\'''")
   })
 })
