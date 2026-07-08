@@ -14,6 +14,7 @@ import { classifyExit } from '../core/sessionExit'
 import { isHttpUrl } from '../core/openTarget'
 import { wrapIndex } from '../core/cycle'
 import { canOpenInIde } from '../core/ideLaunch'
+import { bufferLastLine, lastNonEmptyLine } from './lastLine'
 import {
   DEFAULT_SETTINGS,
   SHELL_ICON,
@@ -63,16 +64,6 @@ interface PaneRef {
   term: Terminal
   fit: FitAddon
   search?: SearchAddon
-}
-
-const ANSI_RE = /\[[0-9;?]*[A-Za-z]|\][^]*|[()][AB0]/g
-function lastNonEmptyLine(data: string): string | null {
-  const lines = data
-    .replace(ANSI_RE, '')
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean)
-  return lines.length ? lines[lines.length - 1] : null
 }
 
 /** Grove's terminal search (xterm SearchAddon) traverses the full buffer
@@ -271,6 +262,19 @@ export class Store {
       }
       this.refreshPanes.clear()
     }, 80)
+  }
+  /** Record a session's latest bottom line for its sidebar card, coalescing the
+   * re-render to ~one notify per burst (the line changes far faster than the eye
+   * needs). Ignores empty lines so a transient blank frame doesn't clear it. */
+  private setLastLine(id: string, line: string | null): void {
+    if (!line) return
+    this.lastLine.set(id, line)
+    if (this.lineRefreshScheduled) return
+    this.lineRefreshScheduled = true
+    setTimeout(() => {
+      this.lineRefreshScheduled = false
+      this.notify()
+    }, 600)
   }
   unregisterPane(id: string): void {
     this.panes.get(id)?.term.dispose()
@@ -1397,18 +1401,18 @@ export class Store {
   // --- bootstrap ---------------------------------------------------------
   wireEvents(): void {
     window.api.onSessionData(({ id, data }) => {
-      this.panes.get(id)?.term.write(data)
-      this.scheduleRepaint(id)
-      const line = lastNonEmptyLine(data)
-      if (line) {
-        this.lastLine.set(id, line)
-        if (!this.lineRefreshScheduled) {
-          this.lineRefreshScheduled = true
-          setTimeout(() => {
-            this.lineRefreshScheduled = false
-            this.notify()
-          }, 600)
-        }
+      const term = this.panes.get(id)?.term
+      if (term) {
+        // Read the card's status/cost line from xterm's resolved screen (in the
+        // write callback, once the chunk has been parsed) rather than the raw
+        // byte stream: an agent repaints that line IN PLACE, so the raw stream
+        // interleaves stale + fresh frames and a regex mangles it (e.g. a prior
+        // "$3,232,025" and a fresh "$323.35" collapse into "3232025").
+        term.write(data, () => this.setLastLine(id, bufferLastLine(term)))
+        this.scheduleRepaint(id)
+      } else {
+        // No live pane (a background, non-selected worktree): best-effort parse.
+        this.setLastLine(id, lastNonEmptyLine(data))
       }
     })
     window.api.onSessionState(({ id, state }) => {
