@@ -1,0 +1,4 @@
+src/main/ipc.ts
+src/preload/index.ts
+src/main/index.ts
+src/renderer/store.ts

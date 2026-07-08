@@ -1,0 +1,2 @@
+src/renderer/lastLine.ts
+src/renderer/store.ts

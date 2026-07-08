@@ -1,0 +1,6 @@
+src/renderer/store.ts
+src/core/layoutStore.ts
+src/core/layoutDedupe.ts
+src/core/hookMessage.ts
+src/main/index.ts
+src/core/tmuxLaunch.ts
