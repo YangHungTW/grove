@@ -2,7 +2,7 @@ import type { MouseEvent } from 'react'
 import { useStore } from './useStore'
 import { store, type ProjectView, type WorktreeView } from './store'
 import { formatTokens, formatUsd, shortModel } from './usageFormat'
-import { RepoIcon, PlusIcon, GearIcon, XIcon, DiffIcon, MergeIcon, AnchorIcon } from './Icons'
+import { RepoIcon, PlusIcon, GearIcon, XIcon, DiffIcon, MergeIcon, AnchorIcon, BoltIcon } from './Icons'
 import type { PrInfo } from '../core/gh'
 import groveLogo from './assets/grove-logo.svg'
 
@@ -33,6 +33,19 @@ function ProjectGroup({ project }: { project: ProjectView }): JSX.Element {
         <RepoIcon className="repo-icon" />
         <span className="project-name">{project.name}</span>
         <span className="project-count">{project.worktrees.size}</span>
+        <button
+          className="proj-btn"
+          title="New task — worktree + agent with a prompt, in one step"
+          onClick={() =>
+            store.openDialog({
+              kind: 'newTask',
+              repoRoot: project.repoRoot,
+              projectName: project.name
+            })
+          }
+        >
+          <BoltIcon size={14} />
+        </button>
         <button
           className="proj-btn"
           title="New worktree"

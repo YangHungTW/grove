@@ -33,6 +33,9 @@ const storeDir = mkdtempSync(join(tmpdir(), 'ccm-store-'))
 const storeFile = join(storeDir, 'projects.json')
 const settingsFile = join(storeDir, 'settings.json')
 const wtPath = `${repoA}-wt-feat`
+// Created by the "New task" one-shot flow (branch typed without a slash so the
+// worktree folder stays flat and cleanup can remove it).
+const taskWtPath = `${repoA}-wt-taskwt`
 const marker = join(repoA, `marker_${Date.now()}`)
 // Per-project create-worktree hook writes this marker — proves the hook runs.
 const hookMarker = join(storeDir, `hook_${Date.now()}`)
@@ -211,7 +214,7 @@ try {
   await win.waitForTimeout(200)
 
   // 5) PER-PROJECT WORKTREE — create a real git worktree under A via the dialog.
-  await groupA.locator('.proj-btn').first().click() // "+" new worktree
+  await groupA.getByTitle('New worktree').click()
   await win.waitForSelector('.dialog-field input', { timeout: 5000 })
   await win.locator('.dialog-field input').fill('feat')
   await win.getByRole('button', { name: 'Create worktree' }).click()
@@ -297,6 +300,38 @@ try {
     { timeout: 5000 }
   )
   const newAgentShortcut = true
+
+  // 7b-iii) NEW TASK — one dialog creates a worktree AND launches an agent in it
+  // with the task as its initial prompt. Reuse the agent marker to prove a fresh
+  // launch happened in the task worktree.
+  rmSync(agentMarker, { force: true })
+  await groupA.getByTitle(/^New task/).click()
+  await win.waitForSelector('.dialog textarea', { timeout: 5000 })
+  await win.locator('.dialog textarea').fill('Fix the render glitch')
+  // The branch is auto-suggested from the prompt, then hand-edited (slash-free
+  // so the worktree folder stays flat for cleanup).
+  const suggested = await win.locator('.dialog-field input').inputValue()
+  assert.equal(suggested, 'task/fix-the-render-glitch', `branch suggestion got "${suggested}"`)
+  await win.locator('.dialog-field input').fill('taskwt')
+  await win.getByRole('button', { name: /^Start/ }).click()
+  await win.waitForFunction(
+    () =>
+      [...document.querySelectorAll('.card-title')].some((t) => t.textContent?.includes('taskwt')),
+    { timeout: 10000 }
+  )
+  assert.ok(existsSync(join(taskWtPath, '.git')), `new task: worktree should exist at ${taskWtPath}`)
+  let newTaskFlow = false
+  for (let i = 0; i < 60; i++) {
+    if (existsSync(agentMarker)) {
+      newTaskFlow = true
+      break
+    }
+    await new Promise((r) => setTimeout(r, 250))
+  }
+  assert.ok(newTaskFlow, 'new task: its agent should launch (marker re-created)')
+  // Back to A's main worktree for the remaining steps.
+  await groupA.locator('.card', { hasText: 'main' }).first().click()
+  await win.waitForTimeout(400)
 
   // 7c) FILE VIEWER — open a Markdown and an HTML file in read-only viewer panes
   //     (driven through the in-app dialog so no native OS picker is needed).
@@ -452,14 +487,15 @@ try {
       `worktreeCreated=true agentLaunched=true multiAgent=${agentRows === 2} ` +
       `agentAfterSwitch=${agentAfterSwitch} newAgentShortcut=${newAgentShortcut} kbdNav=${kbdNav} fileViewer=${fileViewer} ` +
       `viewerPanes=${viewerPanes} htmlIframe=${htmlIframe} htmlScriptRan=${htmlScriptRan} diffReview=${diffReview} ` +
-      `diffAdd=${addLines} diffDel=${delLines} splitDiff=${splitDiff} ideOpen=${ideOpen} finish=${finishFlow} restored=${restored}`
+      `diffAdd=${addLines} diffDel=${delLines} splitDiff=${splitDiff} ideOpen=${ideOpen} finish=${finishFlow} ` +
+      `newTask=${newTaskFlow} restored=${restored}`
   )
 } catch (err) {
   failed = true
   console.error('SMOKE_FAIL', err?.stack ?? err?.message ?? err)
 } finally {
   if (app) await app.close()
-  for (const d of [repoA, repoB, wtPath, storeDir]) rmSync(d, { recursive: true, force: true })
+  for (const d of [repoA, repoB, wtPath, taskWtPath, storeDir]) rmSync(d, { recursive: true, force: true })
   rmSync(agentMarker, { force: true })
   rmSync(ideMarker, { force: true })
 }

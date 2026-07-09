@@ -10,6 +10,7 @@ import { dedupeByDurableKey } from '../core/layoutDedupe'
 import { hookFailedMessage } from '../core/hookMessage'
 import type { ClosedAgent } from '../core/closedAgentsStore'
 import { buildAgentLaunch } from '../core/resume'
+import { withInitialPrompt } from '../core/newTask'
 import { classifyExit } from '../core/sessionExit'
 import { isHttpUrl } from '../core/openTarget'
 import { wrapIndex } from '../core/cycle'
@@ -48,6 +49,7 @@ export interface WtStatus {
 export type DialogState =
   | { kind: 'closeProject'; repoRoot: string; name: string }
   | { kind: 'createWorktree'; repoRoot: string; projectName: string }
+  | { kind: 'newTask'; repoRoot: string; projectName: string }
   | { kind: 'branchExists'; repoRoot: string; projectName: string; branch: string }
   | { kind: 'removeWorktree'; repoRoot: string; wtId: string; branch: string; folder: string }
   | { kind: 'projectSettings'; repoRoot: string; name: string }
@@ -64,6 +66,10 @@ interface PaneRef {
   term: Terminal
   fit: FitAddon
   search?: SearchAddon
+  /** The pane's own fit routine (single sizing invariant: reserved bottom row,
+   * deduped/debounced pty resize). fitVisible() calls this instead of fit.fit()
+   * so the two paths can never disagree about a pane's size. */
+  refit?: () => void
 }
 
 /** Grove's terminal search (xterm SearchAddon) traverses the full buffer
@@ -243,8 +249,14 @@ export class Store {
   }
 
   // --- terminal registration (called by <Pane>) --------------------------
-  registerPane(id: string, term: Terminal, fit: FitAddon, search?: SearchAddon): void {
-    this.panes.set(id, { term, fit, search })
+  registerPane(
+    id: string,
+    term: Terminal,
+    fit: FitAddon,
+    search?: SearchAddon,
+    refit?: () => void
+  ): void {
+    this.panes.set(id, { term, fit, search, refit })
   }
   /** Force a full repaint of panes that just received output, coalesced per
    * burst. Works around xterm canvas/WebGL renderers skipping an in-place row
@@ -296,9 +308,18 @@ export class Store {
       for (const id of visible) {
         const pane = this.panes.get(id)
         if (!pane) continue
-        pane.fit.fit()
+        // The pane's refit shares refit's reserved-bottom-row sizing and skips
+        // the pty resize when nothing changed (fit.fit() here used to size the
+        // terminal one row taller than the pane's own refit — the two paths
+        // ping-ponged, and every fitVisible sent a SIGWINCH per pane even when
+        // the size was unchanged, stacking stale prompt redraws).
+        if (pane.refit) {
+          pane.refit()
+        } else {
+          pane.fit.fit()
+          window.api.sessionResize(id, pane.term.cols, pane.term.rows)
+        }
         const { cols, rows } = pane.term
-        window.api.sessionResize(id, cols, rows)
         // The rows-1→rows bounce forces a full-screen TUI to repaint. Plain
         // shells don't need it — for them each extra SIGWINCH just reprints
         // the prompt, stacking stale copies in the scrollback.
@@ -610,6 +631,7 @@ export class Store {
     if (this.activeWorktreeId) await this.restoreWorktree(this.activeWorktreeId)
     this.syncFocus()
     this.notify()
+    this.fitVisible() // same newly-shown nudge as selectWorktree
   }
   async removeProject(repoRoot: string): Promise<void> {
     for (const wt of this.projects.get(repoRoot)?.worktrees.values() ?? [])
@@ -668,6 +690,21 @@ export class Store {
     }
     this.notify()
   }
+  /** "New task" flow: create a worktree for the task and launch an agent in it
+   * with the task as its initial prompt — one dialog instead of two steps. */
+  async startTask(
+    project: ProjectView,
+    branch: string,
+    agent: AgentDef,
+    prompt: string
+  ): Promise<void> {
+    await this.createWorktree(project, branch)
+    // createWorktree surfaces its own failures (toast / branch-exists dialog);
+    // only launch the agent if the worktree actually appeared.
+    const wt = [...project.worktrees.values()].find((w) => !w.primary && w.branch === branch)
+    if (!wt) return
+    await this.addSession(wt.id, 'agent', agent, undefined, undefined, undefined, prompt)
+  }
   async removeWorktree(project: ProjectView, wtId: string, deleteBranch = false): Promise<void> {
     const wt = project.worktrees.get(wtId)
     if (!wt || wt.primary) return
@@ -703,6 +740,10 @@ export class Store {
     await this.restoreWorktree(wtId) // respawn this worktree's sessions on first select
     this.syncFocus()
     this.notify()
+    // Nudge the panes that just became visible (TUI repaint bounce + first
+    // durable-attach settle mask live in fitVisible — without this call they
+    // never ran on the worktree-switch path they were written for).
+    this.fitVisible()
   }
   switchWorktree(index: number): void {
     const p = this.activeProject()
@@ -740,7 +781,8 @@ export class Store {
     agentDef?: AgentDef,
     titleOverride?: string,
     resumeId?: string,
-    durableKey?: string
+    durableKey?: string,
+    initialPrompt?: string
   ): Promise<void> {
     const wt = this.activeProject()?.worktrees.get(worktreeId)
     if (!wt) return
@@ -755,7 +797,10 @@ export class Store {
     const launch = isAgent
       ? buildAgentLaunch(baseCommand, () => crypto.randomUUID(), resumeId)
       : { command: baseCommand }
-    const command = launch.command
+    // "New task" flow: hand the agent its task as a positional argument (the
+    // claude/codex convention — starts interactive with the prompt submitted).
+    // Never combined with resumeId, so it can't end up on a --resume chain.
+    const command = isAgent ? withInitialPrompt(launch.command, initialPrompt) : launch.command
     // Stable per-agent id for durable (tmux) naming. Distinct from resumeId
     // (which is claude-only): EVERY agent gets one so two agents in a worktree
     // can't collide onto one tmux session. Reused on restore so reattach finds
@@ -1045,10 +1090,12 @@ export class Store {
   }
   focusSession(id: string): void {
     const s = this.sessions.get(id)
+    let tabSwitched = false
     if (s) {
       const groups = this.groupsOf(s.worktreeId)
       const gi = groups.findIndex((g) => g.ids.includes(id))
       if (gi >= 0) {
+        tabSwitched = groups[gi].active !== id
         groups[gi].active = id
         this.focusedGroupByWt.set(s.worktreeId, gi)
       }
@@ -1060,6 +1107,10 @@ export class Store {
     this.pending.delete(id)
     this.syncBadge()
     this.notify()
+    // A tab switch reveals a hidden pane — give it the same newly-shown nudge
+    // as a worktree switch (plain refocus clicks skip this; refit is cheap but
+    // there's no reason to run it per mousedown).
+    if (tabSwitched) this.fitVisible()
     this.panes.get(id)?.term.focus()
   }
 

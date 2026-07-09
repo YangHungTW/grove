@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useStore } from './useStore'
 import { store, type ProjectView } from './store'
+import { suggestBranch } from '../core/newTask'
 
 export function Dialog(): JSX.Element | null {
   const s = useStore()
@@ -18,6 +19,7 @@ export function Dialog(): JSX.Element | null {
         {d.kind === 'createWorktree' && (
           <CreateWorktree projectName={d.projectName} getProject={project} />
         )}
+        {d.kind === 'newTask' && <NewTask projectName={d.projectName} getProject={project} />}
         {d.kind === 'branchExists' && (
           <BranchExists projectName={d.projectName} branch={d.branch} getProject={project} />
         )}
@@ -365,6 +367,97 @@ function CreateWorktree({
         </button>
         <button className="btn-primary" disabled={!branch.trim()} onClick={submit}>
           Create worktree
+        </button>
+      </div>
+    </>
+  )
+}
+
+function NewTask({
+  projectName,
+  getProject
+}: {
+  projectName: string
+  getProject: () => ProjectView | undefined
+}): JSX.Element {
+  const agents = store.installedAgents()
+  const [prompt, setPrompt] = useState('')
+  const [branch, setBranch] = useState('')
+  // Auto-suggest the branch from the prompt until the user edits it by hand.
+  const [branchEdited, setBranchEdited] = useState(false)
+  const [agentId, setAgentId] = useState(agents[0]?.id ?? '')
+  const agent = agents.find((a) => a.id === agentId)
+  const canSubmit = !!prompt.trim() && !!branch.trim() && !!agent
+  const submit = (): void => {
+    const p = getProject()
+    if (!canSubmit || !p || !agent) return
+    store.closeDialog()
+    void store.startTask(p, branch.trim(), agent, prompt.trim())
+  }
+  return (
+    <>
+      <h3 className="dialog-title">New task</h3>
+      <p className="dialog-body">
+        One step: creates a branch + worktree in <b>{projectName}</b> and launches an agent there
+        with your task as its first prompt.
+      </p>
+      <label className="dialog-field">
+        <span>Task</span>
+        <textarea
+          autoFocus
+          value={prompt}
+          rows={3}
+          placeholder="e.g. Fix the flaky login test and add a regression test"
+          spellCheck={false}
+          onChange={(e) => {
+            setPrompt(e.target.value)
+            if (!branchEdited) setBranch(suggestBranch(e.target.value))
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit()
+            else if (e.key === 'Escape') store.closeDialog()
+          }}
+        />
+      </label>
+      <label className="dialog-field">
+        <span>Branch</span>
+        <input
+          value={branch}
+          placeholder="task/fix-flaky-login-test"
+          spellCheck={false}
+          onChange={(e) => {
+            setBranch(e.target.value)
+            setBranchEdited(true)
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') submit()
+            else if (e.key === 'Escape') store.closeDialog()
+          }}
+        />
+      </label>
+      {agents.length === 0 && (
+        <p className="dialog-body">
+          No agents installed — add one in <b>Settings → Agents</b> first.
+        </p>
+      )}
+      {agents.length > 1 &&
+        agents.map((a) => (
+          <label key={a.id} className="dialog-check">
+            <input
+              type="radio"
+              name="new-task-agent"
+              checked={a.id === agentId}
+              onChange={() => setAgentId(a.id)}
+            />
+            <span>{a.name}</span>
+          </label>
+        ))}
+      <div className="dialog-actions">
+        <button className="btn-ghost" onClick={() => store.closeDialog()}>
+          Cancel
+        </button>
+        <button className="btn-primary" disabled={!canSubmit} onClick={submit}>
+          {agents.length === 1 && agent ? `Start with ${agent.name}` : 'Start task'}
         </button>
       </div>
     </>

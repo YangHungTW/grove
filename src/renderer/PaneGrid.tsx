@@ -229,7 +229,6 @@ function Pane({
       })
     }
     termRef.current = term
-    store.registerPane(session.id, term, fit, search)
 
     // Fit whenever this pane actually has a box — fires on display:none→block
     // (worktree/tab switch, split), grid drag, and window resize. The resize
@@ -244,6 +243,7 @@ function Pane({
     // fresh session's prompt renders at the correct width.
     let resizeTimer: number | undefined
     let lastSent = { cols: -1, rows: -1 }
+    let wasHidden = true // pane starts unpainted, so the first refit repaints
     const sendResize = (): void => {
       const { cols, rows } = term
       if (cols === lastSent.cols && rows === lastSent.rows) return
@@ -251,7 +251,13 @@ function Pane({
       window.api.sessionResize(session.id, cols, rows)
     }
     const refit = (): void => {
-      if (el.clientHeight < 2 || el.clientWidth < 2) return
+      if (el.clientHeight < 2 || el.clientWidth < 2) {
+        wasHidden = true // display:none (worktree/tab switch away)
+        return
+      }
+      const reshown = wasHidden
+      wasHidden = false
+      let repainted = false
       try {
         // Compute the target size and resize ONCE. (fit.fit() followed by a
         // shrink would reflow the buffer twice per layout change — the row
@@ -266,11 +272,15 @@ function Pane({
           if (term.cols !== dims.cols || term.rows !== rows) {
             term.resize(dims.cols, rows)
             term.refresh(0, term.rows - 1) // full repaint (new/reshown pane)
+            repainted = true
           }
         }
       } catch {
         /* ignore transient measure errors */
       }
+      // A pane re-shown at the SAME size skips the resize above — but the WebGL
+      // renderer can come back blank/stale from display:none, so repaint anyway.
+      if (reshown && !repainted) term.refresh(0, term.rows - 1)
       if (lastSent.cols < 0) {
         sendResize()
       } else {
@@ -280,6 +290,7 @@ function Pane({
     }
     const ro = new ResizeObserver(refit)
     ro.observe(el)
+    store.registerPane(session.id, term, fit, search, refit)
 
     // The terminal may first fit with a fallback font (smaller cells → too many
     // rows). Once the bundled Nerd Font is ready, cell metrics change, so refit.

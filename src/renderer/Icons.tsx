@@ -47,6 +47,10 @@ export const SingleIcon = ({ size = 16, className }: P): JSX.Element =>
 export const PlusIcon = ({ size = 16, className }: P): JSX.Element =>
   svg(size, className, <path d="M7.2 2h1.6v5.2H14v1.6H8.8V14H7.2V8.8H2V7.2h5.2V2Z" />)
 
+/** Lightning bolt — "new task" (worktree + agent in one step). */
+export const BoltIcon = ({ size = 16, className }: P): JSX.Element =>
+  svg(size, className, <path d="M9.5 1 3.5 9h3l-1 6 6-8h-3l1-6Z" />)
+
 export const ChevronDownIcon = ({ size = 16, className }: P): JSX.Element =>
   svg(size, className, <path d="M3.5 6 8 10.5 12.5 6l-1-1L8 8.5 4.5 5l-1 1Z" />)
 

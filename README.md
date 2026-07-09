@@ -19,6 +19,7 @@ The name is a nod to git *worktrees*: a grove of trees. 🌳
 
 - **Projects → worktrees → sessions.** A flat, cmux-style sidebar: each project (git repo) contains its worktrees; selecting one shows its sessions.
 - **One worktree, many agents.** Run Claude, Codex, Antigravity (`agy`), a plain shell — as many as you want, side by side. Tabs + drag-resizable split panes.
+- **New task in one step.** The ⚡ button on a project takes a task description, suggests a branch name, creates the worktree, and launches your agent there with the task as its first prompt.
 - **Open files in a pane.** Open a Markdown or HTML file (`+ file`) in a read-only viewer alongside your terminals — Markdown is rendered and sanitized; HTML loads in a sandboxed frame.
 - **Review worktree changes.** Hit *Review changes* on any worktree card for an in-app `git diff` (committed + uncommitted) rendered as a unified code-review pane.
 - **Installed-only agent menu.** The `+` menu lists only agents whose command is on your `PATH`. One installed → opens directly; several → a dropdown. Fully editable in Settings (name / command / icon).

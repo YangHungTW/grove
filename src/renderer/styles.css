@@ -1471,7 +1471,8 @@ button {
   margin-bottom: 16px;
   font-size: 12px;
 }
-.dialog-field input {
+.dialog-field input,
+.dialog-field textarea {
   background: var(--bg);
   border: 1px solid var(--accent);
   border-radius: 7px;
@@ -1480,6 +1481,10 @@ button {
   font-size: 13px;
   font-family: 'MesloLGS NF', Menlo, monospace;
   outline: none;
+}
+.dialog-field textarea {
+  resize: vertical;
+  min-height: 64px;
 }
 .dialog-check {
   display: flex;
