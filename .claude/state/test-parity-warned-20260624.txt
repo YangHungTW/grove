@@ -1,4 +1,0 @@
-src/main/index.ts
-src/core/viewerMime.ts
-src/renderer/ViewerPane.tsx
-src/core/htmlViewerUrl.ts
