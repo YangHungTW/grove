@@ -1,0 +1,6 @@
+src/renderer/store.ts
+src/renderer/PaneGrid.tsx
+src/core/newTask.ts
+src/renderer/Icons.tsx
+src/renderer/Dialog.tsx
+src/renderer/Sidebar.tsx
