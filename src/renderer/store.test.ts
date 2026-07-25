@@ -239,3 +239,47 @@ describe('pane sizing goes through the pane-registered refit', () => {
     expect(paneA.refit).not.toHaveBeenCalled()
   })
 })
+
+describe('renderer-atlas plumbing (stale-glyph / doubled status-row fix)', () => {
+  beforeEach(() => {
+    installApi()
+  })
+
+  it('clearPaneAtlas drops the registered renderer addon’s glyph cache', () => {
+    const store = new Store()
+    const pane = fakePane()
+    store.registerPane('s1', pane.term as never, pane.fit as never)
+    const clearTextureAtlas = vi.fn()
+    store.setRenderAddon('s1', { clearTextureAtlas })
+
+    store.clearPaneAtlas('s1')
+    expect(clearTextureAtlas).toHaveBeenCalledTimes(1)
+  })
+
+  it('after setRenderAddon(null) — e.g. renderer swap/unmount — clearing is a no-op', () => {
+    const store = new Store()
+    const pane = fakePane()
+    store.registerPane('s1', pane.term as never, pane.fit as never)
+    const clearTextureAtlas = vi.fn()
+    store.setRenderAddon('s1', { clearTextureAtlas })
+    store.setRenderAddon('s1', null)
+
+    expect(() => store.clearPaneAtlas('s1')).not.toThrow()
+    expect(clearTextureAtlas).not.toHaveBeenCalled()
+  })
+
+  it('re-registering a pane (a re-render) keeps its renderer addon', () => {
+    const store = new Store()
+    const a = fakePane()
+    const b = fakePane()
+    store.registerPane('s1', a.term as never, a.fit as never)
+    const clearTextureAtlas = vi.fn()
+    store.setRenderAddon('s1', { clearTextureAtlas })
+    // <Pane> can re-run registerPane without the renderer effect re-firing; the
+    // addon reference must survive so clears still reach the live renderer.
+    store.registerPane('s1', b.term as never, b.fit as never)
+
+    store.clearPaneAtlas('s1')
+    expect(clearTextureAtlas).toHaveBeenCalledTimes(1)
+  })
+})

@@ -70,6 +70,11 @@ interface PaneRef {
    * deduped/debounced pty resize). fitVisible() calls this instead of fit.fit()
    * so the two paths can never disagree about a pane's size. */
   refit?: () => void
+  /** The active renderer addon (WebGL, or Canvas in transparent mode). Both
+   * expose clearTextureAtlas(); the DOM fallback has none. Registered separately
+   * from the term because <Pane> creates it in a later effect (renderer choice
+   * depends on the transparent setting). */
+  renderAddon?: { clearTextureAtlas?: () => void }
 }
 
 /** Grove's terminal search (xterm SearchAddon) traverses the full buffer
@@ -153,6 +158,13 @@ export class Store {
   // We coalesce a full refresh per output burst to flush those missed rows.
   private refreshPanes = new Set<string>()
   private refreshScheduled = false
+  // A plain refresh() redraws rows but reuses the GPU glyph atlas, so an
+  // in-place rewrite can leave a stale glyph OVERLAID on the fresh one — visible
+  // as "doubled" characters in an agent's status row. clearTextureAtlas() forces
+  // re-rasterization; we fire it on the TRAILING edge of a burst (one clear when
+  // output settles, not one per frame) to avoid churning the atlas mid-stream.
+  private atlasPanes = new Set<string>()
+  private atlasTimer: number | undefined
 
   private version = 0
   private listeners = new Set<() => void>()
@@ -256,7 +268,23 @@ export class Store {
     search?: SearchAddon,
     refit?: () => void
   ): void {
-    this.panes.set(id, { term, fit, search, refit })
+    const prev = this.panes.get(id)
+    this.panes.set(id, { term, fit, search, refit, renderAddon: prev?.renderAddon })
+  }
+  /** Register (or clear) the pane's renderer addon so imperative repaint paths
+   * can reach clearTextureAtlas(). Called by <Pane> when it (re)loads WebGL or
+   * Canvas — after registerPane, and again whenever the transparent setting
+   * flips the renderer. */
+  setRenderAddon(id: string, addon: { clearTextureAtlas?: () => void } | null): void {
+    const pane = this.panes.get(id)
+    if (pane) pane.renderAddon = addon ?? undefined
+  }
+  /** Drop the pane's cached glyph textures so the next redraw re-rasterizes from
+   * scratch. Callers must follow with a refresh() — clearing the atlas alone
+   * does not repaint. Used by the resize/reshow path (fitVisible/<Pane>.refit),
+   * where there is no incoming data to trigger scheduleAtlasClear. */
+  clearPaneAtlas(id: string): void {
+    this.panes.get(id)?.renderAddon?.clearTextureAtlas?.()
   }
   /** Force a full repaint of panes that just received output, coalesced per
    * burst. Works around xterm canvas/WebGL renderers skipping an in-place row
@@ -274,6 +302,23 @@ export class Store {
       }
       this.refreshPanes.clear()
     }, 80)
+  }
+  /** Clear the glyph atlas once output settles, then repaint — flushes a stale
+   * glyph left overlaid by an in-place rewrite (doubled status-row text). Fires
+   * on the burst's trailing edge (reset per chunk) so a long stream clears the
+   * atlas once at the end, not on every frame. */
+  private scheduleAtlasClear(id: string): void {
+    this.atlasPanes.add(id)
+    window.clearTimeout(this.atlasTimer)
+    this.atlasTimer = window.setTimeout(() => {
+      for (const pid of this.atlasPanes) {
+        const pane = this.panes.get(pid)
+        if (!pane) continue
+        pane.renderAddon?.clearTextureAtlas?.()
+        pane.term.refresh(0, pane.term.rows - 1)
+      }
+      this.atlasPanes.clear()
+    }, 180)
   }
   /** Record a session's latest bottom line for its sidebar card, coalescing the
    * re-render to ~one notify per burst (the line changes far faster than the eye
@@ -1461,6 +1506,7 @@ export class Store {
         // "$3,232,025" and a fresh "$323.35" collapse into "3232025").
         term.write(data, () => this.setLastLine(id, bufferLastLine(term)))
         this.scheduleRepaint(id)
+        this.scheduleAtlasClear(id)
       } else {
         // No live pane (a background, non-selected worktree): best-effort parse.
         this.setLastLine(id, lastNonEmptyLine(data))

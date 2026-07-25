@@ -165,7 +165,15 @@ function Pane({
     if (!el) return
     const font = store.terminalFont()
     const term = new Terminal({
-      convertEol: true,
+      // convertEol must stay OFF. A bare LF from a raw-mode TUI means "line feed
+      // only, keep the column" (LNM reset — what iTerm/Terminal.app do). agy /
+      // antigravity redraw their input line by moving up, printing, then emitting
+      // several bare \n to return down while holding the column. convertEol:true
+      // rewrites each \n as CRLF, so the cursor snaps to column 0 and lands on the
+      // "> " prompt — the next glyph then paints over the "> " marker. Cooked-mode
+      // output (shells) already arrives as CRLF via the pty's ONLCR, so leaving
+      // this off costs nothing there.
+      convertEol: false,
       fontSize: font.fontSize,
       fontFamily: font.fontFamily,
       cursorBlink: true,
@@ -271,6 +279,10 @@ function Pane({
           const rows = dims.rows > 4 ? dims.rows - 1 : dims.rows
           if (term.cols !== dims.cols || term.rows !== rows) {
             term.resize(dims.cols, rows)
+            // Drop the glyph atlas before repainting: a resize/reshow is a prime
+            // spot for a stale glyph left overlaid by an agent's in-place status
+            // rewrite, and no incoming data will trigger scheduleAtlasClear here.
+            store.clearPaneAtlas(session.id)
             term.refresh(0, term.rows - 1) // full repaint (new/reshown pane)
             repainted = true
           }
@@ -280,7 +292,10 @@ function Pane({
       }
       // A pane re-shown at the SAME size skips the resize above — but the WebGL
       // renderer can come back blank/stale from display:none, so repaint anyway.
-      if (reshown && !repainted) term.refresh(0, term.rows - 1)
+      if (reshown && !repainted) {
+        store.clearPaneAtlas(session.id)
+        term.refresh(0, term.rows - 1)
+      }
       if (lastSent.cols < 0) {
         sendResize()
       } else {
@@ -325,6 +340,7 @@ function Pane({
         const c = new CanvasAddon()
         term.loadAddon(c)
         addon = c
+        store.setRenderAddon(session.id, c)
         term.refresh(0, term.rows - 1)
       } catch {
         /* keep DOM renderer */
@@ -345,6 +361,7 @@ function Pane({
         })
         term.loadAddon(webgl)
         addon = webgl
+        store.setRenderAddon(session.id, webgl)
         term.refresh(0, term.rows - 1)
       } catch {
         // WebGL unavailable (software rendering / blocklisted GPU) — use canvas.
@@ -352,6 +369,7 @@ function Pane({
       }
     }
     return () => {
+      store.setRenderAddon(session.id, null)
       try {
         addon?.dispose()
       } catch {
