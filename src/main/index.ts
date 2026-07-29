@@ -10,7 +10,8 @@ import {
 } from 'electron'
 import { join, resolve, basename, dirname } from 'node:path'
 import { execFile } from 'node:child_process'
-import { existsSync, copyFileSync } from 'node:fs'
+import { existsSync, copyFileSync, readdirSync, readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { stat as statAsync, readFile as readFileAsync } from 'node:fs/promises'
 import { SessionRegistry } from '../core/sessionRegistry'
 import { PtySession } from '../core/session'
@@ -29,6 +30,7 @@ import {
 } from '../core/worktree'
 import { prCreate, prStatus } from '../core/gh'
 import { shellQuote } from '../core/shellQuote'
+import { discoverSkills, type SkillFs } from '../core/skills'
 import { buildIdeOpenAction } from '../core/ideLaunch'
 import { resolveUserPath } from '../core/userPath'
 import { parseFrameability } from '../core/openTarget'
@@ -148,6 +150,26 @@ function resolveAgents(): ResolvedAgent[] {
   return settings()
     .load()
     .agents.map((a) => ({ ...a, installed: commandExists(a.command) }))
+}
+
+/** Filesystem adapter for discoverSkills, which stays Node-free so the renderer
+ * can import withSkills() from the same module. Both calls swallow their errors:
+ * an absent ~/.claude/skills or .claude/skills is the ordinary case. */
+const skillFs: SkillFs = {
+  readdir(dir) {
+    try {
+      return readdirSync(dir)
+    } catch {
+      return []
+    }
+  },
+  readFile(path) {
+    try {
+      return readFileSync(path, 'utf8')
+    } catch {
+      return ''
+    }
+  }
 }
 
 /** Resolve a new worktree path from the settings template (relative to repo). */
@@ -467,6 +489,9 @@ function registerIpc(): void {
   ipcMain.handle(Channels.closedAgentsLoad, () => closedAgents().load())
   ipcMain.on(Channels.closedAgentsSave, (_e, list: ClosedAgent[]) => closedAgents().save(list))
   ipcMain.handle(Channels.agentsAvailable, () => resolveAgents())
+  ipcMain.handle(Channels.skillsAvailable, (_e, repoRoot?: string) =>
+    discoverSkills(skillFs, { home: homedir(), repoRoot })
+  )
   ipcMain.handle(Channels.settingsLoad, () => settings().load())
   ipcMain.handle(Channels.settingsSave, (_e: IpcMainInvokeEvent, patch: Partial<AppSettings>) => {
     const next = settings().save(patch)

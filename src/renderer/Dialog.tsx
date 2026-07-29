@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useStore } from './useStore'
 import { store, type ProjectView } from './store'
 import { suggestBranch } from '../core/newTask'
+import { skillToken } from '../core/skills'
 
 export function Dialog(): JSX.Element | null {
   const s = useStore()
@@ -381,18 +382,44 @@ function NewTask({
   getProject: () => ProjectView | undefined
 }): JSX.Element {
   const agents = store.installedAgents()
+  const repoRoot = getProject()?.repoRoot
+  // Skills live on disk and are per-project, so enumerate them when the dialog
+  // opens rather than holding a global cache that could go stale.
+  useEffect(() => {
+    if (repoRoot) void store.loadSkills(repoRoot)
+  }, [repoRoot])
   const [prompt, setPrompt] = useState('')
   const [branch, setBranch] = useState('')
   // Auto-suggest the branch from the prompt until the user edits it by hand.
   const [branchEdited, setBranchEdited] = useState(false)
   const [agentId, setAgentId] = useState(agents[0]?.id ?? '')
   const agent = agents.find((a) => a.id === agentId)
+  // Pre-checked from the agent's configured defaults; re-seeded when the agent
+  // changes, since the defaults belong to the agent, not to this dialog.
+  const [skillIds, setSkillIds] = useState<string[]>(() => agents[0]?.skills ?? [])
+  const pickAgent = (id: string): void => {
+    setAgentId(id)
+    setSkillIds(agents.find((a) => a.id === id)?.skills ?? [])
+  }
+  // A configured default that isn't on disk (a plugin skill, or a typo) still
+  // gets a row — invisible-and-silently-dropped is how a typo'd default would
+  // otherwise reach the agent, which skips unknown skills with no error.
+  const known = store.availableSkills
+  const token = skillToken(agent?.command ?? '')
+  const skillRows: { id: string; hint: string }[] = [
+    ...known.map((s) => ({ id: s.id, hint: s.description })),
+    ...skillIds
+      .filter((id) => !known.some((s) => s.id === id))
+      .map((id) => ({ id, hint: 'Not found on disk — the agent will skip it silently' }))
+  ]
+  const toggleSkill = (id: string): void =>
+    setSkillIds((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]))
   const canSubmit = !!prompt.trim() && !!branch.trim() && !!agent
   const submit = (): void => {
     const p = getProject()
     if (!canSubmit || !p || !agent) return
     store.closeDialog()
-    void store.startTask(p, branch.trim(), agent, prompt.trim())
+    void store.startTask(p, branch.trim(), agent, prompt.trim(), skillIds)
   }
   return (
     <>
@@ -447,11 +474,32 @@ function NewTask({
               type="radio"
               name="new-task-agent"
               checked={a.id === agentId}
-              onChange={() => setAgentId(a.id)}
+              onChange={() => pickAgent(a.id)}
             />
             <span>{a.name}</span>
           </label>
         ))}
+      {skillRows.length > 0 && (
+        <>
+          <div className="dialog-subhead">Skills</div>
+          <div className="dialog-checks">
+            {skillRows.map((s) => (
+              <label key={s.id} className="dialog-check" title={s.hint || undefined}>
+                <input
+                  type="checkbox"
+                  checked={skillIds.includes(s.id)}
+                  onChange={() => toggleSkill(s.id)}
+                />
+                <span>
+                  {token}
+                  {s.id}
+                  {s.hint && <em> — {s.hint}</em>}
+                </span>
+              </label>
+            ))}
+          </div>
+        </>
+      )}
       <div className="dialog-actions">
         <button className="btn-ghost" onClick={() => store.closeDialog()}>
           Cancel

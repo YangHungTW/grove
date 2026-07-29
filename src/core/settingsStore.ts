@@ -20,8 +20,15 @@ export class SettingsStore {
       // Migrate the legacy single-Claude default (auto-created before the agent
       // list was user-editable) up to the current presets.
       const a = parsed.agents
+      // ...but a lone claude entry carrying default skills is a deliberate
+      // user configuration, not the auto-created legacy one — replacing it with
+      // the presets would silently discard those skills on every load.
       const isLegacyDefault =
-        !Array.isArray(a) || (a.length === 1 && a[0]?.id === 'claude' && a[0]?.command === 'claude')
+        !Array.isArray(a) ||
+        (a.length === 1 &&
+          a[0]?.id === 'claude' &&
+          a[0]?.command === 'claude' &&
+          !a[0]?.skills?.length)
       return {
         ...DEFAULT_SETTINGS,
         ...parsed,

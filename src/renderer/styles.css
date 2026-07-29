@@ -1149,6 +1149,17 @@ button {
   min-width: 0;
   font-family: 'MesloLGS NF', Menlo, monospace;
 }
+/* Default skills get their own full-width line under the agent's row rather
+   than a fifth column — four inputs abreast leaves none of them readable. */
+.agent-edit {
+  flex-wrap: wrap;
+}
+.agent-edit .agent-skills {
+  flex: 1 0 100%;
+  min-width: 0;
+  font-family: 'MesloLGS NF', Menlo, monospace;
+  opacity: 0.85;
+}
 .agent-state {
   flex: 0 0 auto;
   font-size: 12px;
@@ -1554,6 +1565,24 @@ button {
 .dialog-check em {
   color: var(--muted);
   font-style: normal;
+}
+.dialog-subhead {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+/* Skill list: a machine can easily have dozens, so cap the height and scroll
+   rather than letting the dialog grow past the window. Tighter than a lone
+   .dialog-check, which is spaced as a standalone toggle. */
+.dialog-checks {
+  max-height: 168px;
+  overflow-y: auto;
+  margin-bottom: 16px;
+}
+.dialog-checks .dialog-check {
+  margin-bottom: 6px;
 }
 .dialog-actions {
   display: flex;

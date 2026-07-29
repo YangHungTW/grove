@@ -11,6 +11,7 @@ import { hookFailedMessage } from '../core/hookMessage'
 import type { ClosedAgent } from '../core/closedAgentsStore'
 import { buildAgentLaunch } from '../core/resume'
 import { withInitialPrompt } from '../core/newTask'
+import { withSkills, type SkillDef } from '../core/skills'
 import { classifyExit } from '../core/sessionExit'
 import { isHttpUrl } from '../core/openTarget'
 import { wrapIndex } from '../core/cycle'
@@ -121,6 +122,10 @@ export class Store {
   pickerOpen = false
   pickerIndex = 0
   availableAgents: ResolvedAgent[] = []
+  /** Skills found on disk for the project whose New task dialog is open. Loaded
+   * on demand (loadSkills) rather than at startup: it is per-project, and the
+   * dialog is the only consumer. */
+  availableSkills: SkillDef[] = []
   dialog: DialogState | null = null
   /** Recently-closed resumable agents (most-recent-first), persisted to disk. */
   closedAgents: ClosedAgent[] = []
@@ -795,14 +800,20 @@ export class Store {
     project: ProjectView,
     branch: string,
     agent: AgentDef,
-    prompt: string
+    prompt: string,
+    skillIds: string[] = []
   ): Promise<void> {
     await this.createWorktree(project, branch)
     // createWorktree surfaces its own failures (toast / branch-exists dialog);
     // only launch the agent if the worktree actually appeared.
     const wt = [...project.worktrees.values()].find((w) => !w.primary && w.branch === branch)
     if (!wt) return
-    await this.addSession(wt.id, 'agent', agent, undefined, undefined, undefined, prompt)
+    // Skills ride inside the initial prompt as `/id` lines — no agent CLI has a
+    // launch flag for them. Composed here rather than in addSession so that
+    // already-7-argument signature stays put, and so an empty selection yields
+    // the exact prompt (and therefore the exact command) it always did.
+    const withSkillLines = withSkills(prompt, skillIds, agent.command)
+    await this.addSession(wt.id, 'agent', agent, undefined, undefined, undefined, withSkillLines)
   }
   async removeWorktree(project: ProjectView, wtId: string, deleteBranch = false): Promise<void> {
     const wt = project.worktrees.get(wtId)
@@ -1283,6 +1294,13 @@ export class Store {
   }
   newShellInActive(): void {
     if (this.activeWorktreeId) void this.addSession(this.activeWorktreeId, 'shell')
+  }
+  /** Populate availableSkills for a project (New task dialog opening). Failure
+   * is silently an empty list: skills are optional, and a project with no
+   * .claude/skills is the common case, not an error worth a toast. */
+  async loadSkills(repoRoot: string): Promise<void> {
+    this.availableSkills = await window.api.skillsAvailable(repoRoot).catch(() => [])
+    this.notify()
   }
   /** Installed, non-disabled agents — the ones offered in the "+ agent" menu. */
   installedAgents(): ResolvedAgent[] {

@@ -32,6 +32,7 @@ const api: RendererApi = {
   settingsLoad: () => ipcRenderer.invoke(Channels.settingsLoad),
   settingsSave: (patch) => ipcRenderer.invoke(Channels.settingsSave, patch),
   agentsAvailable: () => ipcRenderer.invoke(Channels.agentsAvailable),
+  skillsAvailable: (repoRoot?: string) => ipcRenderer.invoke(Channels.skillsAvailable, repoRoot),
   worktreeCreate: (repoRoot: string, opts: CreateWorktreeOptions): Promise<WorktreeInfo> =>
     ipcRenderer.invoke(Channels.worktreeCreate, repoRoot, opts),
   worktreeList: (repoRoot: string): Promise<WorktreeInfo[]> =>

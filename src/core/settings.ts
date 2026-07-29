@@ -9,6 +9,12 @@ export interface AgentDef {
   command: string
   /** Single-character or emoji icon for the tab. */
   icon: string
+  /** Skill ids this agent starts a "New task" with, pre-checked in the dialog
+   * and overridable there. Absent/empty injects nothing at all — the agent is
+   * launched exactly as it was before this setting existed. Not a launch flag:
+   * no agent CLI has one, so these become `/id` lines ahead of the task prompt
+   * (see src/core/skills.ts). */
+  skills?: string[]
 }
 
 /** An AgentDef plus whether its command is currently on PATH. */

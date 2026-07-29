@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { AgentDef } from '../core/settings'
+import { parseSkillList } from '../core/skills'
 import { useStore } from './useStore'
 import { store } from './store'
 import {
@@ -277,6 +278,10 @@ export function SettingsPanel(): JSX.Element | null {
               <button className="row-x" title="Remove agent" onClick={() => removeAgent(i)}>
                 ×
               </button>
+              <AgentSkillsField
+                value={a.skills ?? []}
+                onCommit={(skills) => updateAgent(i, { skills })}
+              />
             </div>
           )
         })}
@@ -343,5 +348,45 @@ export function SettingsPanel(): JSX.Element | null {
         </small>
       </div>
     </div>
+  )
+}
+
+/**
+ * Comma-separated skill ids for one agent. Holds raw text locally and commits
+ * on blur: deriving the input's value from the parsed array would swallow the
+ * comma the instant the user typed it (parse drops the empty trailing entry,
+ * join renders it away), making the field feel broken.
+ */
+function AgentSkillsField({
+  value,
+  onCommit
+}: {
+  value: string[]
+  onCommit: (skills: string[]) => void
+}): JSX.Element {
+  const [raw, setRaw] = useState(value.join(', '))
+  const [editing, setEditing] = useState(false)
+  return (
+    <input
+      className="agent-skills"
+      // While idle, mirror the stored value (e.g. after a Reset to presets);
+      // while editing, the user's raw text is the source of truth.
+      value={editing ? raw : value.join(', ')}
+      placeholder="default skills, comma-separated (optional)"
+      spellCheck={false}
+      title="Skills this agent starts a New task with. Invoked as /name lines ahead of your task; empty means nothing is injected."
+      onFocus={() => {
+        setRaw(value.join(', '))
+        setEditing(true)
+      }}
+      onChange={(e) => setRaw(e.target.value)}
+      onBlur={() => {
+        setEditing(false)
+        onCommit(parseSkillList(raw))
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') e.currentTarget.blur()
+      }}
+    />
   )
 }

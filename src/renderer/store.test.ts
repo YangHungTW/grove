@@ -126,6 +126,65 @@ describe('startTask (New task flow)', () => {
     expect(cmd).toMatch(/^claude --session-id \S+ 'fix the '\\''login'\\'' bug'$/)
   })
 
+  it('injects nothing when no skills are selected — byte-identical to the no-skills command', async () => {
+    const { creates } = installApi()
+    const store = new Store()
+    const project = seedProject(store)
+
+    await store.startTask(
+      project,
+      'task/fix-login',
+      { id: 'claude', name: 'Claude', command: 'claude', icon: '★' } as never,
+      "fix the 'login' bug",
+      []
+    )
+
+    const cmd = (creates[0] as unknown as { command: string }).command
+    // Exactly the assertion of the no-skills test above: passing an empty
+    // selection must not perturb the launch command in any way.
+    expect(cmd).toMatch(/^claude --session-id \S+ 'fix the '\\''login'\\'' bug'$/)
+  })
+
+  it('prepends /skill lines ahead of the task text when skills are selected', async () => {
+    const { creates } = installApi()
+    const store = new Store()
+    const project = seedProject(store)
+
+    await store.startTask(
+      project,
+      'task/fix-login',
+      { id: 'claude', name: 'Claude', command: 'claude', icon: '★' } as never,
+      'fix the bug',
+      ['foo', 'bar']
+    )
+
+    const cmd = (creates[0] as unknown as { command: string }).command
+    expect(cmd).toContain('/foo')
+    expect(cmd).toContain('/bar')
+    // Order matters: skills must be invoked BEFORE the task is described.
+    expect(cmd.indexOf('/foo')).toBeLessThan(cmd.indexOf('fix the bug'))
+    expect(cmd.indexOf('/foo')).toBeLessThan(cmd.indexOf('/bar'))
+    // Still one shell-quoted positional argument, newlines and all.
+    expect(cmd).toMatch(/^claude --session-id \S+ '\/foo\n\/bar\nfix the bug'$/)
+  })
+
+  it('uses the agent CLI’s own invocation token', async () => {
+    const { creates } = installApi()
+    const store = new Store()
+    const project = seedProject(store)
+
+    await store.startTask(
+      project,
+      'task/x',
+      { id: 'codex', name: 'Codex', command: 'codex', icon: '★' } as never,
+      'do it',
+      ['review']
+    )
+
+    // codex has no --session-id (not a claude-family CLI), and invokes with $.
+    expect((creates[0] as unknown as { command: string }).command).toBe("codex '$review\ndo it'")
+  })
+
   it('does not launch an agent when the worktree was not created (e.g. branch exists)', async () => {
     const { creates, api } = installApi()
     api.worktreeCreate.mockRejectedValue(new Error('BRANCH_EXISTS'))

@@ -25,6 +25,24 @@ describe('SettingsStore', () => {
     expect(new SettingsStore(file).load().durableSessions).toBe(true)
   })
 
+  it('per-agent default skills round-trip through disk', () => {
+    const agents = [{ id: 'claude', name: 'Claude', command: 'claude', icon: '✳', skills: ['x'] }]
+    new SettingsStore(file).save({ agents })
+    expect(new SettingsStore(file).load().agents[0].skills).toEqual(['x'])
+  })
+
+  it('an agent persisted before skills existed loads with skills undefined', () => {
+    // The field is optional precisely so settingsStore needs no migration —
+    // every settings.json written by an earlier Grove must still load.
+    writeFileSync(
+      file,
+      JSON.stringify({ agents: [{ id: 'claude', name: 'Claude', command: 'claude', icon: '✳' }] })
+    )
+    const loaded = new SettingsStore(file).load()
+    expect(loaded.agents[0].skills).toBeUndefined()
+    expect(loaded.agents[0].command).toBe('claude')
+  })
+
   it('collapsedProjects defaults to empty and round-trips', () => {
     expect(DEFAULT_SETTINGS.collapsedProjects).toEqual([])
     expect(new SettingsStore(file).load().collapsedProjects).toEqual([])

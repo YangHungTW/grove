@@ -7,6 +7,7 @@ import type { SessionDescriptor } from '../core/layoutStore'
 import type { ClosedAgent } from '../core/closedAgentsStore'
 import type { AppSettings } from '../core/settingsStore'
 import type { ResolvedAgent } from '../core/settings'
+import type { SkillDef } from '../core/skills'
 
 /** Channel names. Request/response (invoke) and event (send) are split. */
 export const Channels = {
@@ -23,6 +24,7 @@ export const Channels = {
   settingsLoad: 'settings:load',
   settingsSave: 'settings:save',
   agentsAvailable: 'agents:available',
+  skillsAvailable: 'skills:available',
   worktreeCreate: 'worktree:create',
   worktreeList: 'worktree:list',
   worktreeRemove: 'worktree:remove',
@@ -162,6 +164,10 @@ export interface RendererApi {
   settingsSave(patch: Partial<AppSettings>): Promise<AppSettings>
   /** All configured agents tagged with whether their command is installed. */
   agentsAvailable(): Promise<ResolvedAgent[]>
+  /** Agent Skills found on disk: personal (~/.claude/skills) plus, when a repo
+   * root is given, that project's (.claude/skills). Offered at launch in the
+   * New task dialog. Plugin-namespaced skills are not enumerable this way. */
+  skillsAvailable(repoRoot?: string): Promise<SkillDef[]>
   worktreeCreate(repoRoot: string, opts: CreateWorktreeOptions): Promise<WorktreeInfo>
   worktreeList(repoRoot: string): Promise<WorktreeInfo[]>
   worktreeStatus(worktreePath: string): Promise<WorktreeStatus>
