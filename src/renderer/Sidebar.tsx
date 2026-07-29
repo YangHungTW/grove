@@ -2,12 +2,23 @@ import type { MouseEvent } from 'react'
 import { useStore } from './useStore'
 import { store, type ProjectView, type WorktreeView } from './store'
 import { formatTokens, formatUsd, shortModel } from './usageFormat'
-import { RepoIcon, PlusIcon, GearIcon, XIcon, DiffIcon, MergeIcon, AnchorIcon, BoltIcon } from './Icons'
+import {
+  RepoIcon,
+  PlusIcon,
+  GearIcon,
+  XIcon,
+  DiffIcon,
+  MergeIcon,
+  AnchorIcon,
+  BoltIcon,
+  ChevronDownIcon
+} from './Icons'
 import type { PrInfo } from '../core/gh'
 import groveLogo from './assets/grove-logo.svg'
 
 export function Sidebar(): JSX.Element {
   const s = useStore()
+  const anyExpanded = s.anyProjectExpanded()
   return (
     <aside id="sidebar">
       <div className="brand">
@@ -17,7 +28,20 @@ export function Sidebar(): JSX.Element {
       <button className="new-project" onClick={() => void store.openProject()}>
         + Open project…
       </button>
-      <div className="section-label">Projects</div>
+      <div className="section-label">
+        <span>Projects</span>
+        {s.projects.size > 0 && (
+          <button
+            className="section-action"
+            title={anyExpanded ? 'Collapse every project' : 'Expand every project'}
+            onClick={() =>
+              anyExpanded ? store.collapseAllProjects() : store.expandAllProjects()
+            }
+          >
+            {anyExpanded ? 'Collapse all' : 'Expand all'}
+          </button>
+        )}
+      </div>
       {[...s.projects.values()].map((p) => (
         <ProjectGroup key={p.repoRoot} project={p} />
       ))}
@@ -27,11 +51,29 @@ export function Sidebar(): JSX.Element {
 
 function ProjectGroup({ project }: { project: ProjectView }): JSX.Element {
   const s = useStore()
+  // Collapsing hides the worktree cards, and with them their per-card attention
+  // styling — so surface the aggregate on the header instead.
+  const attention = [...project.worktrees.values()].filter((wt) =>
+    s.worktreePending(wt.id)
+  ).length
   return (
-    <div className="project-group">
+    <div className={'project-group' + (project.expanded ? '' : ' collapsed')}>
       <div className="project-header">
+        <button
+          className="project-caret"
+          aria-expanded={project.expanded}
+          title={project.expanded ? 'Collapse project' : 'Expand project'}
+          onClick={() => store.toggleProjectExpand(project.repoRoot)}
+        >
+          <ChevronDownIcon size={12} />
+        </button>
         <RepoIcon className="repo-icon" />
         <span className="project-name">{project.name}</span>
+        {!project.expanded && attention > 0 && (
+          <span className="project-attention" title={`${attention} need attention`}>
+            {attention}
+          </span>
+        )}
         <span className="project-count">{project.worktrees.size}</span>
         <button
           className="proj-btn"
@@ -83,16 +125,18 @@ function ProjectGroup({ project }: { project: ProjectView }): JSX.Element {
         </button>
       </div>
 
-      <div className="worktrees">
-        {[...project.worktrees.values()].map((wt) => (
-          <WorktreeCard
-            key={wt.id}
-            project={project}
-            wt={wt}
-            active={wt.id === s.activeWorktreeId}
-          />
-        ))}
-      </div>
+      {project.expanded && (
+        <div className="worktrees">
+          {[...project.worktrees.values()].map((wt) => (
+            <WorktreeCard
+              key={wt.id}
+              project={project}
+              wt={wt}
+              active={wt.id === s.activeWorktreeId}
+            />
+          ))}
+        </div>
+      )}
     </div>
   )
 }

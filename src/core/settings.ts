@@ -132,6 +132,10 @@ export interface AppSettings {
   transparent: boolean
   /** Whether the sidebar is collapsed. */
   sidebarCollapsed: boolean
+  /** repoRoots whose sidebar project group is collapsed (hiding its worktrees).
+   * Stores the collapsed set, not the expanded one, so a newly opened project
+   * defaults to expanded without needing a write. */
+  collapsedProjects: string[]
   /** Sidebar width in px (drag-resizable; clamped on apply). */
   sidebarWidth: number
   /** Configured agents for the "+" menu. */
@@ -189,6 +193,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   fontSize: 13,
   transparent: false,
   sidebarCollapsed: false,
+  collapsedProjects: [],
   sidebarWidth: 248,
   agents: AGENT_PRESETS,
   worktreeFolder: '../{repo}-wt-{branch}',

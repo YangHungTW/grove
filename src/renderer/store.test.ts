@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { Store, type ProjectView } from './store'
+import { DEFAULT_SETTINGS } from '../core/settings'
 import type { SessionSnapshot } from '../main/ipc'
 
 // Minimal window.api stub. Each session-create returns a fresh unique id, exactly
@@ -24,7 +25,10 @@ function installApi(): { creates: SessionSnapshot[]; api: Record<string, ReturnT
     sessionResize: vi.fn(),
     setBadgeCount: vi.fn(),
     layoutSave: vi.fn(),
-    refreshWorktreeMeta: vi.fn()
+    refreshWorktreeMeta: vi.fn(),
+    settingsSave: vi.fn(async () => {}),
+    projectRemove: vi.fn(async () => {}),
+    closedAgentsSave: vi.fn()
   }
   // The store reads window.api.* directly.
   ;(globalThis as unknown as { window: { api: unknown } }).window = { api }
@@ -281,5 +285,171 @@ describe('renderer-atlas plumbing (stale-glyph / doubled status-row fix)', () =>
 
     store.clearPaneAtlas('s1')
     expect(clearTextureAtlas).toHaveBeenCalledTimes(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Collapsible sidebar projects
+// ---------------------------------------------------------------------------
+
+// Captured at module load, BEFORE any beforeEach replaces globalThis.window
+// with a bare { api } object — init() needs a real window (addEventListener).
+const jsdomWindow = globalThis.window
+
+function seedSecondProject(store: Store): ProjectView {
+  const project: ProjectView = {
+    repoRoot: '/tmp/other',
+    name: 'other',
+    expanded: true,
+    loaded: true,
+    worktrees: new Map()
+  }
+  store.projects.set(project.repoRoot, project)
+  return project
+}
+
+/** Last collapsedProjects patch handed to settingsSave, or undefined. */
+function lastCollapsed(api: Record<string, ReturnType<typeof vi.fn>>): string[] | undefined {
+  const calls = api.settingsSave.mock.calls
+  for (let i = calls.length - 1; i >= 0; i--) {
+    const patch = calls[i][0] as { collapsedProjects?: string[] }
+    if (patch && 'collapsedProjects' in patch) return patch.collapsedProjects
+  }
+  return undefined
+}
+
+describe('sidebar project collapse', () => {
+  let api: Record<string, ReturnType<typeof vi.fn>>
+  beforeEach(() => {
+    api = installApi().api
+  })
+
+  it('toggling collapses the project and persists its repoRoot', async () => {
+    const store = new Store()
+    const project = seedProject(store)
+    expect(project.expanded).toBe(true)
+
+    store.toggleProjectExpand(project.repoRoot)
+
+    expect(project.expanded).toBe(false)
+    expect(lastCollapsed(api)).toContain('/tmp/repo')
+  })
+
+  it('toggling back expands it and removes it from the persisted set', async () => {
+    const store = new Store()
+    const project = seedProject(store)
+
+    store.toggleProjectExpand(project.repoRoot)
+    store.toggleProjectExpand(project.repoRoot)
+
+    expect(project.expanded).toBe(true)
+    expect(lastCollapsed(api)).not.toContain('/tmp/repo')
+    expect(lastCollapsed(api)).toEqual([])
+  })
+
+  it('collapseAllProjects collapses every project in ONE settings write', () => {
+    const store = new Store()
+    const a = seedProject(store)
+    const b = seedSecondProject(store)
+    api.settingsSave.mockClear()
+
+    store.collapseAllProjects()
+
+    expect(a.expanded).toBe(false)
+    expect(b.expanded).toBe(false)
+    expect(api.settingsSave).toHaveBeenCalledTimes(1)
+    expect(lastCollapsed(api)).toEqual(['/tmp/repo', '/tmp/other'])
+  })
+
+  it('expandAllProjects expands every project and clears the persisted set', () => {
+    const store = new Store()
+    const a = seedProject(store)
+    const b = seedSecondProject(store)
+    store.collapseAllProjects()
+    api.settingsSave.mockClear()
+
+    store.expandAllProjects()
+
+    expect(a.expanded).toBe(true)
+    expect(b.expanded).toBe(true)
+    expect(api.settingsSave).toHaveBeenCalledTimes(1)
+    expect(lastCollapsed(api)).toEqual([])
+  })
+
+  it('anyProjectExpanded drives the Collapse-all / Expand-all label', () => {
+    const store = new Store()
+    seedProject(store)
+    seedSecondProject(store)
+    expect(store.anyProjectExpanded()).toBe(true)
+    store.collapseAllProjects()
+    expect(store.anyProjectExpanded()).toBe(false)
+  })
+
+  it('selecting a collapsed project does not re-expand it, and neither does a reconcile', async () => {
+    const store = new Store()
+    const project = seedProject(store)
+    store.toggleProjectExpand(project.repoRoot)
+    expect(project.expanded).toBe(false)
+
+    await store.setActiveProject(project.repoRoot)
+    expect(store.projects.get('/tmp/repo')!.expanded).toBe(false)
+
+    // The 20s meta poll / window-focus reconcile must not disturb collapse state.
+    api.worktreeList = vi.fn(async () => [{ path: '/tmp/repo', branch: 'main' }])
+    await store.reconcileAllWorktrees()
+    expect(store.projects.get('/tmp/repo')!.expanded).toBe(false)
+    expect(lastCollapsed(api)).toContain('/tmp/repo')
+  })
+
+  it('closing a collapsed project drops it from the persisted set, so reopening starts expanded', async () => {
+    const store = new Store()
+    const project = seedProject(store)
+    seedSecondProject(store)
+    store.toggleProjectExpand(project.repoRoot)
+    expect(lastCollapsed(api)).toContain('/tmp/repo')
+
+    await store.removeProject(project.repoRoot)
+
+    // Stale roots here would silently re-collapse the folder on reopen.
+    expect(lastCollapsed(api)).not.toContain('/tmp/repo')
+    const reopened = (
+      store as unknown as { upsertProject: (r: string, n: string) => ProjectView }
+    ).upsertProject('/tmp/repo', 'repo')
+    expect(reopened.expanded).toBe(true)
+  })
+
+  it('init() rehydrates a persisted collapse instead of force-expanding at boot', async () => {
+    const initApi: Record<string, unknown> = {
+      settingsLoad: vi.fn(async () => ({
+        ...DEFAULT_SETTINGS,
+        collapsedProjects: ['/x']
+      })),
+      agentsAvailable: vi.fn(async () => []),
+      layoutLoad: vi.fn(async () => []),
+      closedAgentsLoad: vi.fn(async () => []),
+      projectListRecent: vi.fn(async () => [{ repoRoot: '/x', name: 'x' }]),
+      repoRoot: vi.fn(async () => '/x'),
+      projectAdd: vi.fn(async () => ({ repoRoot: '/x', name: 'x' })),
+      worktreeList: vi.fn(async () => []),
+      settingsSave: vi.fn(async () => {}),
+      setBadgeCount: vi.fn()
+    }
+    // Unlisted members (the onSessionData/onSessionExit/… listener registrations)
+    // resolve to no-op mocks rather than being hand-listed.
+    const api = new Proxy(initApi, {
+      get: (t, k: string) => (k in t ? t[k] : vi.fn())
+    })
+    ;(globalThis as unknown as { window: unknown }).window = jsdomWindow
+    ;(jsdomWindow as unknown as { api: unknown }).api = api
+    // jsdom has no FontFaceSet; init() awaits document.fonts.load twice.
+    Object.defineProperty(jsdomWindow.document, 'fonts', {
+      value: { load: async () => [] },
+      configurable: true
+    })
+
+    const store = new Store()
+    await store.init()
+
+    expect(store.projects.get('/x')!.expanded).toBe(false)
   })
 })

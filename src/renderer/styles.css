@@ -133,6 +133,10 @@ button {
 }
 
 .section-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
@@ -140,10 +144,62 @@ button {
   color: var(--muted);
   padding: 2px 6px 8px;
 }
+/* Collapse-all / Expand-all: quiet until hovered, so it never competes with
+   the project names below it. */
+.section-action {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  padding: 0;
+  opacity: 0.65;
+}
+.section-action:hover {
+  color: var(--fg);
+  opacity: 1;
+}
 
 /* ---------- flat worktree cards (cmux-style) ---------- */
 .project-group {
   margin-bottom: 14px;
+}
+/* A collapsed group is just a header — drop the gap that separated it from its
+   (now absent) worktree list. */
+.project-group.collapsed {
+  margin-bottom: 6px;
+}
+/* Disclosure caret. Kept deliberately small and muted: the sidebar is a flat
+   card list, and a loud caret would pull it back toward the old accordion look. */
+.project-caret {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  padding: 0;
+  margin-left: -2px;
+  transition: transform 0.12s ease;
+}
+.project-caret:hover {
+  color: var(--fg);
+}
+.project-group.collapsed .project-caret {
+  transform: rotate(-90deg);
+}
+/* Shown only while collapsed: the per-card .attention styling is hidden with
+   the cards, so the count would otherwise vanish silently. */
+.project-attention {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--bg, #1b1b1f);
+  background: var(--accent);
+  border-radius: 9px;
+  padding: 1px 6px;
 }
 /* Project = top level: repo icon + bold name + actions, with a subtle divider. */
 .project-header {

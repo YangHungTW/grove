@@ -25,6 +25,22 @@ describe('SettingsStore', () => {
     expect(new SettingsStore(file).load().durableSessions).toBe(true)
   })
 
+  it('collapsedProjects defaults to empty and round-trips', () => {
+    expect(DEFAULT_SETTINGS.collapsedProjects).toEqual([])
+    expect(new SettingsStore(file).load().collapsedProjects).toEqual([])
+    new SettingsStore(file).save({ collapsedProjects: ['/a', '/b'] })
+    expect(new SettingsStore(file).load().collapsedProjects).toEqual(['/a', '/b'])
+  })
+
+  it('a settings file written before collapsedProjects existed gains the default', () => {
+    // load() spreads DEFAULT_SETTINGS under the parsed file, so no migration
+    // code is needed for pre-feature settings.json files.
+    writeFileSync(file, JSON.stringify({ opacity: 0.9 }))
+    const loaded = new SettingsStore(file).load()
+    expect(loaded.collapsedProjects).toEqual([])
+    expect(loaded.opacity).toBe(0.9)
+  })
+
   it('save merges a partial patch and persists', () => {
     const store = new SettingsStore(file)
     const next = store.save({ background: '#101014', transparent: true })

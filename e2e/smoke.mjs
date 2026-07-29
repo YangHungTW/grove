@@ -113,6 +113,38 @@ try {
   assert.ok(sbAfter > sbBefore + 40, `sidebar resize: col0 should widen (${sbBefore}→${sbAfter})`)
   const sidebarResize = true
 
+  // 2c) PROJECT COLLAPSE — the caret hides the project's worktree cards while
+  // its name + count stay on the header; clicking again restores them.
+  const cardsA = () => groupA.locator('.worktrees .card').count()
+  const cardsBefore = await cardsA()
+  assert.ok(cardsBefore > 0, `collapse: expected project A to have cards, got ${cardsBefore}`)
+  await groupA.locator('.project-caret').click()
+  await win.waitForTimeout(150)
+  const cardsCollapsed = await cardsA()
+  assert.equal(cardsCollapsed, 0, `collapse: expected 0 cards when collapsed, got ${cardsCollapsed}`)
+  assert.ok(
+    await groupA.locator('.project-name').isVisible(),
+    'collapse: project name should stay visible'
+  )
+  assert.ok(
+    await groupA.locator('.project-count').isVisible(),
+    'collapse: project count should stay visible'
+  )
+  // Sibling project is unaffected (collapse is per-project, not an accordion).
+  assert.ok(
+    (await groupB.locator('.worktrees .card').count()) > 0,
+    'collapse: sibling project B should stay expanded'
+  )
+  await groupA.locator('.project-caret').click()
+  await win.waitForTimeout(150)
+  const cardsReexpanded = await cardsA()
+  assert.equal(
+    cardsReexpanded,
+    cardsBefore,
+    `collapse: expected ${cardsBefore} cards after re-expand, got ${cardsReexpanded}`
+  )
+  const projectCollapse = true
+
   const visCount = () =>
     win.evaluate(
       () => [...document.querySelectorAll('.pane')].filter((p) => getComputedStyle(p).display !== 'none').length
@@ -483,7 +515,7 @@ try {
 
   console.log(
     `SMOKE_OK fontLoaded=${fontLoaded} noClip=${noClip} projects=${projectCount} split=${visible} dragResize=${dragResize} roundTrip=true ` +
-      `sidebarResize=${sidebarResize} zoom=${zoomToggle} termSearch=${termSearch} ` +
+      `sidebarResize=${sidebarResize} projectCollapse=${projectCollapse} zoom=${zoomToggle} termSearch=${termSearch} ` +
       `worktreeCreated=true agentLaunched=true multiAgent=${agentRows === 2} ` +
       `agentAfterSwitch=${agentAfterSwitch} newAgentShortcut=${newAgentShortcut} kbdNav=${kbdNav} fileViewer=${fileViewer} ` +
       `viewerPanes=${viewerPanes} htmlIframe=${htmlIframe} htmlScriptRan=${htmlScriptRan} diffReview=${diffReview} ` +

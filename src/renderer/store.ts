@@ -633,7 +633,17 @@ export class Store {
   ): ProjectView {
     let p = this.projects.get(repoRoot)
     if (!p) {
-      p = { repoRoot, name, expanded: false, loaded: false, worktrees: new Map() }
+      // Seeded from the persisted collapsed set, not a constant: init() loads
+      // settings before any upsertProject call, so this IS the rehydration.
+      // Default is expanded — only an explicit past collapse opts out.
+      const collapsed = this.settings.collapsedProjects ?? []
+      p = {
+        repoRoot,
+        name,
+        expanded: !collapsed.includes(repoRoot),
+        loaded: false,
+        worktrees: new Map()
+      }
       this.projects.set(repoRoot, p)
     }
     if (hooks) {
@@ -664,13 +674,38 @@ export class Store {
     const p = this.projects.get(repoRoot)
     if (!p) return
     p.expanded = !p.expanded
-    this.notify()
+    this.persistCollapsed() // notifies via updateSettings
+  }
+  collapseAllProjects(): void {
+    for (const p of this.projects.values()) p.expanded = false
+    this.persistCollapsed()
+  }
+  expandAllProjects(): void {
+    for (const p of this.projects.values()) p.expanded = true
+    this.persistCollapsed()
+  }
+  anyProjectExpanded(): boolean {
+    return [...this.projects.values()].some((p) => p.expanded)
+  }
+  /**
+   * Derive the persisted collapsed set from the live projects and save it in ONE
+   * settings patch — so collapse-all is a single notify + a single IPC write,
+   * not one per project. Deriving (rather than add/remove-ing a key) also drops
+   * closed projects out of the array instead of accumulating stale roots.
+   */
+  private persistCollapsed(): void {
+    const collapsed = [...this.projects.values()]
+      .filter((p) => !p.expanded)
+      .map((p) => p.repoRoot)
+    void this.updateSettings({ collapsedProjects: collapsed })
   }
   async setActiveProject(repoRoot: string): Promise<void> {
     const p = this.projects.get(repoRoot)
     if (!p) return
     this.activeProjectId = repoRoot
-    p.expanded = true // select expands this one; never collapses others
+    // Deliberately does NOT expand: init() calls this on the first project at
+    // boot, so force-expanding here would undo a persisted collapse before the
+    // user ever saw it. Only jumpToPending (an explicit attention jump) expands.
     if (!p.loaded) await this.loadWorktrees(p)
     this.activeWorktreeId = p.worktrees.keys().next().value ?? null
     if (this.activeWorktreeId) await this.restoreWorktree(this.activeWorktreeId)
@@ -691,6 +726,10 @@ export class Store {
       this.activeWorktreeId = this.activeProject()?.worktrees.keys().next().value ?? null
     }
     this.persistLayout()
+    // Re-derive the collapsed set now that this project is gone — otherwise its
+    // root lingers in settings and would silently re-collapse the project if the
+    // user reopened the same folder.
+    this.persistCollapsed()
     this.notify()
   }
 
@@ -1370,13 +1409,20 @@ export class Store {
       this.syncBadge()
       return
     }
+    let expandedOne = false
     for (const p of this.projects.values())
       for (const wt of p.worktrees.values())
         if (wt.id === s.worktreeId) {
           this.activeProjectId = p.repoRoot
-          p.expanded = true
+          // An explicit attention jump must not land on an invisible worktree,
+          // so this one force-expand stays — and is persisted so it sticks.
+          if (!p.expanded) {
+            p.expanded = true
+            expandedOne = true
+          }
           this.activeWorktreeId = wt.id
         }
+    if (expandedOne) this.persistCollapsed()
     this.focusSession(id)
   }
 
