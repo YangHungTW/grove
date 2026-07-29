@@ -709,7 +709,14 @@ function createWindow(): void {
       // electron-vite emits the preload as .mjs under "type":"module".
       preload: join(__dirname, '../preload/index.mjs'),
       sandbox: false,
-      contextIsolation: true
+      contextIsolation: true,
+      // Occluded windows normally get their renderer throttled and GPU
+      // resources reclaimed, which blanks the xterm WebGL canvas until
+      // something forces a repaint. The renderer repaints on focus/visibility
+      // anyway (Store.repaintAllPanes), but agents keep streaming while Grove
+      // is in the background, so throttled timers would also stall the pty
+      // read loop and state detection.
+      backgroundThrottling: false
     }
   })
 

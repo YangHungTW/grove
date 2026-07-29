@@ -286,6 +286,21 @@ export class Store {
   clearPaneAtlas(id: string): void {
     this.panes.get(id)?.renderAddon?.clearTextureAtlas?.()
   }
+  /** Repaint every live pane from scratch (drop the glyph atlas, then refresh).
+   *
+   * Chromium releases GPU resources while a window is occluded — another app or
+   * Space fully in front of Grove — which leaves xterm's WebGL canvas blank on
+   * return. Nothing else asks for a redraw: the repaint triggers are a size
+   * change, a reshow from display:none, and incoming pty output, none of which
+   * fire when you simply come back to an idle pane. The pane therefore stays
+   * black until a stray mouse move makes xterm render again. Regaining
+   * visibility/focus is that missing trigger. */
+  repaintAllPanes(): void {
+    for (const pane of this.panes.values()) {
+      pane.renderAddon?.clearTextureAtlas?.()
+      pane.term.refresh(0, pane.term.rows - 1)
+    }
+  }
   /** Force a full repaint of panes that just received output, coalesced per
    * burst. Works around xterm canvas/WebGL renderers skipping an in-place row
    * rewrite (e.g. an agent's cost/status line) so it stays stale until a manual
@@ -1639,8 +1654,18 @@ export class Store {
     else this.notify()
     this.startMetaPolling()
     // Refocusing Grove (e.g. after creating a worktree in another terminal)
-    // reconciles immediately, so it appears without waiting for the poll.
-    window.addEventListener('focus', () => void this.reconcileAllWorktrees())
+    // reconciles immediately, so it appears without waiting for the poll. It is
+    // also the moment a pane blanked by occlusion needs its repaint — see
+    // repaintAllPanes(). visibilitychange is the precise signal, but macOS
+    // occlusion detection can be disabled (and is skipped entirely for a window
+    // that never fully hides), so focus is the safety net; both are idempotent.
+    window.addEventListener('focus', () => {
+      void this.reconcileAllWorktrees()
+      this.repaintAllPanes()
+    })
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) this.repaintAllPanes()
+    })
   }
 }
 

@@ -288,6 +288,58 @@ describe('renderer-atlas plumbing (stale-glyph / doubled status-row fix)', () =>
   })
 })
 
+describe('repaintAllPanes (blank pane after window occlusion)', () => {
+  beforeEach(() => {
+    installApi()
+  })
+
+  it('clears the atlas and fully refreshes every registered pane', () => {
+    const store = new Store()
+    const a = fakePane()
+    const b = fakePane()
+    store.registerPane('s1', a.term as never, a.fit as never)
+    store.registerPane('s2', b.term as never, b.fit as never)
+    const clearA = vi.fn()
+    const clearB = vi.fn()
+    store.setRenderAddon('s1', { clearTextureAtlas: clearA })
+    store.setRenderAddon('s2', { clearTextureAtlas: clearB })
+
+    store.repaintAllPanes()
+
+    // Coming back from occlusion, the GPU may have dropped the glyph textures
+    // too — a plain refresh would redraw from a stale atlas.
+    expect(clearA).toHaveBeenCalledTimes(1)
+    expect(clearB).toHaveBeenCalledTimes(1)
+    // Full range, not a partial row span: the whole canvas is gone.
+    expect(a.term.refresh).toHaveBeenCalledWith(0, 23)
+    expect(b.term.refresh).toHaveBeenCalledWith(0, 23)
+  })
+
+  it('repaints panes that have no renderer addon (DOM fallback) without throwing', () => {
+    const store = new Store()
+    const pane = fakePane()
+    store.registerPane('s1', pane.term as never, pane.fit as never)
+
+    expect(() => store.repaintAllPanes()).not.toThrow()
+    expect(pane.term.refresh).toHaveBeenCalledWith(0, 23)
+  })
+
+  it('is a no-op with no panes registered', () => {
+    const store = new Store()
+    expect(() => store.repaintAllPanes()).not.toThrow()
+  })
+
+  it('uses each pane’s own row count', () => {
+    const store = new Store()
+    const pane = fakePane()
+    pane.term.resize(100, 40)
+    store.registerPane('s1', pane.term as never, pane.fit as never)
+
+    store.repaintAllPanes()
+    expect(pane.term.refresh).toHaveBeenLastCalledWith(0, 39)
+  })
+})
+
 // ---------------------------------------------------------------------------
 // Collapsible sidebar projects
 // ---------------------------------------------------------------------------

@@ -21,7 +21,26 @@ import { shiftEnterByte } from './termKeys'
 import { findFileLinks } from '../core/fileLinks'
 import { isHttpUrl } from '../core/openTarget'
 import { shellQuote } from '../core/shellQuote'
+import { canRetryWebgl, webglRetryDelay } from '../core/renderRetry'
 import type { SessionSnapshot } from '../main/ipc'
+
+/** Is a WebGL context obtainable right now? Probed on a throwaway canvas after
+ * a context loss, so we only tear down the working canvas renderer once the GPU
+ * is actually back. The probe context is released immediately — browsers cap
+ * how many live WebGL contexts a page may hold, and Grove can have many panes. */
+function webglSupported(): boolean {
+  try {
+    const probe = document.createElement('canvas')
+    const gl = (probe.getContext('webgl2') ?? probe.getContext('webgl')) as
+      | WebGLRenderingContext
+      | null
+    if (!gl) return false
+    gl.getExtension('WEBGL_lose_context')?.loseContext()
+    return true
+  } catch {
+    return false
+  }
+}
 
 export function PaneGrid(): JSX.Element {
   const s = useStore()
@@ -334,21 +353,28 @@ function Pane({
   useEffect(() => {
     const term = termRef.current
     if (!term) return
-    let addon: { dispose(): void } | null = null
+    type RenderAddon = { dispose(): void; clearTextureAtlas?: () => void }
+    let addon: RenderAddon | null = null
+    let gone = false
+    let retryTimer = 0
+    let retries = 0
+    const setAddon = (a: RenderAddon | null): void => {
+      addon = a
+      store.setRenderAddon(session.id, a)
+    }
     const loadCanvas = (): void => {
+      if (gone) return
       try {
         const c = new CanvasAddon()
         term.loadAddon(c)
-        addon = c
-        store.setRenderAddon(session.id, c)
+        setAddon(c)
         term.refresh(0, term.rows - 1)
       } catch {
         /* keep DOM renderer */
       }
     }
-    if (transparent) {
-      loadCanvas()
-    } else {
+    const loadWebgl = (): boolean => {
+      if (gone) return false
       try {
         const webgl = new WebglAddon()
         webgl.onContextLoss(() => {
@@ -357,18 +383,52 @@ function Pane({
           } catch {
             /* ignore */
           }
-          loadCanvas()
+          loadCanvas() // keep the pane readable while the GPU comes back
+          scheduleWebglRetry()
         })
         term.loadAddon(webgl)
-        addon = webgl
-        store.setRenderAddon(session.id, webgl)
+        setAddon(webgl)
         term.refresh(0, term.rows - 1)
+        return true
       } catch {
-        // WebGL unavailable (software rendering / blocklisted GPU) — use canvas.
-        loadCanvas()
+        return false
       }
     }
+    // A lost GPU context is usually transient (driver reset, display change,
+    // waking from occlusion), but nothing re-offers WebGL afterwards: without
+    // this, one blip downgrades the pane to canvas 2D — and its per-keystroke
+    // repaint — for the rest of the session. Probe with backoff, then give up.
+    const scheduleWebglRetry = (): void => {
+      if (gone || !canRetryWebgl(retries)) return
+      retries++
+      retryTimer = window.setTimeout(() => {
+        if (gone) return
+        if (!webglSupported()) {
+          scheduleWebglRetry()
+          return
+        }
+        try {
+          addon?.dispose()
+        } catch {
+          /* ignore */
+        }
+        setAddon(null)
+        if (!loadWebgl()) {
+          loadCanvas()
+          scheduleWebglRetry()
+        }
+      }, webglRetryDelay(retries))
+    }
+    if (transparent) {
+      loadCanvas()
+    } else if (!loadWebgl()) {
+      // WebGL unavailable (software rendering / blocklisted GPU) — use canvas.
+      // No retry here: this is a standing property of the machine, not a blip.
+      loadCanvas()
+    }
     return () => {
+      gone = true
+      window.clearTimeout(retryTimer)
       store.setRenderAddon(session.id, null)
       try {
         addon?.dispose()
