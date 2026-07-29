@@ -188,6 +188,7 @@ try {
   )
   assert.ok(noClip, 'pane terminal overflows its pane (bottom-line clip)')
 
+
   // 3b) DRAG-RESIZE — drag the column divider right; the first column widens.
   const colsCss = () =>
     win.evaluate(() => getComputedStyle(document.getElementById('panes')).gridTemplateColumns)
@@ -513,6 +514,40 @@ try {
   const restored = await win2.locator('.tab').count()
   assert.ok(restored >= 2, `persistence: expected >= 2 restored sessions, got ${restored}`)
 
+  // 9) WEBGL CONTEXT BUDGET — checked HERE because this is the app's widest
+  // state: every restored session has a live Terminal while only the active tab
+  // is on screen. A WebGL context is a scarce PROCESS-wide resource — Chromium
+  // keeps at most 16, and allocating the 17th force-loses the OLDEST one,
+  // blanking whichever pane owned it. Binding the renderer to sessions instead
+  // of to visible panes overran that cap, so panes went black on their own,
+  // re-acquired, and evicted the next pane in turn. Contexts must track panes
+  // that are actually on screen.
+  await win2.waitForTimeout(800) // let the restored panes settle on a renderer
+  const gl = await win2.evaluate(() => {
+    let contexts = 0
+    let lost = 0
+    for (const c of document.querySelectorAll('.xterm-screen canvas')) {
+      // Returns the canvas's EXISTING context (null for a 2D canvas); it never
+      // allocates, so counting cannot itself cause the eviction we guard against.
+      const ctx = c.getContext('webgl2') || c.getContext('webgl')
+      if (!ctx) continue
+      contexts++
+      if (ctx.isContextLost()) lost++
+    }
+    const visibleTerms = [...document.querySelectorAll('.pane')].filter(
+      (p) => getComputedStyle(p).display !== 'none' && p.querySelector('.xterm-screen')
+    ).length
+    const termPanes = document.querySelectorAll('.pane .xterm-screen').length
+    return { contexts, lost, visibleTerms, termPanes }
+  })
+  assert.ok(gl.termPanes > gl.visibleTerms, 'webgl budget: need hidden panes to make this meaningful')
+  assert.equal(gl.lost, 0, `webgl: ${gl.lost} pane context(s) already lost`)
+  assert.ok(
+    gl.contexts <= gl.visibleTerms,
+    `webgl: ${gl.contexts} live contexts for ${gl.visibleTerms} visible of ${gl.termPanes} terminal ` +
+      `panes — hidden panes must not hold a context`
+  )
+
   console.log(
     `SMOKE_OK fontLoaded=${fontLoaded} noClip=${noClip} projects=${projectCount} split=${visible} dragResize=${dragResize} roundTrip=true ` +
       `sidebarResize=${sidebarResize} projectCollapse=${projectCollapse} zoom=${zoomToggle} termSearch=${termSearch} ` +
@@ -520,7 +555,7 @@ try {
       `agentAfterSwitch=${agentAfterSwitch} newAgentShortcut=${newAgentShortcut} kbdNav=${kbdNav} fileViewer=${fileViewer} ` +
       `viewerPanes=${viewerPanes} htmlIframe=${htmlIframe} htmlScriptRan=${htmlScriptRan} diffReview=${diffReview} ` +
       `diffAdd=${addLines} diffDel=${delLines} splitDiff=${splitDiff} ideOpen=${ideOpen} finish=${finishFlow} ` +
-      `newTask=${newTaskFlow} restored=${restored}`
+      `newTask=${newTaskFlow} restored=${restored} glContexts=${gl.contexts}/${gl.visibleTerms}`
   )
 } catch (err) {
   failed = true

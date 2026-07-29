@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { Store, type ProjectView } from './store'
 import { DEFAULT_SETTINGS } from '../core/settings'
 import type { SessionSnapshot } from '../main/ipc'
@@ -396,6 +396,71 @@ describe('repaintAllPanes (blank pane after window occlusion)', () => {
 
     store.repaintAllPanes()
     expect(pane.term.refresh).toHaveBeenLastCalledWith(0, 39)
+  })
+})
+
+describe('scheduleScrollRepaint (blank pane after scrolling past the buffer end)', () => {
+  beforeEach(() => {
+    installApi()
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('clears the atlas and fully refreshes the wheeled pane', () => {
+    const store = new Store()
+    const pane = fakePane()
+    store.registerPane('s1', pane.term as never, pane.fit as never)
+    const clear = vi.fn()
+    store.setRenderAddon('s1', { clearTextureAtlas: clear })
+
+    store.scheduleScrollRepaint('s1')
+    // Trailing edge: nothing repaints while the gesture is still going.
+    expect(pane.term.refresh).not.toHaveBeenCalled()
+    vi.runAllTimers()
+
+    expect(clear).toHaveBeenCalledTimes(1)
+    expect(pane.term.refresh).toHaveBeenCalledWith(0, 23)
+  })
+
+  it('coalesces a burst of wheel events into one repaint', () => {
+    const store = new Store()
+    const pane = fakePane()
+    store.registerPane('s1', pane.term as never, pane.fit as never)
+
+    // A trackpad flick delivers dozens of wheel events; each must not cost a
+    // full-canvas repaint.
+    for (let i = 0; i < 30; i++) store.scheduleScrollRepaint('s1')
+    vi.runAllTimers()
+
+    expect(pane.term.refresh).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves other panes alone', () => {
+    const store = new Store()
+    const a = fakePane()
+    const b = fakePane()
+    store.registerPane('s1', a.term as never, a.fit as never)
+    store.registerPane('s2', b.term as never, b.fit as never)
+
+    store.scheduleScrollRepaint('s1')
+    vi.runAllTimers()
+
+    expect(a.term.refresh).toHaveBeenCalledTimes(1)
+    expect(b.term.refresh).not.toHaveBeenCalled()
+  })
+
+  it('does not throw when the pane is disposed before the timer fires', () => {
+    const store = new Store()
+    const pane = fakePane()
+    store.registerPane('s1', pane.term as never, pane.fit as never)
+
+    store.scheduleScrollRepaint('s1')
+    store.unregisterPane('s1')
+
+    expect(() => vi.runAllTimers()).not.toThrow()
+    expect(pane.term.refresh).not.toHaveBeenCalled()
   })
 })
 

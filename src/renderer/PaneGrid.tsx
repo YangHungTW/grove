@@ -24,24 +24,6 @@ import { shellQuote } from '../core/shellQuote'
 import { canRetryWebgl, webglRetryDelay } from '../core/renderRetry'
 import type { SessionSnapshot } from '../main/ipc'
 
-/** Is a WebGL context obtainable right now? Probed on a throwaway canvas after
- * a context loss, so we only tear down the working canvas renderer once the GPU
- * is actually back. The probe context is released immediately — browsers cap
- * how many live WebGL contexts a page may hold, and Grove can have many panes. */
-function webglSupported(): boolean {
-  try {
-    const probe = document.createElement('canvas')
-    const gl = (probe.getContext('webgl2') ?? probe.getContext('webgl')) as
-      | WebGLRenderingContext
-      | null
-    if (!gl) return false
-    gl.getExtension('WEBGL_lose_context')?.loseContext()
-    return true
-  } catch {
-    return false
-  }
-}
-
 export function PaneGrid(): JSX.Element {
   const s = useStore()
   const { cols } = s.computeGrid()
@@ -326,6 +308,13 @@ function Pane({
     ro.observe(el)
     store.registerPane(session.id, term, fit, search, refit)
 
+    // Scrolling past the end of the scrollback blanks the WebGL canvas and
+    // nothing asks for a redraw afterwards (see Store.scheduleScrollRepaint).
+    // A passive listener on the pane, not an xterm wheel handler: it must not
+    // be able to change what xterm does with the event, only repaint after it.
+    const onWheel = (): void => store.scheduleScrollRepaint(session.id)
+    el.addEventListener('wheel', onWheel, { passive: true })
+
     // The terminal may first fit with a fallback font (smaller cells → too many
     // rows). Once the bundled Nerd Font is ready, cell metrics change, so refit.
     let alive = true
@@ -336,20 +325,31 @@ function Pane({
     return () => {
       alive = false
       window.clearTimeout(resizeTimer)
+      el.removeEventListener('wheel', onWheel)
       ro.disconnect()
       store.unregisterPane(session.id)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id])
 
-  // Renderer choice depends on transparency, and re-runs when it toggles:
-  //  - opaque  → WebGL: lowest input latency (canvas 2D repaints per keystroke
-  //    and feels laggy on Retina). Force a refresh on attach (WebGL can leave a
-  //    fresh pane unpainted) and fall back to canvas on GPU context loss.
+  // Renderer choice, re-run whenever transparency or visibility changes:
+  //  - opaque + on screen → WebGL: lowest input latency (canvas 2D repaints per
+  //    keystroke and feels laggy on Retina). Force a refresh on attach (WebGL
+  //    can leave a fresh pane unpainted) and fall back to canvas on context loss.
   //  - transparent → Canvas: xterm's WebGL renderer ignores allowTransparency
   //    (paints an opaque background), so it would defeat the see-through effect.
   //    Canvas renders the rgba background transparent while keeping text fully
   //    opaque — exactly "background shows through, glyphs stay solid".
+  //  - HIDDEN (display:none, i.e. another tab/worktree) → Canvas, because a
+  //    WebGL context is a scarce process-wide resource. Grove keeps a live
+  //    Terminal for EVERY session, not just the visible ones, so binding WebGL
+  //    to sessions rather than to screen slots overruns Chromium's cap of 16
+  //    live contexts: allocating the 17th force-loses the OLDEST one, blanking
+  //    whichever pane happened to own it (measured — 20 sessions leaves several
+  //    panes with isContextLost() true). The blanked pane then falls back and
+  //    re-acquires, which evicts the next one, so the blackout rolls from pane
+  //    to pane and each "recovers by itself". Visible panes are a handful, so
+  //    scoping WebGL to them keeps the process far below the cap.
   useEffect(() => {
     const term = termRef.current
     if (!term) return
@@ -362,6 +362,17 @@ function Pane({
       addon = a
       store.setRenderAddon(session.id, a)
     }
+    // A renderer swapped in as the pane becomes visible attaches BEFORE the
+    // browser has laid the pane out, so its first refresh measures a stale box
+    // and can leave individual cells unpainted (observed as dropped glyphs in a
+    // syntax-highlighted prompt). Repaint once more after layout has settled.
+    let repaintFrame = 0
+    const repaintNextFrame = (): void => {
+      cancelAnimationFrame(repaintFrame)
+      repaintFrame = requestAnimationFrame(() => {
+        if (!gone) store.repaintPane(session.id)
+      })
+    }
     const loadCanvas = (): void => {
       if (gone) return
       try {
@@ -369,6 +380,7 @@ function Pane({
         term.loadAddon(c)
         setAddon(c)
         term.refresh(0, term.rows - 1)
+        repaintNextFrame()
       } catch {
         /* keep DOM renderer */
       }
@@ -389,6 +401,7 @@ function Pane({
         term.loadAddon(webgl)
         setAddon(webgl)
         term.refresh(0, term.rows - 1)
+        repaintNextFrame()
         return true
       } catch {
         return false
@@ -397,16 +410,19 @@ function Pane({
     // A lost GPU context is usually transient (driver reset, display change,
     // waking from occlusion), but nothing re-offers WebGL afterwards: without
     // this, one blip downgrades the pane to canvas 2D — and its per-keystroke
-    // repaint — for the rest of the session. Probe with backoff, then give up.
+    // repaint — for the rest of the session. Retry with backoff, then give up.
+    //
+    // The retry must NOT probe on a throwaway canvas first: allocating a context
+    // just to ask "is the GPU back?" is itself an allocation against Chromium's
+    // 16-context cap, so a probing pane can evict a healthy pane's context and
+    // start the next blackout. loadWebgl() allocates exactly the one context we
+    // actually intend to keep, and throws if the GPU is still unavailable — the
+    // attempt IS the probe.
     const scheduleWebglRetry = (): void => {
       if (gone || !canRetryWebgl(retries)) return
       retries++
       retryTimer = window.setTimeout(() => {
         if (gone) return
-        if (!webglSupported()) {
-          scheduleWebglRetry()
-          return
-        }
         try {
           addon?.dispose()
         } catch {
@@ -419,7 +435,7 @@ function Pane({
         }
       }, webglRetryDelay(retries))
     }
-    if (transparent) {
+    if (transparent || !visible) {
       loadCanvas()
     } else if (!loadWebgl()) {
       // WebGL unavailable (software rendering / blocklisted GPU) — use canvas.
@@ -429,6 +445,7 @@ function Pane({
     return () => {
       gone = true
       window.clearTimeout(retryTimer)
+      cancelAnimationFrame(repaintFrame)
       store.setRenderAddon(session.id, null)
       try {
         addon?.dispose()
@@ -436,7 +453,7 @@ function Pane({
         /* term may already be disposed */
       }
     }
-  }, [session.id, transparent])
+  }, [session.id, transparent, visible])
 
   return (
     <div

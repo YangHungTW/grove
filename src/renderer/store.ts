@@ -170,6 +170,9 @@ export class Store {
   // output settles, not one per frame) to avoid churning the atlas mid-stream.
   private atlasPanes = new Set<string>()
   private atlasTimer: number | undefined
+  // Panes wheeled since the last scroll-repaint tick — see scheduleScrollRepaint.
+  private scrollPanes = new Set<string>()
+  private scrollTimer: ReturnType<typeof setTimeout> | undefined
 
   private version = 0
   private listeners = new Set<() => void>()
@@ -301,10 +304,31 @@ export class Store {
    * black until a stray mouse move makes xterm render again. Regaining
    * visibility/focus is that missing trigger. */
   repaintAllPanes(): void {
-    for (const pane of this.panes.values()) {
-      pane.renderAddon?.clearTextureAtlas?.()
-      pane.term.refresh(0, pane.term.rows - 1)
-    }
+    for (const id of this.panes.keys()) this.repaintPane(id)
+  }
+  /** Repaint one pane from scratch (drop its glyph atlas, then full refresh). */
+  repaintPane(id: string): void {
+    const pane = this.panes.get(id)
+    if (!pane) return
+    pane.renderAddon?.clearTextureAtlas?.()
+    pane.term.refresh(0, pane.term.rows - 1)
+  }
+  /** Repaint a pane on the trailing edge of a wheel burst.
+   *
+   * Wheeling to the end of the scrollback and pushing further leaves xterm's
+   * WebGL canvas blank: the viewport is already clamped, so no rows are marked
+   * dirty and no redraw is scheduled. The buffer is intact — the text is still
+   * selectable, and moving the mouse over the pane repaints just the rows it
+   * touches — but the pane otherwise stays black until the next pty output.
+   * This is the scroll counterpart of the occlusion blanking repaintAllPanes()
+   * handles; the trailing edge means one repaint per gesture, not per notch. */
+  scheduleScrollRepaint(id: string): void {
+    this.scrollPanes.add(id)
+    clearTimeout(this.scrollTimer)
+    this.scrollTimer = setTimeout(() => {
+      for (const pid of this.scrollPanes) this.repaintPane(pid)
+      this.scrollPanes.clear()
+    }, 60)
   }
   /** Force a full repaint of panes that just received output, coalesced per
    * burst. Works around xterm canvas/WebGL renderers skipping an in-place row

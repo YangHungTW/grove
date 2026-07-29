@@ -1301,6 +1301,13 @@ button {
   top: 0 !important;
   left: 0 !important;
 }
+/* A terminal pane is the end of the scroll chain: wheeling past the top/bottom
+   of the scrollback must not rubber-band the pane or scroll the app shell
+   behind it. (The overscroll bounce is also what leaves the WebGL canvas blank
+   at the end of the buffer — see Store.scheduleScrollRepaint.) */
+.pane .xterm-viewport {
+  overscroll-behavior: none;
+}
 /* Hide the scrollbar so FitAddon doesn't reserve ~15px on the right (leaving a
    grey strip). Wheel-scroll still works. */
 .pane .xterm-viewport::-webkit-scrollbar {
