@@ -1,5 +1,53 @@
 import { describe, it, expect } from 'vitest'
-import { sortByOrder, moveBefore, reorderMap } from './sidebarOrder'
+import { sortByOrder, moveBefore, reorderMap, slotAt, slotBefore } from './sidebarOrder'
+
+/** Three 20px-tall rows stacked with a 10px gap, as the sidebar renders them. */
+const rows = [
+  { id: 'a', top: 0, height: 20 },
+  { id: 'b', top: 30, height: 20 },
+  { id: 'c', top: 60, height: 20 }
+]
+
+describe('slotAt — hit-testing a drag against a whole list', () => {
+  it('takes the top edge of the row the cursor is in the upper half of', () => {
+    expect(slotAt(2, rows)).toEqual({ id: 'a', edge: 'top' })
+    expect(slotAt(35, rows)).toEqual({ id: 'b', edge: 'top' })
+  })
+
+  it('rolls past a row once the cursor clears its midpoint', () => {
+    expect(slotAt(18, rows)).toEqual({ id: 'b', edge: 'top' })
+  })
+
+  it('resolves the gaps between rows — no dead zone to steer around', () => {
+    expect(slotAt(25, rows)).toEqual({ id: 'b', edge: 'top' })
+    expect(slotAt(55, rows)).toEqual({ id: 'c', edge: 'top' })
+  })
+
+  it('lands on the last row’s bottom edge anywhere below the list', () => {
+    expect(slotAt(75, rows)).toEqual({ id: 'c', edge: 'bottom' })
+    expect(slotAt(4000, rows)).toEqual({ id: 'c', edge: 'bottom' })
+  })
+
+  it('has nothing to insert relative to in an empty list', () => {
+    expect(slotAt(10, [])).toBeNull()
+  })
+})
+
+describe('slotBefore — turning a slot into an insertion point', () => {
+  const ids = ['a', 'b', 'c']
+
+  it('inserts before the row itself on its top edge', () => {
+    expect(slotBefore({ id: 'b', edge: 'top' }, ids)).toBe('b')
+  })
+
+  it('inserts before the following row on a bottom edge', () => {
+    expect(slotBefore({ id: 'a', edge: 'bottom' }, ids)).toBe('b')
+  })
+
+  it('appends past the last row, which is otherwise unreachable', () => {
+    expect(slotBefore({ id: 'c', edge: 'bottom' }, ids)).toBeUndefined()
+  })
+})
 
 describe('sortByOrder — applying a saved sidebar arrangement', () => {
   it('returns the incoming order when nothing is saved', () => {

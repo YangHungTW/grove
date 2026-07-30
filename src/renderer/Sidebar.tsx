@@ -13,6 +13,7 @@ import {
   BoltIcon,
   ChevronDownIcon
 } from './Icons'
+import { slotAt, slotBefore, type DropSlot } from '../core/sidebarOrder'
 import type { PrInfo } from '../core/gh'
 import groveLogo from './assets/grove-logo.svg'
 
@@ -25,29 +26,46 @@ let dragWt: { repoRoot: string; id: string } | null = null
 /** Which edge of a row the cursor is on — the insertion line to draw. */
 type Edge = 'top' | 'bottom' | null
 
-function edgeOf(e: DragEvent<HTMLElement>): Exclude<Edge, null> {
-  const r = e.currentTarget.getBoundingClientRect()
-  return e.clientY > r.top + r.height / 2 ? 'bottom' : 'top'
+/**
+ * The insertion slot for a drag over a list container, measured from the rows
+ * it actually rendered. Rows are found by `sel` and identified by `attr`, so the
+ * container — not each row — owns hit testing, and the gaps between rows and the
+ * space below the last one stay droppable.
+ */
+function slotIn(e: DragEvent<HTMLElement>, sel: string, attr: string): DropSlot | null {
+  const rows = [...e.currentTarget.querySelectorAll<HTMLElement>(sel)].map((el) => {
+    const r = el.getBoundingClientRect()
+    return { id: el.getAttribute(attr) ?? '', top: r.top, height: r.height }
+  })
+  return slotAt(e.clientY, rows)
 }
 
-/**
- * The id to insert before for a drop on `targetId`: the target itself when the
- * cursor is on its top half, otherwise the row after it (undefined past the
- * last row = append). The bottom half matters — without it the last position is
- * unreachable, since every drop would land above something.
- */
-function insertBefore(e: DragEvent<HTMLElement>, ids: string[], targetId: string): string | undefined {
-  if (edgeOf(e) === 'top') return targetId
-  return ids[ids.indexOf(targetId) + 1]
+/** True once the drag has left `currentTarget` for good, rather than merely
+ * crossed into one of its children — which fires dragleave on the parent too,
+ * and would otherwise blink the insertion line off on every internal move. */
+function reallyLeft(e: DragEvent<HTMLElement>): boolean {
+  const to = e.relatedTarget
+  return !(to instanceof Node) || !e.currentTarget.contains(to)
 }
 
 function edgeClass(edge: Edge): string {
   return edge ? ` drop-${edge}` : ''
 }
 
+/** The insertion line for `id`, when the slot is on that row. */
+function slotClass(slot: DropSlot | null, id: string): string {
+  return edgeClass(slot?.id === id ? slot.edge : null)
+}
+
 export function Sidebar(): JSX.Element {
   const s = useStore()
   const anyExpanded = s.anyProjectExpanded()
+  // The list, not each header, hit-tests project drags: a group is as tall as
+  // its expanded worktrees, so aiming at headers alone meant threading a ~28px
+  // strip, and an insertion line under an expanded header drew *inside* the
+  // group it was really landing after.
+  const [slot, setSlot] = useState<DropSlot | null>(null)
+  const canDropProject = (): boolean => dragProject !== null
   return (
     <aside id="sidebar">
       <div className="brand">
@@ -71,16 +89,45 @@ export function Sidebar(): JSX.Element {
           </button>
         )}
       </div>
-      {[...s.projects.values()].map((p) => (
-        <ProjectGroup key={p.repoRoot} project={p} />
-      ))}
+      <div
+        className="project-list"
+        onDragOver={(e) => {
+          if (!canDropProject()) return
+          e.preventDefault()
+          e.dataTransfer.dropEffect = 'move'
+          setSlot(slotIn(e, '.project-group', 'data-repo'))
+        }}
+        onDragLeave={(e) => {
+          if (reallyLeft(e)) setSlot(null)
+        }}
+        onDrop={(e) => {
+          if (!canDropProject() || !dragProject) return
+          e.preventDefault()
+          const at = slotIn(e, '.project-group', 'data-repo')
+          setSlot(null)
+          if (at) store.reorderProject(dragProject, slotBefore(at, [...s.projects.keys()]))
+          dragProject = null
+        }}
+      >
+        {[...s.projects.values()].map((p) => (
+          <ProjectGroup key={p.repoRoot} project={p} slot={slot} />
+        ))}
+      </div>
     </aside>
   )
 }
 
-function ProjectGroup({ project }: { project: ProjectView }): JSX.Element {
+function ProjectGroup({
+  project,
+  slot
+}: {
+  project: ProjectView
+  slot: DropSlot | null
+}): JSX.Element {
   const s = useStore()
-  const [edge, setEdge] = useState<Edge>(null)
+  // Worktree cards are hit-tested by their container for the same reason
+  // projects are — see Sidebar. Held here so the whole list shares one slot.
+  const [cardSlot, setCardSlot] = useState<DropSlot | null>(null)
   // Collapsing hides the worktree cards, and with them their per-card attention
   // styling — so surface the aggregate on the header instead.
   const attention = [...project.worktrees.values()].filter((wt) =>
@@ -89,12 +136,18 @@ function ProjectGroup({ project }: { project: ProjectView }): JSX.Element {
   // Read at event time, never at render: the drag state is module-level, so
   // nothing re-renders between dragstart and dragover — a value captured in the
   // render closure would still say "no drag in progress" and reject every drop.
-  const canDrop = (): boolean => dragProject !== null && dragProject !== project.repoRoot
+  const canDropCard = (): boolean => dragWt !== null && dragWt.repoRoot === project.repoRoot
   return (
-    <div className={'project-group' + (project.expanded ? '' : ' collapsed')}>
+    <div
+      className={
+        'project-group' +
+        (project.expanded ? '' : ' collapsed') +
+        slotClass(slot, project.repoRoot)
+      }
+      data-repo={project.repoRoot}
+    >
       <div
-        className={'project-header' + edgeClass(edge)}
-        data-repo={project.repoRoot}
+        className="project-header"
         draggable
         onDragStart={(e) => {
           dragProject = project.repoRoot
@@ -102,24 +155,6 @@ function ProjectGroup({ project }: { project: ProjectView }): JSX.Element {
           e.dataTransfer.setData('text/plain', project.repoRoot)
         }}
         onDragEnd={() => {
-          dragProject = null
-          setEdge(null)
-        }}
-        onDragOver={(e) => {
-          if (!canDrop()) return
-          e.preventDefault()
-          e.dataTransfer.dropEffect = 'move'
-          setEdge(edgeOf(e))
-        }}
-        onDragLeave={() => setEdge(null)}
-        onDrop={(e) => {
-          if (!canDrop() || !dragProject) return
-          e.preventDefault()
-          setEdge(null)
-          store.reorderProject(
-            dragProject,
-            insertBefore(e, [...s.projects.keys()], project.repoRoot)
-          )
           dragProject = null
         }}
       >
@@ -192,13 +227,38 @@ function ProjectGroup({ project }: { project: ProjectView }): JSX.Element {
       </div>
 
       {project.expanded && (
-        <div className="worktrees">
+        <div
+          className="worktrees"
+          onDragOver={(e) => {
+            if (!canDropCard()) return
+            e.preventDefault()
+            e.dataTransfer.dropEffect = 'move'
+            setCardSlot(slotIn(e, '.card', 'data-wt'))
+          }}
+          onDragLeave={(e) => {
+            if (reallyLeft(e)) setCardSlot(null)
+          }}
+          onDrop={(e) => {
+            if (!canDropCard() || !dragWt) return
+            e.preventDefault()
+            const at = slotIn(e, '.card', 'data-wt')
+            setCardSlot(null)
+            if (at)
+              store.reorderWorktree(
+                project.repoRoot,
+                dragWt.id,
+                slotBefore(at, [...project.worktrees.keys()])
+              )
+            dragWt = null
+          }}
+        >
           {[...project.worktrees.values()].map((wt) => (
             <WorktreeCard
               key={wt.id}
               project={project}
               wt={wt}
               active={wt.id === s.activeWorktreeId}
+              slot={cardSlot}
             />
           ))}
         </div>
@@ -210,14 +270,15 @@ function ProjectGroup({ project }: { project: ProjectView }): JSX.Element {
 function WorktreeCard({
   project,
   wt,
-  active
+  active,
+  slot
 }: {
   project: ProjectView
   wt: WorktreeView
   active: boolean
+  slot: DropSlot | null
 }): JSX.Element {
   const s = useStore()
-  const [edge, setEdge] = useState<Edge>(null)
   const st = s.wtStatus.get(wt.id)
   const line = s.worktreeLastLine(wt.id)
   const cnt = s.sessionsOf(wt.id).length
@@ -231,44 +292,22 @@ function WorktreeCard({
   if (st?.ahead) statusParts.push(`↑${st.ahead}`)
   if (st?.behind) statusParts.push(`↓${st.behind}`)
 
-  // A worktree belongs to its repo, so cards only reorder within their project.
-  // Evaluated at event time — see the note on ProjectGroup's canDrop.
-  const canDrop = (): boolean =>
-    dragWt !== null && dragWt.repoRoot === project.repoRoot && dragWt.id !== wt.id
-
   return (
     <div
       className={
-        'card' + (active ? ' active' : '') + (attention ? ' attention' : '') + edgeClass(edge)
+        'card' + (active ? ' active' : '') + (attention ? ' attention' : '') + slotClass(slot, wt.id)
       }
       data-wt={wt.id}
       draggable
       onClick={() => void store.selectWorktree(project.repoRoot, wt.id)}
       onDragStart={(e) => {
+        // A worktree belongs to its repo, so cards only reorder within their
+        // project — the container checks repoRoot before accepting the drop.
         dragWt = { repoRoot: project.repoRoot, id: wt.id }
         e.dataTransfer.effectAllowed = 'move'
         e.dataTransfer.setData('text/plain', wt.id)
       }}
       onDragEnd={() => {
-        dragWt = null
-        setEdge(null)
-      }}
-      onDragOver={(e) => {
-        if (!canDrop()) return
-        e.preventDefault()
-        e.dataTransfer.dropEffect = 'move'
-        setEdge(edgeOf(e))
-      }}
-      onDragLeave={() => setEdge(null)}
-      onDrop={(e) => {
-        if (!canDrop() || !dragWt) return
-        e.preventDefault()
-        setEdge(null)
-        store.reorderWorktree(
-          project.repoRoot,
-          dragWt.id,
-          insertBefore(e, [...project.worktrees.keys()], wt.id)
-        )
         dragWt = null
       }}
     >

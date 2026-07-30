@@ -181,12 +181,15 @@ try {
     )
   const projectNames = () => win.locator('.project-name').allInnerTexts()
   const namesBefore = await projectNames()
-  const headerSel = (repo) => `.project-header[data-repo="${repo}"]`
+  // The header is the drag handle; the whole group is the row that gets hit
+  // tested (by .project-list, which the dispatched events bubble up to).
+  const groupSel = (repo) => `.project-group[data-repo="${repo}"]`
+  const handleSel = (repo) => `${groupSel(repo)} .project-header`
   const [firstRepo, secondRepo] = await win.evaluate(() =>
-    [...document.querySelectorAll('.project-header')].map((h) => h.dataset.repo)
+    [...document.querySelectorAll('.project-group')].map((g) => g.dataset.repo)
   )
-  // Drop on the TOP half of the first header = insert above it.
-  await dragRow(headerSel(secondRepo), headerSel(firstRepo), 'top')
+  // Drop on the TOP half of the first group = insert above it.
+  await dragRow(handleSel(secondRepo), groupSel(firstRepo), 'top')
   await win.waitForTimeout(250)
   const namesAfter = await projectNames()
   assert.deepEqual(
@@ -200,7 +203,7 @@ try {
     savedOrder[0].endsWith(namesBefore[1]),
     `reorder: persisted order should lead with the dragged project (${savedOrder[0]})`
   )
-  await dragRow(headerSel(firstRepo), headerSel(secondRepo), 'top')
+  await dragRow(handleSel(firstRepo), groupSel(secondRepo), 'top')
   await win.waitForTimeout(250)
   assert.deepEqual(await projectNames(), namesBefore, 'reorder: dragging back should restore order')
 
@@ -338,9 +341,7 @@ try {
   const [firstWt, secondWt] = await win.evaluate(
     (repo) =>
       [
-        ...document
-          .querySelector(`.project-header[data-repo="${repo}"]`)
-          .parentElement.querySelectorAll('.card')
+        ...document.querySelectorAll(`.project-group[data-repo="${repo}"] .card`)
       ].map((c) => c.dataset.wt),
     repoA
   )

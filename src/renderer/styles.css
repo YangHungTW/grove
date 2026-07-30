@@ -97,6 +97,17 @@ button {
   border-right: 1px solid #000;
   padding: 10px 8px;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+#sidebar > *:not(.project-list) {
+  flex: 0 0 auto;
+}
+/* Owns project drag-and-drop, so it claims the sidebar's leftover height: the
+   empty space under the last project is where a drop-at-the-end naturally aims,
+   and a shrink-to-fit list would leave it inert. */
+.project-list {
+  flex: 1 0 auto;
 }
 
 .brand {
@@ -165,6 +176,7 @@ button {
 /* ---------- flat worktree cards (cmux-style) ---------- */
 .project-group {
   margin-bottom: 14px;
+  position: relative;
 }
 /* A collapsed group is just a header — drop the gap that separated it from its
    (now absent) worktree list. */
@@ -287,17 +299,17 @@ button {
       0 0 9px 1px color-mix(in srgb, var(--attention) 50%, transparent);
   }
 }
-/* Drag-to-reorder insertion line, shared by project headers and worktree cards.
-   Drawn as an outline-style box-shadow rather than a border so it can't shift
-   the row's layout while the list is being dragged through. */
-.project-header.drop-top,
-.project-header.drop-bottom,
+/* Drag-to-reorder insertion line, shared by project groups and worktree cards.
+   Drawn as an ::after overlay rather than a border so it can't shift the row's
+   layout while the list is being dragged through. It sits on the *group*, not
+   its header: an expanded project is header + cards, and a line tucked under
+   the header would point inside the group the drop actually lands after. */
 .card.drop-top,
 .card.drop-bottom {
   position: relative;
 }
-.project-header.drop-top::after,
-.project-header.drop-bottom::after,
+.project-group.drop-top::after,
+.project-group.drop-bottom::after,
 .card.drop-top::after,
 .card.drop-bottom::after {
   content: '';
@@ -309,13 +321,20 @@ button {
   background: var(--accent);
   pointer-events: none;
 }
-.project-header.drop-top::after,
+.project-group.drop-top::after,
 .card.drop-top::after {
   top: -2px;
 }
-.project-header.drop-bottom::after,
 .card.drop-bottom::after {
   bottom: -2px;
+}
+/* Centred in the 14px gap below the group, so it reads as "between these two
+   projects" rather than as an underline on this one. */
+.project-group.drop-bottom::after {
+  bottom: -8px;
+}
+.project-group.collapsed.drop-bottom::after {
+  bottom: -4px;
 }
 
 .card-top {

@@ -35,6 +35,34 @@ export function moveBefore(ids: string[], dragId: string, beforeId?: string): st
   return rest
 }
 
+/** A drop position: an insertion line drawn on one edge of row `id`. */
+export type DropSlot = { id: string; edge: 'top' | 'bottom' }
+
+/** A row's vertical extent, as measured from its bounding box. */
+export type RowSpan = { id: string; top: number; height: number }
+
+/**
+ * The insertion slot for a cursor at `y` over a *list* of rows, rather than over
+ * one row: the first row whose midpoint is below the cursor takes the line on
+ * its top edge, and a cursor past every midpoint lands on the last row's bottom.
+ *
+ * Measuring against the whole list is what makes the gaps between rows, the
+ * list's own padding, and the empty space below the last row droppable — hit
+ * testing row-by-row leaves all of those as dead zones you have to steer around.
+ * Returns null for an empty list, where there is nothing to insert relative to.
+ */
+export function slotAt(y: number, rows: RowSpan[]): DropSlot | null {
+  if (!rows.length) return null
+  const hit = rows.find((r) => y < r.top + r.height / 2)
+  return hit ? { id: hit.id, edge: 'top' } : { id: rows[rows.length - 1].id, edge: 'bottom' }
+}
+
+/** The id a `slot` inserts before — the row itself on its top edge, the row
+ * after it on its bottom (undefined past the last row = append). */
+export function slotBefore(slot: DropSlot, ids: string[]): string | undefined {
+  return slot.edge === 'top' ? slot.id : ids[ids.indexOf(slot.id) + 1]
+}
+
 /** Rebuild a Map in `ids` order, dropping ids it doesn't contain. Insertion
  * order IS the render order for the sidebar's Maps, so this is how a reorder
  * takes effect. */
