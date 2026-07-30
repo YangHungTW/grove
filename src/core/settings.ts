@@ -144,6 +144,14 @@ export interface AppSettings {
   collapsedProjects: string[]
   /** Sidebar width in px (drag-resizable; clamped on apply). */
   sidebarWidth: number
+  /** User's drag-and-drop arrangement of the sidebar's project groups (repo
+   * roots, top to bottom). Empty = never reordered, so the recent-projects
+   * order stands. Projects missing from the list render after it. */
+  projectOrder: string[]
+  /** User's drag-and-drop arrangement of the worktree cards inside each project,
+   * keyed by repo root (values are worktree paths). A project with no entry
+   * keeps `git worktree list` order. */
+  worktreeOrder: Record<string, string[]>
   /** Configured agents for the "+" menu. */
   agents: AgentDef[]
   /** Worktree folder template, relative to the project (supports {branch}, {repo}, {timestamp}). */
@@ -201,6 +209,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   sidebarCollapsed: false,
   collapsedProjects: [],
   sidebarWidth: 248,
+  projectOrder: [],
+  worktreeOrder: {},
   agents: AGENT_PRESETS,
   worktreeFolder: '../{repo}-wt-{branch}',
   keybindings: DEFAULT_KEYBINDINGS,

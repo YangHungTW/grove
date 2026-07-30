@@ -287,6 +287,37 @@ button {
       0 0 9px 1px color-mix(in srgb, var(--attention) 50%, transparent);
   }
 }
+/* Drag-to-reorder insertion line, shared by project headers and worktree cards.
+   Drawn as an outline-style box-shadow rather than a border so it can't shift
+   the row's layout while the list is being dragged through. */
+.project-header.drop-top,
+.project-header.drop-bottom,
+.card.drop-top,
+.card.drop-bottom {
+  position: relative;
+}
+.project-header.drop-top::after,
+.project-header.drop-bottom::after,
+.card.drop-top::after,
+.card.drop-bottom::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+  pointer-events: none;
+}
+.project-header.drop-top::after,
+.card.drop-top::after {
+  top: -2px;
+}
+.project-header.drop-bottom::after,
+.card.drop-bottom::after {
+  bottom: -2px;
+}
+
 .card-top {
   display: flex;
   align-items: center;

@@ -1,4 +1,4 @@
-import type { MouseEvent } from 'react'
+import { useState, type DragEvent, type MouseEvent } from 'react'
 import { useStore } from './useStore'
 import { store, type ProjectView, type WorktreeView } from './store'
 import { formatTokens, formatUsd, shortModel } from './usageFormat'
@@ -15,6 +15,35 @@ import {
 } from './Icons'
 import type { PrInfo } from '../core/gh'
 import groveLogo from './assets/grove-logo.svg'
+
+/** In-flight sidebar drag, module-level (like GroupTabs') because the dragged
+ * row and the row under the cursor are different components, and dataTransfer
+ * can't be read during dragover. Exactly one is set at a time. */
+let dragProject: string | null = null
+let dragWt: { repoRoot: string; id: string } | null = null
+
+/** Which edge of a row the cursor is on — the insertion line to draw. */
+type Edge = 'top' | 'bottom' | null
+
+function edgeOf(e: DragEvent<HTMLElement>): Exclude<Edge, null> {
+  const r = e.currentTarget.getBoundingClientRect()
+  return e.clientY > r.top + r.height / 2 ? 'bottom' : 'top'
+}
+
+/**
+ * The id to insert before for a drop on `targetId`: the target itself when the
+ * cursor is on its top half, otherwise the row after it (undefined past the
+ * last row = append). The bottom half matters — without it the last position is
+ * unreachable, since every drop would land above something.
+ */
+function insertBefore(e: DragEvent<HTMLElement>, ids: string[], targetId: string): string | undefined {
+  if (edgeOf(e) === 'top') return targetId
+  return ids[ids.indexOf(targetId) + 1]
+}
+
+function edgeClass(edge: Edge): string {
+  return edge ? ` drop-${edge}` : ''
+}
 
 export function Sidebar(): JSX.Element {
   const s = useStore()
@@ -51,14 +80,49 @@ export function Sidebar(): JSX.Element {
 
 function ProjectGroup({ project }: { project: ProjectView }): JSX.Element {
   const s = useStore()
+  const [edge, setEdge] = useState<Edge>(null)
   // Collapsing hides the worktree cards, and with them their per-card attention
   // styling — so surface the aggregate on the header instead.
   const attention = [...project.worktrees.values()].filter((wt) =>
     s.worktreePending(wt.id)
   ).length
+  // Read at event time, never at render: the drag state is module-level, so
+  // nothing re-renders between dragstart and dragover — a value captured in the
+  // render closure would still say "no drag in progress" and reject every drop.
+  const canDrop = (): boolean => dragProject !== null && dragProject !== project.repoRoot
   return (
     <div className={'project-group' + (project.expanded ? '' : ' collapsed')}>
-      <div className="project-header">
+      <div
+        className={'project-header' + edgeClass(edge)}
+        data-repo={project.repoRoot}
+        draggable
+        onDragStart={(e) => {
+          dragProject = project.repoRoot
+          e.dataTransfer.effectAllowed = 'move'
+          e.dataTransfer.setData('text/plain', project.repoRoot)
+        }}
+        onDragEnd={() => {
+          dragProject = null
+          setEdge(null)
+        }}
+        onDragOver={(e) => {
+          if (!canDrop()) return
+          e.preventDefault()
+          e.dataTransfer.dropEffect = 'move'
+          setEdge(edgeOf(e))
+        }}
+        onDragLeave={() => setEdge(null)}
+        onDrop={(e) => {
+          if (!canDrop() || !dragProject) return
+          e.preventDefault()
+          setEdge(null)
+          store.reorderProject(
+            dragProject,
+            insertBefore(e, [...s.projects.keys()], project.repoRoot)
+          )
+          dragProject = null
+        }}
+      >
         <button
           className="project-caret"
           aria-expanded={project.expanded}
@@ -68,7 +132,9 @@ function ProjectGroup({ project }: { project: ProjectView }): JSX.Element {
           <ChevronDownIcon size={12} />
         </button>
         <RepoIcon className="repo-icon" />
-        <span className="project-name">{project.name}</span>
+        <span className="project-name" title="Drag to reorder projects">
+          {project.name}
+        </span>
         {!project.expanded && attention > 0 && (
           <span className="project-attention" title={`${attention} need attention`}>
             {attention}
@@ -151,6 +217,7 @@ function WorktreeCard({
   active: boolean
 }): JSX.Element {
   const s = useStore()
+  const [edge, setEdge] = useState<Edge>(null)
   const st = s.wtStatus.get(wt.id)
   const line = s.worktreeLastLine(wt.id)
   const cnt = s.sessionsOf(wt.id).length
@@ -164,10 +231,46 @@ function WorktreeCard({
   if (st?.ahead) statusParts.push(`↑${st.ahead}`)
   if (st?.behind) statusParts.push(`↓${st.behind}`)
 
+  // A worktree belongs to its repo, so cards only reorder within their project.
+  // Evaluated at event time — see the note on ProjectGroup's canDrop.
+  const canDrop = (): boolean =>
+    dragWt !== null && dragWt.repoRoot === project.repoRoot && dragWt.id !== wt.id
+
   return (
     <div
-      className={'card' + (active ? ' active' : '') + (attention ? ' attention' : '')}
+      className={
+        'card' + (active ? ' active' : '') + (attention ? ' attention' : '') + edgeClass(edge)
+      }
+      data-wt={wt.id}
+      draggable
       onClick={() => void store.selectWorktree(project.repoRoot, wt.id)}
+      onDragStart={(e) => {
+        dragWt = { repoRoot: project.repoRoot, id: wt.id }
+        e.dataTransfer.effectAllowed = 'move'
+        e.dataTransfer.setData('text/plain', wt.id)
+      }}
+      onDragEnd={() => {
+        dragWt = null
+        setEdge(null)
+      }}
+      onDragOver={(e) => {
+        if (!canDrop()) return
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'move'
+        setEdge(edgeOf(e))
+      }}
+      onDragLeave={() => setEdge(null)}
+      onDrop={(e) => {
+        if (!canDrop() || !dragWt) return
+        e.preventDefault()
+        setEdge(null)
+        store.reorderWorktree(
+          project.repoRoot,
+          dragWt.id,
+          insertBefore(e, [...project.worktrees.keys()], wt.id)
+        )
+        dragWt = null
+      }}
     >
       <div className="card-top">
         {stateDot !== 'none' && (
@@ -176,7 +279,9 @@ function WorktreeCard({
             title={`Agent: ${stateDot === 'busy' ? 'working' : stateDot === 'waiting' ? 'needs input' : 'idle'}`}
           />
         )}
-        <span className="card-title">{wt.branch || '(detached)'}</span>
+        <span className="card-title" title="Drag to reorder worktrees">
+          {wt.branch || '(detached)'}
+        </span>
         {durable && (
           <span
             className="card-durable"

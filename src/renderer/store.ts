@@ -16,6 +16,7 @@ import { classifyExit } from '../core/sessionExit'
 import { isHttpUrl } from '../core/openTarget'
 import { wrapIndex } from '../core/cycle'
 import { canOpenInIde } from '../core/ideLaunch'
+import { moveBefore, reorderMap } from '../core/sidebarOrder'
 import { bufferLastLine, lastNonEmptyLine } from './lastLine'
 import {
   DEFAULT_SETTINGS,
@@ -524,6 +525,7 @@ export class Store {
           primary: i === 0 || w.path === project.repoRoot
         })
       )
+      this.applyWorktreeOrder(project)
     } catch {
       /* not a git repo */
     }
@@ -555,7 +557,16 @@ export class Store {
       if (!primary) this.refreshPr(w.path)
       added = true
     })
+    // Newly-appeared worktrees land at the end of the user's arrangement (they
+    // are unknown to the saved order), which is where an append belongs.
+    if (added) this.applyWorktreeOrder(project)
     return added
+  }
+
+  /** Re-seat a project's worktree cards into the user's saved drag order. */
+  private applyWorktreeOrder(project: ProjectView): void {
+    const order = this.settings.worktreeOrder?.[project.repoRoot]
+    if (order?.length) project.worktrees = reorderMap(project.worktrees, order)
   }
 
   /** Reconcile every loaded project; notify the UI if any new worktree appeared. */
@@ -732,6 +743,41 @@ export class Store {
     return [...this.projects.values()].some((p) => p.expanded)
   }
   /**
+   * Drag-and-drop reorder of the sidebar's project groups: move `repoRoot` to
+   * sit above `beforeRoot` (or to the bottom when it is omitted). The Map's
+   * insertion order IS the render order, so the move is applied by rebuilding
+   * it; the full resulting order is persisted so it survives a relaunch.
+   */
+  reorderProject(repoRoot: string, beforeRoot?: string): void {
+    const next = moveBefore([...this.projects.keys()], repoRoot, beforeRoot)
+    this.projects = reorderMap(this.projects, next)
+    this.persistSidebarOrder()
+  }
+  /** Same, for the worktree cards inside one project. Cards never move between
+   * projects — a worktree belongs to its repo — so a cross-project drop is
+   * ignored by the caller. */
+  reorderWorktree(repoRoot: string, wtId: string, beforeId?: string): void {
+    const p = this.projects.get(repoRoot)
+    if (!p) return
+    const next = moveBefore([...p.worktrees.keys()], wtId, beforeId)
+    p.worktrees = reorderMap(p.worktrees, next)
+    this.persistSidebarOrder()
+  }
+  /**
+   * Derive the whole sidebar arrangement from the live projects and save it in
+   * ONE settings patch. Deriving (rather than patching one key) also drops a
+   * closed project out of both lists instead of accumulating stale roots — the
+   * same reasoning as persistCollapsed. Unloaded projects are skipped so a
+   * project whose worktrees haven't been listed yet can't blank its own order.
+   */
+  private persistSidebarOrder(): void {
+    const worktreeOrder: Record<string, string[]> = { ...this.settings.worktreeOrder }
+    for (const root of Object.keys(worktreeOrder)) if (!this.projects.has(root)) delete worktreeOrder[root]
+    for (const p of this.projects.values())
+      if (p.loaded) worktreeOrder[p.repoRoot] = [...p.worktrees.keys()]
+    void this.updateSettings({ projectOrder: [...this.projects.keys()], worktreeOrder })
+  }
+  /**
    * Derive the persisted collapsed set from the live projects and save it in ONE
    * settings patch — so collapse-all is a single notify + a single IPC write,
    * not one per project. Deriving (rather than add/remove-ing a key) also drops
@@ -772,8 +818,9 @@ export class Store {
     this.persistLayout()
     // Re-derive the collapsed set now that this project is gone — otherwise its
     // root lingers in settings and would silently re-collapse the project if the
-    // user reopened the same folder.
+    // user reopened the same folder. Same for its sidebar position/card order.
     this.persistCollapsed()
+    this.persistSidebarOrder()
     this.notify()
   }
 
@@ -1689,9 +1736,20 @@ export class Store {
     } catch {
       /* launched dir not a git repo */
     }
+    // Rehydrate the user's drag-and-drop project order (worktree cards get the
+    // same treatment inside loadWorktrees). Projects opened since the order was
+    // saved — including the launch directory added just above — keep their spot
+    // at the end rather than jumping the arrangement.
+    this.projects = reorderMap(this.projects, this.settings.projectOrder ?? [])
     // Load every project's worktrees so all cards render in the flat sidebar.
     for (const p of this.projects.values()) await this.loadWorktrees(p)
-    const first = this.projects.keys().next().value as string | undefined
+    // Select the launch directory's project, not simply the topmost one: with a
+    // custom drag order those are no longer the same, and `grove` run inside a
+    // repo should still open on THAT repo. Falls back to the first project when
+    // the launch dir isn't a git repo.
+    const first = this.projects.has(this.repoRoot)
+      ? this.repoRoot
+      : (this.projects.keys().next().value as string | undefined)
     if (first) await this.setActiveProject(first)
     else this.notify()
     this.startMetaPolling()

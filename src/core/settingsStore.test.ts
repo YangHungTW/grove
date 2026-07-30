@@ -59,6 +59,25 @@ describe('SettingsStore', () => {
     expect(loaded.opacity).toBe(0.9)
   })
 
+  it('the sidebar drag-and-drop order defaults to empty and round-trips', () => {
+    expect(DEFAULT_SETTINGS.projectOrder).toEqual([])
+    expect(DEFAULT_SETTINGS.worktreeOrder).toEqual({})
+    new SettingsStore(file).save({
+      projectOrder: ['/b', '/a'],
+      worktreeOrder: { '/a': ['/a/wt-2', '/a'] }
+    })
+    const loaded = new SettingsStore(file).load()
+    expect(loaded.projectOrder).toEqual(['/b', '/a'])
+    expect(loaded.worktreeOrder).toEqual({ '/a': ['/a/wt-2', '/a'] })
+  })
+
+  it('a settings file written before the sidebar order existed gains the defaults', () => {
+    writeFileSync(file, JSON.stringify({ opacity: 0.9 }))
+    const loaded = new SettingsStore(file).load()
+    expect(loaded.projectOrder).toEqual([])
+    expect(loaded.worktreeOrder).toEqual({})
+  })
+
   it('save merges a partial patch and persists', () => {
     const store = new SettingsStore(file)
     const next = store.save({ background: '#101014', transparent: true })

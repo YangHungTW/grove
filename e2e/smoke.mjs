@@ -145,6 +145,69 @@ try {
   )
   const projectCollapse = true
 
+  // 2d) SIDEBAR REORDER — drag a project header above its sibling; the sidebar
+  // order flips and the arrangement is persisted to settings. Dragging it back
+  // restores the original order so later steps are unaffected.
+  //
+  // Playwright's mouse-driven dragTo() does not raise HTML5 drag events under
+  // Electron (no drag interception), so the gesture is dispatched directly:
+  // dragstart on the source, then dragover/drop on the target at the y offset
+  // that picks the insertion edge. Same events React's handlers see for real.
+  const dragRow = (fromSel, toSel, edge) =>
+    win.evaluate(
+      ({ fromSel, toSel, edge }) => {
+        const from = document.querySelector(fromSel)
+        const to = document.querySelector(toSel)
+        if (!from || !to) throw new Error(`drag: missing ${!from ? fromSel : toSel}`)
+        const dt = new DataTransfer()
+        const fire = (el, type) => {
+          const r = el.getBoundingClientRect()
+          el.dispatchEvent(
+            new DragEvent(type, {
+              bubbles: true,
+              cancelable: true,
+              dataTransfer: dt,
+              clientX: r.left + 20,
+              clientY: edge === 'top' ? r.top + 2 : r.bottom - 2
+            })
+          )
+        }
+        fire(from, 'dragstart')
+        fire(to, 'dragover')
+        fire(to, 'drop')
+        fire(from, 'dragend')
+      },
+      { fromSel, toSel, edge }
+    )
+  const projectNames = () => win.locator('.project-name').allInnerTexts()
+  const namesBefore = await projectNames()
+  const headerSel = (repo) => `.project-header[data-repo="${repo}"]`
+  const [firstRepo, secondRepo] = await win.evaluate(() =>
+    [...document.querySelectorAll('.project-header')].map((h) => h.dataset.repo)
+  )
+  // Drop on the TOP half of the first header = insert above it.
+  await dragRow(headerSel(secondRepo), headerSel(firstRepo), 'top')
+  await win.waitForTimeout(250)
+  const namesAfter = await projectNames()
+  assert.deepEqual(
+    namesAfter,
+    [namesBefore[1], namesBefore[0], ...namesBefore.slice(2)],
+    `reorder: expected the dragged project on top (${namesBefore} → ${namesAfter})`
+  )
+  const savedOrder = JSON.parse(readFileSync(settingsFile, 'utf8')).projectOrder ?? []
+  assert.equal(savedOrder.length, namesBefore.length, 'reorder: projectOrder should be persisted')
+  assert.ok(
+    savedOrder[0].endsWith(namesBefore[1]),
+    `reorder: persisted order should lead with the dragged project (${savedOrder[0]})`
+  )
+  await dragRow(headerSel(firstRepo), headerSel(secondRepo), 'top')
+  await win.waitForTimeout(250)
+  assert.deepEqual(await projectNames(), namesBefore, 'reorder: dragging back should restore order')
+
+  // The matching card-level check needs a project with 2+ worktrees, so it runs
+  // after the new-worktree step (5a).
+  const projectReorder = true
+
   const visCount = () =>
     win.evaluate(
       () => [...document.querySelectorAll('.pane')].filter((p) => getComputedStyle(p).display !== 'none').length
@@ -265,6 +328,38 @@ try {
     else await win.waitForTimeout(100)
   }
   assert.ok(hookRan, 'create-worktree hook should run and write its marker')
+
+  // 5a) CARD REORDER — drag 'feat' above 'main' inside project A, then back.
+  // Restoring matters: the keyboard-nav step below addresses cards by position.
+  const cardTitles = () => groupA.locator('.card-title').allInnerTexts()
+  const cardsPre = await cardTitles()
+  assert.ok(cardsPre.length >= 2, `card reorder: expected 2+ cards, got ${cardsPre.length}`)
+  const cardSel = (wt) => `.card[data-wt="${wt}"]`
+  const [firstWt, secondWt] = await win.evaluate(
+    (repo) =>
+      [
+        ...document
+          .querySelector(`.project-header[data-repo="${repo}"]`)
+          .parentElement.querySelectorAll('.card')
+      ].map((c) => c.dataset.wt),
+    repoA
+  )
+  await dragRow(cardSel(secondWt), cardSel(firstWt), 'top')
+  await win.waitForTimeout(250)
+  assert.deepEqual(
+    await cardTitles(),
+    [cardsPre[1], cardsPre[0], ...cardsPre.slice(2)],
+    'card reorder: dragged card should move above its sibling'
+  )
+  const savedWtOrder = JSON.parse(readFileSync(settingsFile, 'utf8')).worktreeOrder ?? {}
+  assert.ok(
+    (savedWtOrder[repoA] ?? []).length >= 2,
+    `card reorder: worktreeOrder for A should be persisted (${JSON.stringify(savedWtOrder)})`
+  )
+  await dragRow(cardSel(firstWt), cardSel(secondWt), 'top')
+  await win.waitForTimeout(250)
+  assert.deepEqual(await cardTitles(), cardsPre, 'card reorder: dragging back should restore order')
+  const cardReorder = true
 
   // Re-select A's main worktree card.
   await groupA.locator('.card', { hasText: 'main' }).first().click()
@@ -550,7 +645,8 @@ try {
 
   console.log(
     `SMOKE_OK fontLoaded=${fontLoaded} noClip=${noClip} projects=${projectCount} split=${visible} dragResize=${dragResize} roundTrip=true ` +
-      `sidebarResize=${sidebarResize} projectCollapse=${projectCollapse} zoom=${zoomToggle} termSearch=${termSearch} ` +
+      `sidebarResize=${sidebarResize} projectCollapse=${projectCollapse} projectReorder=${projectReorder} ` +
+      `cardReorder=${cardReorder} zoom=${zoomToggle} termSearch=${termSearch} ` +
       `worktreeCreated=true agentLaunched=true multiAgent=${agentRows === 2} ` +
       `agentAfterSwitch=${agentAfterSwitch} newAgentShortcut=${newAgentShortcut} kbdNav=${kbdNav} fileViewer=${fileViewer} ` +
       `viewerPanes=${viewerPanes} htmlIframe=${htmlIframe} htmlScriptRan=${htmlScriptRan} diffReview=${diffReview} ` +
