@@ -157,6 +157,17 @@ export function SettingsPanel(): JSX.Element | null {
         </label>
 
         <label className="settings-row">
+          <span title="Off = canvas 2D. Slightly laggier typing, but immune to the WebGL glyph corruption some GPUs show on an agent's status row.">
+            GPU terminal rendering
+          </span>
+          <input
+            type="checkbox"
+            checked={cfg.gpuRenderer}
+            onChange={(e) => void store.updateSettings({ gpuRenderer: e.target.checked })}
+          />
+        </label>
+
+        <label className="settings-row">
           <span>Transparent window</span>
           <input
             type="checkbox"

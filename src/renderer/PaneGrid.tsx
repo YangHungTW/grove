@@ -112,6 +112,7 @@ export function PaneGrid(): JSX.Element {
             column={colOf.get(sess.id) ?? 1}
             focused={sess.id === s.focusedSessionId}
             transparent={s.settings.transparent}
+            gpuRenderer={s.settings.gpuRenderer}
             searching={sess.id === s.searchSessionId}
             settling={s.isSettling(sess.id)}
           />
@@ -128,6 +129,7 @@ function Pane({
   column,
   focused,
   transparent,
+  gpuRenderer,
   searching,
   settling
 }: {
@@ -136,6 +138,7 @@ function Pane({
   column: number
   focused: boolean
   transparent: boolean
+  gpuRenderer: boolean
   searching: boolean
   settling: boolean
 }): JSX.Element {
@@ -332,10 +335,15 @@ function Pane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id])
 
-  // Renderer choice, re-run whenever transparency or visibility changes:
+  // Renderer choice, re-run whenever transparency, visibility or the setting
+  // changes:
   //  - opaque + on screen → WebGL: lowest input latency (canvas 2D repaints per
   //    keystroke and feels laggy on Retina). Force a refresh on attach (WebGL
   //    can leave a fresh pane unpainted) and fall back to canvas on context loss.
+  //  - gpuRenderer off → Canvas. An escape hatch for GPUs where xterm's WebGL
+  //    renderer corrupts glyphs (see the setting's doc comment). Until now the
+  //    only way to reach the canvas renderer was to turn ON a transparent
+  //    window, which is an unrelated cosmetic choice to have to accept.
   //  - transparent → Canvas: xterm's WebGL renderer ignores allowTransparency
   //    (paints an opaque background), so it would defeat the see-through effect.
   //    Canvas renders the rgba background transparent while keeping text fully
@@ -435,7 +443,7 @@ function Pane({
         }
       }, webglRetryDelay(retries))
     }
-    if (transparent || !visible) {
+    if (transparent || !visible || !gpuRenderer) {
       loadCanvas()
     } else if (!loadWebgl()) {
       // WebGL unavailable (software rendering / blocklisted GPU) — use canvas.
@@ -453,7 +461,7 @@ function Pane({
         /* term may already be disposed */
       }
     }
-  }, [session.id, transparent, visible])
+  }, [session.id, transparent, visible, gpuRenderer])
 
   return (
     <div

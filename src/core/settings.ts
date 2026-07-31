@@ -136,6 +136,15 @@ export interface AppSettings {
   fontSize: number
   /** Enable window vibrancy / transparent background. */
   transparent: boolean
+  /** Render terminals on the GPU (xterm's WebGL addon) rather than canvas 2D.
+   * On by default: canvas 2D repaints per keystroke and feels laggy on Retina.
+   * Turn it off on a GPU where the WebGL renderer corrupts glyphs — an agent's
+   * in-place-repainted status row rendering as several frames of digits fused
+   * together, which a text selection momentarily repairs. That is a renderer
+   * fault, not a buffer one (copying the row yields the right text), and the
+   * canvas renderer does not show it. Transparency forces canvas regardless,
+   * since the WebGL renderer ignores allowTransparency. */
+  gpuRenderer: boolean
   /** Whether the sidebar is collapsed. */
   sidebarCollapsed: boolean
   /** repoRoots whose sidebar project group is collapsed (hiding its worktrees).
@@ -206,6 +215,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   fontFamily: 'MesloLGS NF',
   fontSize: 13,
   transparent: false,
+  gpuRenderer: true,
   sidebarCollapsed: false,
   collapsedProjects: [],
   sidebarWidth: 248,

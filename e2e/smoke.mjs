@@ -644,6 +644,42 @@ try {
       `panes — hidden panes must not hold a context`
   )
 
+  // 10) RENDERER ESCAPE HATCH — turning GPU rendering off must actually swap the
+  // pane onto xterm's canvas renderer. This is the only workaround for GPUs whose
+  // WebGL renderer corrupts glyphs, and it used to require turning ON a
+  // transparent window — an unrelated cosmetic choice. Runs LAST: it re-creates
+  // every visible pane's renderer, so it must not perturb an earlier assertion.
+  // The canvas renderer is identifiable by its named layers; WebGL draws into a
+  // single unclassed canvas.
+  const paneLayers = () =>
+    win2.evaluate(() =>
+      [...document.querySelectorAll('.pane[style*="block"] canvas')].map((c) => c.className)
+    )
+  assert.ok(
+    !(await paneLayers()).includes('xterm-text-layer'),
+    'renderer: GPU rendering is on by default, so no canvas text layer'
+  )
+  // exact: the sidebar's per-project "Project settings (hooks)" buttons would
+  // otherwise match this name too.
+  await win2.getByRole('button', { name: 'Settings', exact: true }).click()
+  await win2.waitForSelector('.settings-panel', { timeout: 5000 })
+  await win2
+    .locator('.settings-row', { hasText: 'GPU terminal rendering' })
+    .locator('input[type=checkbox]')
+    .uncheck()
+  await win2.waitForFunction(
+    () =>
+      [...document.querySelectorAll('.pane[style*="block"] canvas')].some(
+        (c) => c.className === 'xterm-text-layer'
+      ),
+    { timeout: 5000 }
+  )
+  const rendererToggle = (await paneLayers()).includes('xterm-text-layer')
+  assert.ok(
+    JSON.parse(readFileSync(settingsFile, 'utf8')).gpuRenderer === false,
+    'renderer: the choice should be persisted'
+  )
+
   console.log(
     `SMOKE_OK fontLoaded=${fontLoaded} noClip=${noClip} projects=${projectCount} split=${visible} dragResize=${dragResize} roundTrip=true ` +
       `sidebarResize=${sidebarResize} projectCollapse=${projectCollapse} projectReorder=${projectReorder} ` +
@@ -652,7 +688,8 @@ try {
       `agentAfterSwitch=${agentAfterSwitch} newAgentShortcut=${newAgentShortcut} kbdNav=${kbdNav} fileViewer=${fileViewer} ` +
       `viewerPanes=${viewerPanes} htmlIframe=${htmlIframe} htmlScriptRan=${htmlScriptRan} diffReview=${diffReview} ` +
       `diffAdd=${addLines} diffDel=${delLines} splitDiff=${splitDiff} ideOpen=${ideOpen} finish=${finishFlow} ` +
-      `newTask=${newTaskFlow} restored=${restored} glContexts=${gl.contexts}/${gl.visibleTerms}`
+      `newTask=${newTaskFlow} restored=${restored} glContexts=${gl.contexts}/${gl.visibleTerms} ` +
+      `rendererToggle=${rendererToggle}`
   )
 } catch (err) {
   failed = true

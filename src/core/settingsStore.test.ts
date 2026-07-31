@@ -25,6 +25,21 @@ describe('SettingsStore', () => {
     expect(new SettingsStore(file).load().durableSessions).toBe(true)
   })
 
+  it('gpuRenderer defaults on and round-trips when turned off', () => {
+    // The escape hatch for GPUs whose WebGL renderer corrupts glyphs. Default on
+    // because canvas 2D repaints per keystroke and feels laggy on Retina.
+    expect(DEFAULT_SETTINGS.gpuRenderer).toBe(true)
+    new SettingsStore(file).save({ gpuRenderer: false })
+    expect(new SettingsStore(file).load().gpuRenderer).toBe(false)
+  })
+
+  it('a settings.json written before gpuRenderer existed loads with it on', () => {
+    writeFileSync(file, JSON.stringify({ fontSize: 15 }))
+    const loaded = new SettingsStore(file).load()
+    expect(loaded.fontSize).toBe(15)
+    expect(loaded.gpuRenderer).toBe(true)
+  })
+
   it('per-agent default skills round-trip through disk', () => {
     const agents = [{ id: 'claude', name: 'Claude', command: 'claude', icon: '✳', skills: ['x'] }]
     new SettingsStore(file).save({ agents })
