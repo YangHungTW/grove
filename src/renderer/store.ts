@@ -33,6 +33,12 @@ const ATLAS_SETTLE_MS = 180
  * Re-rasterizing every glyph is not free, so this trades a bounded amount of
  * that work for an upper bound on how long a doubled status row can persist. */
 const ATLAS_MAX_WAIT_MS = 400
+/** Panes are dealt one of ATLAS_PHASES offsets, ATLAS_PHASE_STEP_MS apart, and
+ * clear that much EARLIER than the cap — so a grid of live agents re-rasterizes
+ * in separate frames instead of stacking into one, without any pane exceeding
+ * ATLAS_MAX_WAIT_MS. Keep PHASES * STEP well under the cap. */
+const ATLAS_PHASES = 4
+const ATLAS_PHASE_STEP_MS = 60
 
 export interface WorktreeView {
   id: string // = path
@@ -177,9 +183,11 @@ export class Store {
   // re-rasterization; we fire it on the TRAILING edge of a burst (one clear when
   // output settles, not one per frame) to avoid churning the atlas mid-stream —
   // but bounded by ATLAS_MAX_WAIT_MS, see scheduleAtlasClear.
-  private atlasPanes = new Set<string>()
-  private atlasTimer: number | undefined
-  private atlasDeadline = 0
+  // Per pane, not one shared timer: panes stream independently, and a shared
+  // timer made every streaming pane re-rasterize in the same frame.
+  private atlasTimers = new Map<string, { timer: number; deadline: number }>()
+  private atlasPhase = new Map<string, number>()
+  private atlasPhaseNext = 0
   // Panes wheeled since the last scroll-repaint tick — see scheduleScrollRepaint.
   private scrollPanes = new Set<string>()
   private scrollTimer: ReturnType<typeof setTimeout> | undefined
@@ -370,24 +378,37 @@ export class Store {
    * clearing only once you stopped typing (or dragged a selection, which forces
    * its own repaint) and coming straight back when output resumed. */
   private scheduleAtlasClear(id: string): void {
-    this.atlasPanes.add(id)
     const now = Date.now()
-    // First chunk of a burst starts the clock the cap is measured against.
-    if (this.atlasTimer === undefined) this.atlasDeadline = now + ATLAS_MAX_WAIT_MS
-    window.clearTimeout(this.atlasTimer)
-    this.atlasTimer = window.setTimeout(
+    const pending = this.atlasTimers.get(id)
+    if (pending) window.clearTimeout(pending.timer)
+    // First chunk of a burst fixes the deadline this pane's clear is capped at.
+    const deadline = pending?.deadline ?? now + ATLAS_MAX_WAIT_MS - this.atlasPhaseOf(id)
+    const timer = window.setTimeout(
       () => {
-        this.atlasTimer = undefined
-        for (const pid of this.atlasPanes) {
-          const pane = this.panes.get(pid)
-          if (!pane) continue
-          pane.renderAddon?.clearTextureAtlas?.()
-          pane.term.refresh(0, pane.term.rows - 1)
-        }
-        this.atlasPanes.clear()
+        this.atlasTimers.delete(id)
+        const pane = this.panes.get(id)
+        // Nothing draws a hidden pane (another tab or worktree), so clearing its
+        // atlas only costs a re-rasterization no one sees. Checked here rather
+        // than when scheduling: this runs a few times a second, not per chunk.
+        // <Pane> clears the atlas on reshow, which is where it does matter.
+        if (!pane || !this.visibleSessions().includes(id)) return
+        pane.renderAddon?.clearTextureAtlas?.()
+        pane.term.refresh(0, pane.term.rows - 1)
       },
-      Math.max(0, Math.min(ATLAS_SETTLE_MS, this.atlasDeadline - now))
+      Math.max(0, Math.min(ATLAS_SETTLE_MS, deadline - now))
     )
+    this.atlasTimers.set(id, { timer, deadline })
+  }
+  /** A pane's stable phase offset. Subtracted from the deadline, never added, so
+   * staggering can only bring a clear forward — ATLAS_MAX_WAIT_MS stays a real
+   * upper bound for every pane. */
+  private atlasPhaseOf(id: string): number {
+    let phase = this.atlasPhase.get(id)
+    if (phase === undefined) {
+      phase = (this.atlasPhaseNext++ % ATLAS_PHASES) * ATLAS_PHASE_STEP_MS
+      this.atlasPhase.set(id, phase)
+    }
+    return phase
   }
   /** Record a session's latest bottom line for its sidebar card, coalescing the
    * re-render to ~one notify per burst (the line changes far faster than the eye
@@ -407,6 +428,10 @@ export class Store {
     this.panes.delete(id)
     this.settling.delete(id)
     this.settledOnce.delete(id)
+    const pending = this.atlasTimers.get(id)
+    if (pending) window.clearTimeout(pending.timer)
+    this.atlasTimers.delete(id)
+    this.atlasPhase.delete(id)
   }
   /** True while a durable agent pane is masked during its (re)attach settle. */
   isSettling(id: string): boolean {

@@ -362,17 +362,42 @@ describe('renderer-atlas plumbing (stale-glyph / doubled status-row fix)', () =>
 })
 
 describe('atlas clear under sustained output (garbled cost row while an agent runs)', () => {
-  /** Wire a store to a pane and return a "pty emitted a chunk" function. */
-  function streamingPane(): { clearTextureAtlas: ReturnType<typeof vi.fn>; emit: () => void } {
+  /** A store with `ids` as panes of the active worktree — visible unless
+   * `hidden`, which parks them on a worktree that isn't selected. Returns each
+   * pane's clearTextureAtlas spy and a "pty emitted a chunk" function. */
+  function streamingPanes(
+    ids: string[],
+    { hidden = false } = {}
+  ): {
+    store: Store
+    clears: Record<string, ReturnType<typeof vi.fn>>
+    emit: (id: string) => void
+  } {
     const { api } = installApi()
     const store = new Store()
-    const pane = fakePane()
-    store.registerPane('s1', pane.term as never, pane.fit as never)
-    const clearTextureAtlas = vi.fn()
-    store.setRenderAddon('s1', { clearTextureAtlas })
+    const wtId = '/tmp/repo-wt'
+    const clears: Record<string, ReturnType<typeof vi.fn>> = {}
+    for (const id of ids) {
+      const pane = fakePane()
+      store.sessions.set(id, { id, worktreeId: wtId, kind: 'agent' } as never)
+      store.registerPane(id, pane.term as never, pane.fit as never)
+      clears[id] = vi.fn()
+      store.setRenderAddon(id, { clearTextureAtlas: clears[id] })
+    }
+    // One group per session, so every pane is its group's active (= visible) one.
+    store.groupsByWt.set(
+      wtId,
+      ids.map((id) => ({ ids: [id], active: id }))
+    )
+    store.activeWorktreeId = hidden ? '/tmp/other-wt' : wtId
     store.wireEvents()
     const onData = api.onSessionData.mock.calls[0][0] as (e: { id: string; data: string }) => void
-    return { clearTextureAtlas, emit: () => onData({ id: 's1', data: 'cost: $5.03\r' }) }
+    return { store, clears, emit: (id) => onData({ id, data: 'cost: $5.03\r' }) }
+  }
+
+  function streamingPane(): { clearTextureAtlas: ReturnType<typeof vi.fn>; emit: () => void } {
+    const { clears, emit } = streamingPanes(['s1'])
+    return { clearTextureAtlas: clears.s1, emit: () => emit('s1') }
   }
 
   beforeEach(() => vi.useFakeTimers())
@@ -408,6 +433,42 @@ describe('atlas clear under sustained output (garbled cost row while an agent ru
     expect(clearTextureAtlas).not.toHaveBeenCalled()
     vi.advanceTimersByTime(2)
     expect(clearTextureAtlas).toHaveBeenCalledTimes(1)
+  })
+
+  it('skips a pane on a worktree that is not on screen', () => {
+    const { clears, emit } = streamingPanes(['s1'], { hidden: true })
+    emit('s1')
+    vi.advanceTimersByTime(1000)
+    // A background agent keeps producing output; nothing is drawing its pane, so
+    // re-rasterizing its glyphs is work no one sees. <Pane> clears on reshow.
+    expect(clears.s1).not.toHaveBeenCalled()
+  })
+
+  it('staggers concurrent panes so they do not re-rasterize in one frame', () => {
+    const { clears, emit } = streamingPanes(['s1', 's2', 's3'])
+    const frames: Record<string, number[]> = { s1: [], s2: [], s3: [] }
+    // Three agents streaming in lockstep — the case a single shared timer
+    // collapsed into one very expensive frame every cycle.
+    for (let t = 0; t < 1000; t += 20) {
+      for (const id of ['s1', 's2', 's3']) emit(id)
+      vi.advanceTimersByTime(20)
+      for (const id of ['s1', 's2', 's3']) {
+        if (clears[id].mock.calls.length > frames[id].length) frames[id].push(t)
+      }
+    }
+    for (const id of ['s1', 's2', 's3']) expect(frames[id].length).toBeGreaterThan(0)
+    // No two panes cleared in the same tick.
+    const collisions = frames.s1.filter((t) => frames.s2.includes(t) || frames.s3.includes(t))
+    expect(collisions).toEqual([])
+    expect(frames.s2.filter((t) => frames.s3.includes(t))).toEqual([])
+  })
+
+  it('drops a pane’s pending clear when it is torn down', () => {
+    const { store, clears, emit } = streamingPanes(['s1'])
+    emit('s1')
+    store.unregisterPane('s1')
+    vi.advanceTimersByTime(1000)
+    expect(clears.s1).not.toHaveBeenCalled()
   })
 })
 
