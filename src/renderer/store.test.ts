@@ -403,27 +403,29 @@ describe('atlas clear under sustained output (garbled cost row while an agent ru
   beforeEach(() => vi.useFakeTimers())
   afterEach(() => vi.useRealTimers())
 
-  it('still clears while chunks keep arriving inside the settle window', () => {
+  it('does NOT clear while a pane is streaming — deliberately', () => {
     const { clearTextureAtlas, emit } = streamingPane()
-    // A live agent: one chunk every 50ms for a second. A pure trailing debounce
-    // reset per chunk would never fire here, leaving every refresh in that second
-    // to redraw from a stale atlas — the doubled status row that started this.
+    // A live agent: one chunk every 50ms for a second, all inside the 180ms
+    // settle window. 0.9.2 made the clear fire ~2.5x a second here, to try to
+    // repair a garbled cost row; it did not (that is a fault in xterm's WebGL
+    // renderer), and it charged every streaming pane a full glyph
+    // re-rasterization several times a second for nothing. Assert the absence so
+    // the cap is not reintroduced on the same disproven theory.
     for (let i = 0; i < 20; i++) {
       emit()
       vi.advanceTimersByTime(50)
     }
-    expect(clearTextureAtlas.mock.calls.length).toBeGreaterThanOrEqual(2)
+    expect(clearTextureAtlas).not.toHaveBeenCalled()
   })
 
-  it('caps how long a clear can be deferred, rather than clearing every chunk', () => {
+  it('clears once when a burst finally ends, not once per chunk', () => {
     const { clearTextureAtlas, emit } = streamingPane()
     for (let i = 0; i < 20; i++) {
       emit()
       vi.advanceTimersByTime(50)
     }
-    // 1s of output at 400ms max wait: a couple of clears, not one per chunk —
-    // re-rasterizing the glyph cache 20 times a second is its own problem.
-    expect(clearTextureAtlas.mock.calls.length).toBeLessThan(5)
+    vi.advanceTimersByTime(200)
+    expect(clearTextureAtlas).toHaveBeenCalledTimes(1)
   })
 
   it('still clears promptly once output settles', () => {
@@ -444,23 +446,18 @@ describe('atlas clear under sustained output (garbled cost row while an agent ru
     expect(clears.s1).not.toHaveBeenCalled()
   })
 
-  it('staggers concurrent panes so they do not re-rasterize in one frame', () => {
-    const { clears, emit } = streamingPanes(['s1', 's2', 's3'])
-    const frames: Record<string, number[]> = { s1: [], s2: [], s3: [] }
-    // Three agents streaming in lockstep — the case a single shared timer
-    // collapsed into one very expensive frame every cycle.
-    for (let t = 0; t < 1000; t += 20) {
-      for (const id of ['s1', 's2', 's3']) emit(id)
-      vi.advanceTimersByTime(20)
-      for (const id of ['s1', 's2', 's3']) {
-        if (clears[id].mock.calls.length > frames[id].length) frames[id].push(t)
-      }
+  it('debounces each pane on its own output, not on the busiest pane’s', () => {
+    const { clears, emit } = streamingPanes(['s1', 's2'])
+    // s1 goes quiet while s2 keeps streaming. With one timer shared across panes
+    // — as this used to be — s2's chunks kept resetting it, so s1's clear was
+    // held hostage by a pane that had nothing to do with it.
+    emit('s1')
+    for (let i = 0; i < 6; i++) {
+      emit('s2')
+      vi.advanceTimersByTime(50)
     }
-    for (const id of ['s1', 's2', 's3']) expect(frames[id].length).toBeGreaterThan(0)
-    // No two panes cleared in the same tick.
-    const collisions = frames.s1.filter((t) => frames.s2.includes(t) || frames.s3.includes(t))
-    expect(collisions).toEqual([])
-    expect(frames.s2.filter((t) => frames.s3.includes(t))).toEqual([])
+    expect(clears.s1).toHaveBeenCalledTimes(1)
+    expect(clears.s2).not.toHaveBeenCalled()
   })
 
   it('drops a pane’s pending clear when it is torn down', () => {
