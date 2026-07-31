@@ -28,10 +28,20 @@ function installApi(): { creates: SessionSnapshot[]; api: Record<string, ReturnT
     refreshWorktreeMeta: vi.fn(),
     settingsSave: vi.fn(async () => {}),
     projectRemove: vi.fn(async () => {}),
-    closedAgentsSave: vi.fn()
+    closedAgentsSave: vi.fn(),
+    // Subscriptions wireEvents() installs; tests drive them by grabbing the
+    // handler off the mock's calls.
+    onSessionData: vi.fn(),
+    onSessionState: vi.fn(),
+    onSessionExit: vi.fn(),
+    onNotifyJump: vi.fn(),
+    onHookFailed: vi.fn()
   }
-  // The store reads window.api.* directly.
-  ;(globalThis as unknown as { window: { api: unknown } }).window = { api }
+  // The store reads window.api.* directly. Augment jsdom's window rather than
+  // replacing it — the store also uses window.setTimeout/clearTimeout, which a
+  // bare `{ api }` stub would strip.
+  const g = globalThis as unknown as { window?: Record<string, unknown> }
+  ;(g.window ??= {}).api = api
   return { creates, api }
 }
 
@@ -220,7 +230,11 @@ function fakePane(): {
     }),
     refresh: vi.fn(),
     focus: vi.fn(),
-    dispose: vi.fn()
+    dispose: vi.fn(),
+    // Enough of the write/read surface for the onSessionData path: xterm parses
+    // asynchronously and calls back, and the store then reads the resolved row.
+    write: vi.fn((_data: string, cb?: () => void) => cb?.()),
+    buffer: { active: { baseY: 0, getLine: () => ({ translateToString: () => 'status row' }) } }
   }
   return { term: term as never, fit: { fit: vi.fn() }, refit: vi.fn() }
 }
@@ -343,6 +357,56 @@ describe('renderer-atlas plumbing (stale-glyph / doubled status-row fix)', () =>
     store.registerPane('s1', b.term as never, b.fit as never)
 
     store.clearPaneAtlas('s1')
+    expect(clearTextureAtlas).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('atlas clear under sustained output (garbled cost row while an agent runs)', () => {
+  /** Wire a store to a pane and return a "pty emitted a chunk" function. */
+  function streamingPane(): { clearTextureAtlas: ReturnType<typeof vi.fn>; emit: () => void } {
+    const { api } = installApi()
+    const store = new Store()
+    const pane = fakePane()
+    store.registerPane('s1', pane.term as never, pane.fit as never)
+    const clearTextureAtlas = vi.fn()
+    store.setRenderAddon('s1', { clearTextureAtlas })
+    store.wireEvents()
+    const onData = api.onSessionData.mock.calls[0][0] as (e: { id: string; data: string }) => void
+    return { clearTextureAtlas, emit: () => onData({ id: 's1', data: 'cost: $5.03\r' }) }
+  }
+
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  it('still clears while chunks keep arriving inside the settle window', () => {
+    const { clearTextureAtlas, emit } = streamingPane()
+    // A live agent: one chunk every 50ms for a second. A pure trailing debounce
+    // reset per chunk would never fire here, leaving every refresh in that second
+    // to redraw from a stale atlas — the doubled status row that started this.
+    for (let i = 0; i < 20; i++) {
+      emit()
+      vi.advanceTimersByTime(50)
+    }
+    expect(clearTextureAtlas.mock.calls.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('caps how long a clear can be deferred, rather than clearing every chunk', () => {
+    const { clearTextureAtlas, emit } = streamingPane()
+    for (let i = 0; i < 20; i++) {
+      emit()
+      vi.advanceTimersByTime(50)
+    }
+    // 1s of output at 400ms max wait: a couple of clears, not one per chunk —
+    // re-rasterizing the glyph cache 20 times a second is its own problem.
+    expect(clearTextureAtlas.mock.calls.length).toBeLessThan(5)
+  })
+
+  it('still clears promptly once output settles', () => {
+    const { clearTextureAtlas, emit } = streamingPane()
+    emit()
+    vi.advanceTimersByTime(179)
+    expect(clearTextureAtlas).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(2)
     expect(clearTextureAtlas).toHaveBeenCalledTimes(1)
   })
 })

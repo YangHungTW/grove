@@ -27,6 +27,13 @@ import {
   type ResolvedAgent
 } from '../core/settings'
 
+/** How quiet output must go before the glyph atlas is cleared and repainted. */
+const ATLAS_SETTLE_MS = 180
+/** …and the longest that clear may be deferred while output keeps arriving.
+ * Re-rasterizing every glyph is not free, so this trades a bounded amount of
+ * that work for an upper bound on how long a doubled status row can persist. */
+const ATLAS_MAX_WAIT_MS = 400
+
 export interface WorktreeView {
   id: string // = path
   path: string
@@ -168,9 +175,11 @@ export class Store {
   // in-place rewrite can leave a stale glyph OVERLAID on the fresh one — visible
   // as "doubled" characters in an agent's status row. clearTextureAtlas() forces
   // re-rasterization; we fire it on the TRAILING edge of a burst (one clear when
-  // output settles, not one per frame) to avoid churning the atlas mid-stream.
+  // output settles, not one per frame) to avoid churning the atlas mid-stream —
+  // but bounded by ATLAS_MAX_WAIT_MS, see scheduleAtlasClear.
   private atlasPanes = new Set<string>()
   private atlasTimer: number | undefined
+  private atlasDeadline = 0
   // Panes wheeled since the last scroll-repaint tick — see scheduleScrollRepaint.
   private scrollPanes = new Set<string>()
   private scrollTimer: ReturnType<typeof setTimeout> | undefined
@@ -350,20 +359,35 @@ export class Store {
   }
   /** Clear the glyph atlas once output settles, then repaint — flushes a stale
    * glyph left overlaid by an in-place rewrite (doubled status-row text). Fires
-   * on the burst's trailing edge (reset per chunk) so a long stream clears the
-   * atlas once at the end, not on every frame. */
+   * on the burst's trailing edge so a long stream clears the atlas at most every
+   * ATLAS_MAX_WAIT_MS rather than on every frame.
+   *
+   * The cap is what makes this work at all while an agent is live. Resetting the
+   * timer per chunk — a pure trailing debounce — means it never fires during a
+   * stream, because pty chunks arrive far closer together than the settle window;
+   * meanwhile scheduleRepaint keeps issuing refreshes that redraw from the stale
+   * atlas. The doubled cost/status row would then survive for the whole session,
+   * clearing only once you stopped typing (or dragged a selection, which forces
+   * its own repaint) and coming straight back when output resumed. */
   private scheduleAtlasClear(id: string): void {
     this.atlasPanes.add(id)
+    const now = Date.now()
+    // First chunk of a burst starts the clock the cap is measured against.
+    if (this.atlasTimer === undefined) this.atlasDeadline = now + ATLAS_MAX_WAIT_MS
     window.clearTimeout(this.atlasTimer)
-    this.atlasTimer = window.setTimeout(() => {
-      for (const pid of this.atlasPanes) {
-        const pane = this.panes.get(pid)
-        if (!pane) continue
-        pane.renderAddon?.clearTextureAtlas?.()
-        pane.term.refresh(0, pane.term.rows - 1)
-      }
-      this.atlasPanes.clear()
-    }, 180)
+    this.atlasTimer = window.setTimeout(
+      () => {
+        this.atlasTimer = undefined
+        for (const pid of this.atlasPanes) {
+          const pane = this.panes.get(pid)
+          if (!pane) continue
+          pane.renderAddon?.clearTextureAtlas?.()
+          pane.term.refresh(0, pane.term.rows - 1)
+        }
+        this.atlasPanes.clear()
+      },
+      Math.max(0, Math.min(ATLAS_SETTLE_MS, this.atlasDeadline - now))
+    )
   }
   /** Record a session's latest bottom line for its sidebar card, coalescing the
    * re-render to ~one notify per burst (the line changes far faster than the eye
