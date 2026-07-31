@@ -361,6 +361,79 @@ describe('renderer-atlas plumbing (stale-glyph / doubled status-row fix)', () =>
   })
 })
 
+describe('a collapsed project must not hide the worktree being selected', () => {
+  beforeEach(() => {
+    installApi()
+  })
+
+  /** A store holding `roots`, each with one worktree, all collapsed — the state
+   * a restart rehydrates from settings.collapsedProjects. */
+  function collapsedProjects(store: Store, roots: string[]): void {
+    store.settings = { ...store.settings, collapsedProjects: [...roots] }
+    for (const repoRoot of roots) {
+      const project: ProjectView = {
+        repoRoot,
+        name: repoRoot,
+        expanded: false,
+        loaded: true,
+        worktrees: new Map([[`${repoRoot}/wt`, { id: `${repoRoot}/wt`, path: `${repoRoot}/wt`, branch: 'main', primary: true }]])
+      }
+      store.projects.set(repoRoot, project)
+    }
+    ;(store as unknown as { refreshWorktreeMeta: (id: string) => void }).refreshWorktreeMeta =
+      () => {}
+    ;(store as unknown as { restoreWorktree: (id: string) => Promise<void> }).restoreWorktree =
+      async () => {}
+  }
+
+  it('opens the project the boot selection lands in', async () => {
+    // The reported bug: restart came up with tabs on a worktree whose project
+    // was collapsed, so the sidebar showed nothing for the session in front of
+    // you. init() picks the launch project's first worktree via setActiveProject.
+    const store = new Store()
+    collapsedProjects(store, ['/tmp/a'])
+
+    await store.setActiveProject('/tmp/a')
+
+    expect(store.projects.get('/tmp/a')?.expanded).toBe(true)
+    expect(store.activeWorktreeId).toBe('/tmp/a/wt')
+  })
+
+  it('leaves every other collapsed project alone', async () => {
+    const store = new Store()
+    collapsedProjects(store, ['/tmp/a', '/tmp/b'])
+
+    await store.setActiveProject('/tmp/a')
+
+    expect(store.projects.get('/tmp/b')?.expanded).toBe(false)
+    expect(store.settings.collapsedProjects).toEqual(['/tmp/b'])
+  })
+
+  it('opens a collapsed project reached by keyboard worktree switch', async () => {
+    // switchWorktree/cycleWorktree can select into a project no card is visible
+    // in; clicking a card never can.
+    const store = new Store()
+    collapsedProjects(store, ['/tmp/a'])
+
+    await store.selectWorktree('/tmp/a', '/tmp/a/wt')
+
+    expect(store.projects.get('/tmp/a')?.expanded).toBe(true)
+  })
+
+  it('still lets you collapse the project you are working in', async () => {
+    // The reveal is on selection, not on state — otherwise the caret would fight
+    // you on the one project you are most likely to want out of the way.
+    const store = new Store()
+    collapsedProjects(store, ['/tmp/a'])
+    await store.setActiveProject('/tmp/a')
+
+    store.toggleProjectExpand('/tmp/a')
+
+    expect(store.projects.get('/tmp/a')?.expanded).toBe(false)
+    expect(store.settings.collapsedProjects).toEqual(['/tmp/a'])
+  })
+})
+
 describe('atlas clear under sustained output (garbled cost row while an agent runs)', () => {
   /** A store with `ids` as panes of the active worktree — visible unless
    * `hidden`, which parks them on a worktree that isn't selected. Returns each

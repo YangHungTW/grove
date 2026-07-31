@@ -743,6 +743,22 @@ export class Store {
       this.toast(errMsg(err))
     }
   }
+  /** Open the project a worktree is being selected in, so the selection is
+   * actually visible.
+   *
+   * A collapsed project hides its worktree cards. Land the active worktree in
+   * one — which is what a restart did, since boot selects the launch project's
+   * first worktree regardless of its collapsed state — and the app comes up with
+   * tabs open on a worktree the sidebar doesn't show, and no way to switch off it
+   * there. Only the project being selected into opens; every other collapsed
+   * project keeps its state. Collapsing the project you are working in still
+   * works, because this runs on selection, never on toggle. */
+  private revealSelectedProject(repoRoot: string): void {
+    const p = this.projects.get(repoRoot)
+    if (!p || p.expanded) return
+    p.expanded = true
+    this.persistCollapsed() // notifies via updateSettings
+  }
   toggleProjectExpand(repoRoot: string): void {
     const p = this.projects.get(repoRoot)
     if (!p) return
@@ -811,11 +827,12 @@ export class Store {
     const p = this.projects.get(repoRoot)
     if (!p) return
     this.activeProjectId = repoRoot
-    // Deliberately does NOT expand: init() calls this on the first project at
-    // boot, so force-expanding here would undo a persisted collapse before the
-    // user ever saw it. Only jumpToPending (an explicit attention jump) expands.
     if (!p.loaded) await this.loadWorktrees(p)
     this.activeWorktreeId = p.worktrees.keys().next().value ?? null
+    // Opens THIS project only — see revealSelectedProject. init() routes the
+    // boot selection through here, so a persisted collapse on the launch project
+    // is what used to leave the restored tabs pointing at an invisible worktree.
+    if (this.activeWorktreeId) this.revealSelectedProject(repoRoot)
     if (this.activeWorktreeId) await this.restoreWorktree(this.activeWorktreeId)
     this.syncFocus()
     this.notify()
@@ -934,6 +951,9 @@ export class Store {
   async selectWorktree(projectId: string, wtId: string): Promise<void> {
     this.activeProjectId = projectId
     this.activeWorktreeId = wtId
+    // Clicking a card can't reach a collapsed project, but the keyboard paths
+    // (switchWorktree/cycleWorktree) and the create flows can.
+    this.revealSelectedProject(projectId)
     if (this.activeWorktreeId !== this.sessions.get(this.zoomedSessionId ?? '')?.worktreeId)
       this.zoomedSessionId = null
     await this.restoreWorktree(wtId) // respawn this worktree's sessions on first select
@@ -1724,6 +1744,9 @@ export class Store {
       if (s) {
         this.activeProjectId = this.repoRootOf(s.worktreeId) ?? this.activeProjectId
         this.activeWorktreeId = s.worktreeId
+        // Same reason jumpToPending expands: an explicit jump must not land on a
+        // worktree the sidebar is hiding.
+        if (this.activeProjectId) this.revealSelectedProject(this.activeProjectId)
         this.focusSession(id)
       }
     })
