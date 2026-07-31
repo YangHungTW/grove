@@ -14,6 +14,7 @@ import {
   ChevronDownIcon
 } from './Icons'
 import { slotAt, slotBefore, type DropSlot } from '../core/sidebarOrder'
+import { cardPath } from '../core/cardPath'
 import type { PrInfo } from '../core/gh'
 import groveLogo from './assets/grove-logo.svg'
 
@@ -285,7 +286,9 @@ function WorktreeCard({
   const stateDot = s.worktreeState(wt.id)
   const attention = s.worktreePending(wt.id)
   const durable = s.worktreeDurable(wt.id)
-  const folder = wt.path.split('/').filter(Boolean).pop() ?? ''
+  // Blank whenever the folder just repeats the project header and the branch
+  // above it — the common case with the default worktree template.
+  const folder = cardPath(wt.path.split('/').filter(Boolean).pop() ?? '', project.name, wt.branch)
 
   const statusParts: string[] = []
   if (st?.dirty) statusParts.push(`●${st.dirty}`)
@@ -397,7 +400,7 @@ function WorktreeCard({
           </button>
         )}
       </div>
-      <div className="card-path">{folder}</div>
+      {folder && <div className="card-path">{folder}</div>}
       {line && <div className="card-sub">{line}</div>}
       <UsageLine wtId={wt.id} />
       <QuickRespond wtId={wt.id} />

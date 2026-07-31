@@ -213,22 +213,25 @@ button {
   border-radius: 9px;
   padding: 1px 6px;
 }
-/* Project = top level: repo icon + bold name + actions, with a subtle divider. */
+/* Project = top level: repo icon + bold name + actions, over a divider.
+   The name has to out-weigh .card-title below it — the cards sit on a lighter
+   --panel-2 block, so without a clear size gap the child reads as the parent. */
 .project-header {
   display: flex;
   align-items: center;
   gap: 7px;
-  padding: 5px 8px 6px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  margin-bottom: 6px;
+  padding: 5px 8px 7px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.11);
+  margin-bottom: 7px;
 }
 .repo-icon {
-  color: var(--muted);
+  color: var(--fg);
+  opacity: 0.75;
   flex: 0 0 auto;
 }
 .project-name {
   flex: 1;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--fg);
   letter-spacing: 0.01em;
@@ -243,6 +246,9 @@ button {
   border-radius: 9px;
   padding: 1px 6px;
 }
+/* Four always-lit icons next to the name pull the eye off it. Recede them until
+   the row is hovered — dimmed rather than hidden, so they stay discoverable and
+   the row doesn't reflow when you point at it. */
 .proj-btn {
   border: 0;
   background: transparent;
@@ -251,9 +257,15 @@ button {
   font-size: 13px;
   padding: 0 4px;
   line-height: 1;
+  opacity: 0.5;
+  transition: opacity 0.1s, color 0.1s;
+}
+.project-header:hover .proj-btn {
+  opacity: 1;
 }
 .proj-btn:hover {
   color: var(--fg);
+  opacity: 1;
 }
 /* Worktrees nested under the project, with a left rail showing containment. */
 .worktrees {
