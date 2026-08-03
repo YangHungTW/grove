@@ -199,7 +199,10 @@ export interface RendererApi {
   sessionCreate(req: CreateSessionRequest): Promise<SessionSnapshot>
   sessionInput(id: string, data: string): void
   sessionResize(id: string, cols: number, rows: number): void
-  sessionKill(id: string): void
+  /** Close a session. A durable (tmux) agent is TERMINATED — pass `detach: true`
+   * to only drop the control client and leave the agent running in the
+   * background (the tab menu's "Detach (keep running)"). */
+  sessionKill(id: string, detach?: boolean): void
   sessionList(worktreeId?: string): Promise<SessionSnapshot[]>
   /** Open a native picker for a Markdown/HTML file, starting in `defaultPath`
    * (the worktree folder). null if cancelled. */

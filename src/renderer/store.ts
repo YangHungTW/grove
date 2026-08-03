@@ -1226,8 +1226,15 @@ export class Store {
   renameFocused(): void {
     this.promptRename(this.focusedSessionId)
   }
-  closeSession(id: string, quiet = false): void {
-    window.api.sessionKill(id)
+  /**
+   * Close a session's tab. A durable (tmux) agent is TERMINATED, not just
+   * detached — closing a tab means "I'm done with this agent", and the old
+   * detach-only behaviour leaked a live agent process per closed tab. `detach`
+   * is the explicit opt-out (tab menu → "Detach (keep running)"), which leaves
+   * the agent running and reattaches via the recently-closed list.
+   */
+  closeSession(id: string, quiet = false, detach = false): void {
+    window.api.sessionKill(id, detach)
     const sess = this.sessions.get(id)
     const wtId = sess?.worktreeId
     // A resumable agent closed by the user (not torn down in bulk) goes to the
@@ -1256,6 +1263,12 @@ export class Store {
     }
   }
 
+  /** Close the tab but leave a durable agent running in the background; it comes
+   * back (reattached to the same live process) from the recently-closed list. */
+  detachSession(id: string): void {
+    this.closeSession(id, false, true)
+  }
+
   // --- recently-closed agents (resume) -----------------------------------
   /** repoRoot that owns a worktree id (= path), for keying closed-agent entries. */
   private repoRootOf(wtId: string): string | undefined {
@@ -1274,8 +1287,10 @@ export class Store {
       title: sess.title,
       icon: sess.icon,
       closedAt: Date.now(),
-      // Carry the durable key so reopening reattaches to the still-live tmux
-      // process (closing a durable agent kills only the control client).
+      // Carry the stable durable key either way: after a DETACH it reattaches to
+      // the still-live tmux process, and after a normal close (which terminates
+      // that process) `tmux new-session -A` recreates it under the same name and
+      // the agent comes back via `--resume`.
       durableKey
     }
     // Dedupe by resume id (resuming then re-closing the same session), newest first.

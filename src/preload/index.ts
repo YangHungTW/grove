@@ -68,8 +68,8 @@ const api: RendererApi = {
   sessionResize: (id: string, cols: number, rows: number): void => {
     ipcRenderer.send(Channels.sessionResize, id, cols, rows)
   },
-  sessionKill: (id: string): void => {
-    ipcRenderer.send(Channels.sessionKill, id)
+  sessionKill: (id: string, detach?: boolean): void => {
+    ipcRenderer.send(Channels.sessionKill, id, detach)
   },
   sessionList: (worktreeId?: string): Promise<SessionSnapshot[]> =>
     ipcRenderer.invoke(Channels.sessionList, worktreeId),

@@ -112,6 +112,10 @@ function GroupStrip({
 }): JSX.Element {
   const s = useStore()
   const [dropOver, setDropOver] = useState(false)
+  // Right-click tab menu, positioned at the pointer (the tab itself is a
+  // <button>, so the popup can't be nested inside it).
+  const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null)
+  const menuSess = menu ? s.sessions.get(menu.id) : undefined
   const allowDrop = (e: DragEvent): void => {
     if (dragId) {
       e.preventDefault()
@@ -146,9 +150,13 @@ function GroupStrip({
             className={
               'tab' + (id === active ? ' active' : '') + (s.pending.has(id) ? ' attention' : '')
             }
-            title="Drag to move · double-click to rename"
+            title="Drag to move · double-click to rename · right-click for more"
             onClick={() => store.focusSession(id)}
             onDoubleClick={() => store.promptRename(id)}
+            onContextMenu={(e) => {
+              e.preventDefault()
+              setMenu({ id, x: e.clientX, y: e.clientY })
+            }}
             onDragStart={(e) => {
               dragId = id
               e.dataTransfer.effectAllowed = 'move'
@@ -187,6 +195,42 @@ function GroupStrip({
           </button>
         )
       })}
+      {menu && menuSess && (
+        <>
+          <div className="recent-backdrop" onClick={() => setMenu(null)} />
+          <div className="tab-menu" style={{ left: menu.x, top: menu.y }}>
+            <button
+              onClick={() => {
+                setMenu(null)
+                store.promptRename(menu.id)
+              }}
+            >
+              Rename…
+            </button>
+            {/* Durable agents only: closing terminates the tmux session, so this
+                is the way to park one in the background and pick it up later. */}
+            {menuSess.durable && (
+              <button
+                title="Close the tab but leave the agent running — reopen it from Recently closed"
+                onClick={() => {
+                  setMenu(null)
+                  store.detachSession(menu.id)
+                }}
+              >
+                Detach (keep running)
+              </button>
+            )}
+            <button
+              onClick={() => {
+                setMenu(null)
+                store.closeSession(menu.id)
+              }}
+            >
+              Close{menuSess.durable ? ' (terminate)' : ''}
+            </button>
+          </div>
+        </>
+      )}
     </div>
   )
 }

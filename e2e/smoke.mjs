@@ -59,7 +59,10 @@ const launchOpts = {
     CCM_AGENT_CMD: `touch '${agentMarker}'; sleep 30`,
     // Stand in for a real GUI editor (like CCM_AGENT_CMD): records the opened file
     // path (passed as "$1" by openInEditor) into a marker we can assert on.
-    CCM_IDE_CMD: `node -e "require('fs').writeFileSync(process.argv[1], process.argv[2])" '${ideMarker}'`
+    CCM_IDE_CMD: `node -e "require('fs').writeFileSync(process.argv[1], process.argv[2])" '${ideMarker}'`,
+    // Quitting with durable agents alive normally asks whether to terminate them.
+    // There is nobody to click it here, so app.close() would hang on the modal.
+    CCM_NO_QUIT_PROMPT: '1'
   }
 }
 

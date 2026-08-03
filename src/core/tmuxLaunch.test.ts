@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { tmuxSessionName, buildTmuxControlLaunch, durableEnabled } from './tmuxLaunch'
+import {
+  tmuxSessionName,
+  buildTmuxControlLaunch,
+  buildTmuxKill,
+  durableEnabled
+} from './tmuxLaunch'
 
 describe('durableEnabled', () => {
   it('is on only when opted in AND tmux is available', () => {
@@ -64,5 +69,26 @@ describe('buildTmuxControlLaunch', () => {
     const { args } = buildTmuxControlLaunch('/bin/zsh', 'g', 80, 24, "claude --resume 'a b'")
     // The embedded single quotes become the '\'' escape sequence.
     expect(args[1]).toContain("-ilc 'claude --resume '\\''a b'\\'''")
+  })
+})
+
+describe('buildTmuxKill', () => {
+  it('kills each named session through a login shell', () => {
+    const { command, args } = buildTmuxKill('/bin/zsh', ['grove_a', 'grove_b'])
+    expect(command).toBe('/bin/zsh')
+    expect(args[0]).toBe('-lc') // login shell — Electron from Finder has no tmux on PATH
+    expect(args[1]).toContain('tmux kill-session -t "$s"')
+    // Names ride as positional args ($0 is the `--` placeholder), never inlined.
+    expect(args.slice(2)).toEqual(['--', 'grove_a', 'grove_b'])
+  })
+
+  it('tolerates an already-dead session instead of aborting the loop', () => {
+    expect(buildTmuxKill('/bin/zsh', ['x']).args[1]).toContain('|| true')
+  })
+
+  it('never interpolates a name into the script (no shell injection)', () => {
+    const { args } = buildTmuxKill('/bin/zsh', ['grove_x; rm -rf ~'])
+    expect(args[1]).not.toContain('rm -rf')
+    expect(args).toContain('grove_x; rm -rf ~')
   })
 })

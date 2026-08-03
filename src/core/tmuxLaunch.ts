@@ -33,6 +33,29 @@ export function durableEnabled(durableSessions: boolean, tmuxAvailable: boolean)
   return durableSessions && tmuxAvailable
 }
 
+/**
+ * Build the shell invocation that TEARS DOWN durable tmux sessions by name.
+ *
+ * Killing a durable session's pty only exits its `tmux -CC` control client — the
+ * tmux session and the agent inside it live on. That is the right behaviour for
+ * a Grove restart, but not for "the user closed this tab": without an explicit
+ * kill-session every closed tab leaks a permanently-running agent process.
+ *
+ * Names are passed as POSITIONAL ARGS (never interpolated) so a worktree path
+ * can't inject shell. `|| true` keeps an already-dead session from aborting the
+ * loop. The shell is a LOGIN shell so tmux resolves on PATH — Electron launched
+ * from Finder/Dock otherwise has a stripped PATH (same reason as openInEditor).
+ */
+export function buildTmuxKill(
+  shell: string,
+  names: string[]
+): { command: string; args: string[] } {
+  return {
+    command: shell,
+    args: ['-lc', 'for s in "$@"; do tmux kill-session -t "$s" || true; done', '--', ...names]
+  }
+}
+
 /** Single-quote a string for safe embedding inside a POSIX `sh -lc '...'`. */
 function shSingleQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`

@@ -46,7 +46,12 @@ import type { ResolvedAgent } from '../core/settings'
 import { execFileSync } from 'node:child_process'
 import { detectState } from '../core/stateDetection'
 import { TmuxControlParser, toSendKeysHex } from '../core/tmuxControl'
-import { buildTmuxControlLaunch, tmuxSessionName, durableEnabled } from '../core/tmuxLaunch'
+import {
+  buildTmuxControlLaunch,
+  buildTmuxKill,
+  tmuxSessionName,
+  durableEnabled
+} from '../core/tmuxLaunch'
 import type { CreateWorktreeOptions } from '../core/worktree'
 import {
   Channels,
@@ -351,6 +356,23 @@ function openInEditor(command: string, filePath: string, cwd: string): void {
     execFile(shell, ['-lc', `${editor} "$1"`, '--', filePath], { cwd }, () => {})
   } catch {
     /* ignore launch errors — best-effort, like runHook */
+  }
+}
+
+/**
+ * Terminate durable (tmux) sessions by name. Best-effort and idempotent: a name
+ * that is already gone is not an error. `sync` is used on the quit path, where
+ * the app may exit before an async child has a chance to run.
+ */
+function killTmuxSessions(names: string[], sync = false): void {
+  if (names.length === 0) return
+  const shell = process.env.SHELL || '/bin/zsh'
+  const { command, args } = buildTmuxKill(shell, names)
+  try {
+    if (sync) execFileSync(command, args, { stdio: 'ignore', timeout: 5000 })
+    else execFile(command, args, () => {})
+  } catch {
+    /* ignore — best-effort teardown, like runHook */
   }
 }
 
@@ -666,10 +688,16 @@ function registerIpc(): void {
     }
     ptys.get(id)?.resize(cols, rows)
   })
-  ipcMain.on(Channels.sessionKill, (_e, id: string) => {
-    // For a control session, killing the pty exits the -CC client; the tmux
-    // session (and its agent) persists detached — that's the durability we want.
+  ipcMain.on(Channels.sessionKill, (_e, id: string, detach?: boolean) => {
+    // For a control session, killing the pty only exits the -CC client — the tmux
+    // session and the agent inside it keep running. Durability is meant to survive
+    // a Grove RESTART, not a deliberate close: without the kill-session below,
+    // every closed tab left a permanently-running agent behind (and, in bulk, a
+    // machine that won't shut down). `detach` is the explicit opt-out — the tab
+    // menu's "Detach (keep running)" — which keeps the old behaviour.
+    const c = control.get(id)
     ptys.get(id)?.kill()
+    if (c && !detach) killTmuxSessions([c.name])
     control.delete(id)
     registry.removeSession(id)
   })
@@ -819,6 +847,42 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
+})
+
+// Quitting with durable agents still attached: their tmux sessions would outlive
+// Grove entirely (that's the point of durable mode — reattach on next launch),
+// but silently leaving N agents running is how the machine ends up unable to shut
+// down. Ask once, and let the user choose. Answered synchronously because the
+// decision has to be made before the app tears down.
+let quitAnswered = false
+app.on('before-quit', (e) => {
+  const names = [...control.values()].map((c) => c.name)
+  if (quitAnswered || names.length === 0) return
+  // No human to answer under automation — terminate rather than block the quit
+  // on a modal nobody can click (and rather than leak agents out of a test run).
+  if (process.env.CCM_NO_QUIT_PROMPT) {
+    quitAnswered = true
+    killTmuxSessions(names, true)
+    return
+  }
+  const n = names.length
+  const choice = dialog.showMessageBoxSync({
+    type: 'question',
+    buttons: ['Terminate all', 'Keep running', 'Cancel'],
+    defaultId: 0,
+    cancelId: 2,
+    title: 'Grove',
+    message: `${n} durable agent session${n === 1 ? '' : 's'} still running`,
+    detail:
+      'Durable agents keep running in the background after Grove quits, and reattach ' +
+      'the next time you launch it. Terminate them now, or leave them running?'
+  })
+  if (choice === 2) {
+    e.preventDefault()
+    return
+  }
+  quitAnswered = true
+  if (choice === 0) killTmuxSessions(names, true)
 })
 
 app.on('window-all-closed', () => {

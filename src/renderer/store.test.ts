@@ -23,6 +23,7 @@ function installApi(): { creates: SessionSnapshot[]; api: Record<string, ReturnT
       return snap
     }),
     sessionResize: vi.fn(),
+    sessionKill: vi.fn(),
     setBadgeCount: vi.fn(),
     layoutSave: vi.fn(),
     refreshWorktreeMeta: vi.fn(),
@@ -822,5 +823,56 @@ describe('sidebar project collapse', () => {
     await store.init()
 
     expect(store.projects.get('/x')!.expanded).toBe(false)
+  })
+})
+
+// Closing a tab used to only DETACH a durable (tmux) agent: the control client
+// died, the agent kept running forever. Nothing ever reaped those, so a day of
+// opening and closing tabs left a pile of live agent processes behind.
+describe('closing a tab terminates a durable agent (no background leak)', () => {
+  async function openAgent(): Promise<{ store: Store; api: Record<string, ReturnType<typeof vi.fn>>; wtId: string }> {
+    const { api } = installApi()
+    const store = new Store()
+    const project = seedProject(store)
+    await store.createWorktree(project, 'feat')
+    const wtId = '/tmp/repo-wt-feat'
+    await store.addSession(wtId, 'agent', {
+      id: 'claude',
+      name: 'Claude',
+      command: 'claude',
+      icon: '★'
+    } as never)
+    return { store, api, wtId }
+  }
+
+  it('closeSession kills without the detach flag — the tmux session goes away', async () => {
+    const { store, api, wtId } = await openAgent()
+    const id = store.sessionsOf(wtId)[0].id
+
+    store.closeSession(id)
+
+    expect(api.sessionKill).toHaveBeenCalledWith(id, false)
+    expect(store.sessionsOf(wtId)).toHaveLength(0)
+  })
+
+  it('detachSession is the explicit opt-out and leaves the agent running', async () => {
+    const { store, api, wtId } = await openAgent()
+    const id = store.sessionsOf(wtId)[0].id
+
+    store.detachSession(id)
+
+    expect(api.sessionKill).toHaveBeenCalledWith(id, true)
+    expect(store.sessionsOf(wtId)).toHaveLength(0)
+  })
+
+  it('bulk teardown (removing the worktree) terminates too — nothing is left detached', async () => {
+    const { store, api, wtId } = await openAgent()
+    const project = store.projects.get('/tmp/repo')!
+    project.worktrees.set(wtId, { id: wtId, path: wtId, branch: 'feat', primary: false })
+    const id = store.sessionsOf(wtId)[0].id
+
+    await store.removeWorktree(project, wtId)
+
+    expect(api.sessionKill).toHaveBeenCalledWith(id, false)
   })
 })
