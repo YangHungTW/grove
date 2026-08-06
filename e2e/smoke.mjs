@@ -13,7 +13,7 @@
  */
 import { _electron as electron } from 'playwright'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, existsSync, writeFileSync, readFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, existsSync, writeFileSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, basename } from 'node:path'
 import assert from 'node:assert/strict'
@@ -42,6 +42,14 @@ const hookMarker = join(storeDir, `hook_${Date.now()}`)
 const agentMarker = join(repoA, `agent_${Date.now()}`)
 const ideMarker = join(repoA, `ide_${Date.now()}`)
 const layoutFile = join(storeDir, 'layout.json')
+// Stands in for ~/.claude/sessions — Claude Code's own registry of live sessions.
+// Grove joins it by the uuid it pinned with --session-id and takes its
+// busy/idle/waiting from there instead of scraping the pty. Pointed at a temp
+// dir so the test neither reads nor writes the real one.
+const claudeSessionsDir = join(storeDir, 'claude-sessions')
+// Must exist before launch: Grove watches this directory, and a missing one puts
+// it on a slow retry rather than a live watch.
+mkdirSync(claudeSessionsDir, { recursive: true })
 let app
 let failed = false
 
@@ -60,6 +68,7 @@ const launchOpts = {
     // Stand in for a real GUI editor (like CCM_AGENT_CMD): records the opened file
     // path (passed as "$1" by openInEditor) into a marker we can assert on.
     CCM_IDE_CMD: `node -e "require('fs').writeFileSync(process.argv[1], process.argv[2])" '${ideMarker}'`,
+    CCM_CLAUDE_SESSIONS: claudeSessionsDir,
     // Quitting with durable agents alive normally asks whether to terminate them.
     // There is nobody to click it here, so app.close() would hang on the modal.
     CCM_NO_QUIT_PROMPT: '1'
@@ -401,6 +410,41 @@ try {
   }
   assert.ok(agentLaunched, 'agent launch: CCM_AGENT_CMD marker should appear on disk')
 
+  // 6b) CLAUDE SESSION REGISTRY — Grove takes an agent's busy/idle/waiting from
+  // Claude's own registry (~/.claude/sessions/<pid>.json) rather than scraping
+  // the pty, joining on the uuid it pinned with --session-id. Fake a record for
+  // the agent just launched and prove the whole chain lands in the UI:
+  // fs.watch → parse → join → state event → sidebar reason line.
+  let resumeId = ''
+  for (let i = 0; i < 40 && !resumeId; i++) {
+    try {
+      resumeId = JSON.parse(readFileSync(layoutFile, 'utf8')).find((d) => d.kind === 'agent')
+        ?.resumeId ?? ''
+    } catch {
+      /* layout not written yet */
+    }
+    if (!resumeId) await new Promise((r) => setTimeout(r, 250))
+  }
+  assert.ok(resumeId, 'registry join: Grove should pin a --session-id uuid for a claude agent')
+  writeFileSync(
+    join(claudeSessionsDir, `${process.pid}.json`),
+    // process.pid is this test runner: a pid that is definitely alive, since
+    // Grove drops records whose process is gone.
+    JSON.stringify({
+      pid: process.pid,
+      sessionId: resumeId,
+      cwd: repoA,
+      kind: 'interactive',
+      status: 'waiting',
+      waitingFor: 'dialog open'
+    })
+  )
+  await win.waitForFunction(
+    () => document.querySelector('.card.active .card-waiting')?.textContent === 'waiting: dialog open',
+    { timeout: 8000 }
+  )
+  const registryWaiting = true
+
   // 7) MULTIPLE AGENTS — a second agent is allowed (two agent tabs).
   await addClaudeAgent()
   await win.waitForFunction(
@@ -692,7 +736,7 @@ try {
       `viewerPanes=${viewerPanes} htmlIframe=${htmlIframe} htmlScriptRan=${htmlScriptRan} diffReview=${diffReview} ` +
       `diffAdd=${addLines} diffDel=${delLines} splitDiff=${splitDiff} ideOpen=${ideOpen} finish=${finishFlow} ` +
       `newTask=${newTaskFlow} restored=${restored} glContexts=${gl.contexts}/${gl.visibleTerms} ` +
-      `rendererToggle=${rendererToggle}`
+      `rendererToggle=${rendererToggle} registryWaiting=${registryWaiting}`
   )
 } catch (err) {
   failed = true

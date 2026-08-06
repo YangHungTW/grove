@@ -826,6 +826,46 @@ describe('sidebar project collapse', () => {
   })
 })
 
+// Claude reports WHY it is waiting ("dialog open", "sandbox request"…) in its
+// own session registry; main forwards it on the state event. The reason is only
+// meaningful while waiting — a stale one left on an idle tab reads as a bug.
+describe('waitingFor rides along with the state event', () => {
+  function wired(): {
+    store: Store
+    emit: (e: { id: string; state: string; waitingFor?: string }) => void
+  } {
+    const { api } = installApi()
+    const store = new Store()
+    const wtId = '/tmp/repo-wt-feat'
+    store.sessions.set('s1', {
+      id: 's1',
+      worktreeId: wtId,
+      kind: 'agent',
+      title: 'claude',
+      state: 'idle'
+    } as never)
+    store.focusedSessionId = 's1' // suppress the toast/notify attention path
+    store.wireEvents()
+    const onState = api.onSessionState.mock.calls[0][0]
+    return { store, emit: onState as never }
+  }
+
+  it('records the reason on a waiting state and exposes it per worktree', () => {
+    const { store, emit } = wired()
+    emit({ id: 's1', state: 'waiting', waitingFor: 'dialog open' })
+    expect(store.sessions.get('s1')!.waitingFor).toBe('dialog open')
+    expect(store.worktreeWaitingFor('/tmp/repo-wt-feat')).toBe('dialog open')
+  })
+
+  it('clears the reason once the session stops waiting', () => {
+    const { store, emit } = wired()
+    emit({ id: 's1', state: 'waiting', waitingFor: 'sandbox request' })
+    emit({ id: 's1', state: 'busy' })
+    expect(store.sessions.get('s1')!.waitingFor).toBeUndefined()
+    expect(store.worktreeWaitingFor('/tmp/repo-wt-feat')).toBeUndefined()
+  })
+})
+
 // Closing a tab used to only DETACH a durable (tmux) agent: the control client
 // died, the agent kept running forever. Nothing ever reaped those, so a day of
 // opening and closing tabs left a pile of live agent processes behind.

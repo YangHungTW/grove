@@ -73,6 +73,10 @@ export interface SessionSnapshot {
   viewerKind?: ViewerKind
   /** Durable (tmux control-mode) agent: survives a Grove restart and reattaches. */
   durable?: boolean
+  /** While `state === 'waiting'`, why — e.g. "dialog open", "sandbox request".
+   * Comes from Claude's own session registry, so only claude-family agents
+   * report it (see core/claudeRegistry). */
+  waitingFor?: string
 }
 
 export interface CreateSessionRequest {
@@ -87,6 +91,11 @@ export interface CreateSessionRequest {
   rows?: number
   /** Agent id used for state detection (e.g. 'claude'); defaults from kind. */
   agent?: string
+  /** The agent's own session uuid, when Grove pinned one via `--session-id`
+   * (see core/resume). It is the join key into Claude's session registry, which
+   * reports authoritative busy/idle/waiting instead of the regex guess in
+   * core/stateDetection. Absent for agents with no resume support. */
+  agentSessionId?: string
   /** Stable per-agent id for durable (tmux) sessions. Folded into the tmux
    * session name so multiple agents in one worktree don't collide onto a single
    * session; persisted + restored so a relaunch reattaches to the right one. */
@@ -114,6 +123,8 @@ export interface SessionDataEvent {
 export interface SessionStateEvent {
   id: string
   state: SessionState
+  /** Reason accompanying a `waiting` state; cleared on any other state. */
+  waitingFor?: string
 }
 export interface SessionExitEvent {
   id: string

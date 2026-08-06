@@ -214,6 +214,12 @@ export class Store {
   worktreeDurable(wtId: string): boolean {
     return this.sessionsOf(wtId).some((s) => s.kind === 'agent' && s.durable)
   }
+  /** Why this worktree's agent is waiting, when Claude told us (e.g. "dialog
+   * open"). Drives the sidebar card's reason line — a card in the attention
+   * state is otherwise silent about what it actually wants. */
+  worktreeWaitingFor(wtId: string): string | undefined {
+    return this.sessionsOf(wtId).find((s) => s.waitingFor)?.waitingFor
+  }
   /** Worst session state in a worktree, for the card's status dot. */
   worktreeState(wtId: string): SessionState | 'none' {
     const ss = this.sessionsOf(wtId)
@@ -1038,6 +1044,10 @@ export class Store {
         kind,
         command,
         agent: detect,
+        // The uuid we just pinned with --session-id: main's join key into
+        // Claude's own session registry, which reports authoritative
+        // busy/idle/waiting instead of the regex guess in core/stateDetection.
+        agentSessionId: launch.resumeId,
         cwd: wt.path,
         title,
         icon,
@@ -1715,10 +1725,13 @@ export class Store {
         this.setLastLine(id, lastNonEmptyLine(data))
       }
     })
-    window.api.onSessionState(({ id, state }) => {
+    window.api.onSessionState(({ id, state, waitingFor }) => {
       const s = this.sessions.get(id)
       if (!s) return
       s.state = state
+      // Only meaningful while waiting — clear it otherwise so a tooltip can't
+      // keep advertising a dialog that has already been dismissed.
+      s.waitingFor = state === 'waiting' ? waitingFor : undefined
       if ((state as SessionState) === 'waiting' && id !== this.focusedSessionId) {
         this.pending.add(id)
         this.toast(`${s.title} needs your attention`)

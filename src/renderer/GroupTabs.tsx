@@ -150,7 +150,14 @@ function GroupStrip({
             className={
               'tab' + (id === active ? ' active' : '') + (s.pending.has(id) ? ' attention' : '')
             }
-            title="Drag to move · double-click to rename · right-click for more"
+            // Claude reports WHY it is waiting (a dialog, a sandbox request…);
+            // surfacing it here means you can triage a yellow tab without
+            // switching into it.
+            title={
+              sess.waitingFor
+                ? `${sess.title} — waiting: ${sess.waitingFor}\nDrag to move · double-click to rename · right-click for more`
+                : 'Drag to move · double-click to rename · right-click for more'
+            }
             onClick={() => store.focusSession(id)}
             onDoubleClick={() => store.promptRename(id)}
             onContextMenu={(e) => {

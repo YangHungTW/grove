@@ -10,7 +10,7 @@ import {
 } from 'electron'
 import { join, resolve, basename, dirname } from 'node:path'
 import { execFile } from 'node:child_process'
-import { existsSync, copyFileSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, copyFileSync, readdirSync, readFileSync, watch } from 'node:fs'
 import { homedir } from 'node:os'
 import { stat as statAsync, readFile as readFileAsync } from 'node:fs/promises'
 import { SessionRegistry } from '../core/sessionRegistry'
@@ -46,6 +46,7 @@ import type { ResolvedAgent } from '../core/settings'
 import { execFileSync } from 'node:child_process'
 import { detectState } from '../core/stateDetection'
 import { TmuxControlParser, toSendKeysHex } from '../core/tmuxControl'
+import { parseRegistryEntry, registryUpdates, type RegistryEntry } from '../core/claudeRegistry'
 import {
   buildTmuxControlLaunch,
   buildTmuxKill,
@@ -83,6 +84,17 @@ const ptys = new Map<string, PtySession>()
 // stdin/out is the tmux protocol, not raw terminal I/O. Input/resize must be
 // translated to tmux commands instead of written to the pty directly.
 const control = new Map<string, { name: string }>()
+// Claude's own session registry (~/.claude/sessions/<pid>.json): authoritative
+// busy/idle/waiting, computed from the CLI's UI state rather than scraped out of
+// its output. `agentSessionIds` is the join — Grove session id → the uuid Grove
+// pinned with `--session-id` — and `waitingReason` carries the human-readable
+// "why" alongside a waiting state.
+const agentSessionIds = new Map<string, string>()
+const waitingReason = new Map<string, string>()
+let registryEntries: RegistryEntry[] = []
+// Uuids of the entries above, for the per-output-chunk check in forwardOutput —
+// that runs on every byte an agent emits, so it must not scan.
+let liveRegistryUuids = new Set<string>()
 let mainWindow: BrowserWindow | null = null
 let projectStore: ProjectStore | null = null
 let layoutStore: LayoutStore | null = null
@@ -269,7 +281,8 @@ function snapshot(s: Session): SessionSnapshot {
     pid: s.pid,
     filePath: s.filePath,
     viewerKind: s.viewerKind,
-    durable: control.has(s.id) || undefined
+    durable: control.has(s.id) || undefined,
+    waitingFor: waitingReason.get(s.id)
   }
 }
 
@@ -376,6 +389,125 @@ function killTmuxSessions(names: string[], sync = false): void {
   }
 }
 
+// --- Claude session registry -------------------------------------------------
+
+function claudeSessionsDir(): string {
+  return process.env.CCM_CLAUDE_SESSIONS ?? join(homedir(), '.claude', 'sessions')
+}
+
+/** Is that pid still around? A crashed CLI leaves its registry file behind, and
+ * a phantom record would otherwise pin a tab to a state nothing can move. */
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Every live record in Claude's registry. Unreadable or half-written files are
+ * skipped for this tick rather than failing the sweep — the directory belongs to
+ * another program, which rewrites it whenever it likes. */
+function readClaudeRegistry(): RegistryEntry[] {
+  const dir = claudeSessionsDir()
+  let names: string[]
+  try {
+    names = readdirSync(dir)
+  } catch {
+    return []
+  }
+  const out: RegistryEntry[] = []
+  for (const name of names) {
+    if (!/^\d+\.json$/.test(name)) continue
+    try {
+      const entry = parseRegistryEntry(JSON.parse(readFileSync(join(dir, name), 'utf8')))
+      if (entry && pidAlive(entry.pid)) out.push(entry)
+    } catch {
+      /* skip this file this tick */
+    }
+  }
+  return out
+}
+
+/** Does this Grove session currently have a live registry record backing it?
+ * When it doesn't — a non-claude agent, or a resume chain that fell through to a
+ * bare `claude` with a uuid we never learned — output scraping stays in charge. */
+function registryBacked(groveId: string): boolean {
+  const uuid = agentSessionIds.get(groveId)
+  return uuid !== undefined && liveRegistryUuids.has(uuid)
+}
+
+/** Drop a torn-down session's registry bookkeeping. Called wherever a session
+ * stops existing, so a recycled Grove id can never inherit a stale reason. */
+function forgetRegistryJoin(groveId: string): void {
+  agentSessionIds.delete(groveId)
+  waitingReason.delete(groveId)
+}
+
+/** Push registry status onto the Grove sessions it backs. The decision of what
+ * changed lives in core/claudeRegistry; this is the plumbing around it. */
+function applyRegistry(): void {
+  const current = new Map(
+    [...agentSessionIds.keys()].flatMap((groveId) => {
+      const record = registry.getSession(groveId)
+      if (!record || !ptys.has(groveId)) return []
+      return [[groveId, { state: record.state, waitingFor: waitingReason.get(groveId) }] as const]
+    })
+  )
+  for (const u of registryUpdates(registryEntries, agentSessionIds, current)) {
+    if (u.waitingFor) waitingReason.set(u.groveId, u.waitingFor)
+    else waitingReason.delete(u.groveId)
+    if (u.reasonOnly) {
+      // setState early-returns on an unchanged state, which would swallow the
+      // new reason — emit it directly.
+      send(Channels.sessionStateChange, {
+        id: u.groveId,
+        state: u.state,
+        waitingFor: u.waitingFor
+      })
+      continue
+    }
+    const record = registry.getSession(u.groveId)
+    if (record) record.state = u.state
+    // onStateChange attaches the reason and emits — see createSession.
+    ptys.get(u.groveId)?.setState(u.state)
+  }
+  if (process.env.CCM_DEBUG_REGISTRY)
+    console.log(`[registry] ${registryEntries.length} live, ${agentSessionIds.size} joined`)
+}
+
+/**
+ * Watch Claude's registry directory. The files are rewritten on each status
+ * TRANSITION rather than on a heartbeat, so watching is sufficient and polling
+ * would just burn wakeups. One transition can rewrite a file more than once, so
+ * the reread is debounced.
+ *
+ * The directory may not exist yet (claude never run on this machine); retry on a
+ * slow timer so the very first agent Grove launches doesn't need an app restart
+ * before its state goes live.
+ */
+function startClaudeRegistryWatch(): void {
+  let debounce: NodeJS.Timeout | null = null
+  const refresh = (): void => {
+    registryEntries = readClaudeRegistry()
+    liveRegistryUuids = new Set(registryEntries.map((e) => e.sessionId))
+    applyRegistry()
+  }
+  const attach = (): void => {
+    refresh()
+    try {
+      watch(claudeSessionsDir(), () => {
+        if (debounce) clearTimeout(debounce)
+        debounce = setTimeout(refresh, 150)
+      })
+    } catch {
+      setTimeout(attach, 30_000).unref?.()
+    }
+  }
+  attach()
+}
+
 function createSession(req: CreateSessionRequest): SessionSnapshot {
   // A user-supplied file path (viewer panes) may be pasted relative, with `~`, or
   // quoted — resolve it against the worktree cwd now so fileRead/IDE-open (which
@@ -404,6 +536,9 @@ function createSession(req: CreateSessionRequest): SessionSnapshot {
   if (req.kind === 'viewer' || req.kind === 'diff') return snapshot(record)
 
   const agent = req.agent ?? (req.kind === 'agent' ? 'claude' : '')
+  // Join key into Claude's session registry. Recorded before the spawn so the
+  // very first registry sweep after startup already sees this session.
+  if (req.agentSessionId) agentSessionIds.set(record.id, req.agentSessionId)
   const spec = launchSpecFor(req)
   const tmuxName = durableAgentName(req)
   const pty = new PtySession({
@@ -424,7 +559,11 @@ function createSession(req: CreateSessionRequest): SessionSnapshot {
 
   const forwardOutput = (data: string): void => {
     send(Channels.sessionData, { id: record.id, data })
-    if (agent) {
+    // Claude's registry is authoritative wherever we can join to it; scraping
+    // the byte stream is the fallback for everything else. Checked per chunk (not
+    // once at spawn) so a session whose registry record disappears mid-flight
+    // degrades back to detection instead of freezing on its last known state.
+    if (agent && !registryBacked(record.id)) {
       const next = detectState(data, agent)
       if (next !== record.state) {
         record.state = next
@@ -445,6 +584,7 @@ function createSession(req: CreateSessionRequest): SessionSnapshot {
         send(Channels.sessionExit, { id: record.id, exitCode: 0 })
         ptys.delete(record.id)
         control.delete(record.id)
+        forgetRegistryJoin(record.id)
       },
       onOther: process.env.CCM_TMUX_DEBUG ? (l) => console.error('[tmux]', l) : undefined
     })
@@ -455,13 +595,18 @@ function createSession(req: CreateSessionRequest): SessionSnapshot {
   }
   pty.onStateChange((state) => {
     record.state = state
-    send(Channels.sessionStateChange, { id: record.id, state })
+    send(Channels.sessionStateChange, {
+      id: record.id,
+      state,
+      waitingFor: waitingReason.get(record.id)
+    })
   })
   pty.onExit(({ exitCode, signal }) => {
     record.state = 'exited'
     send(Channels.sessionExit, { id: record.id, exitCode, signal })
     ptys.delete(record.id)
     control.delete(record.id)
+    forgetRegistryJoin(record.id)
   })
 
   ptys.set(record.id, pty)
@@ -471,6 +616,7 @@ function createSession(req: CreateSessionRequest): SessionSnapshot {
     // Spawn failed (e.g. shell not found) — roll back the registry record.
     ptys.delete(record.id)
     control.delete(record.id)
+    forgetRegistryJoin(record.id)
     registry.removeSession(record.id)
     throw err
   }
@@ -699,6 +845,7 @@ function registerIpc(): void {
     ptys.get(id)?.kill()
     if (c && !detach) killTmuxSessions([c.name])
     control.delete(id)
+    forgetRegistryJoin(id)
     registry.removeSession(id)
   })
 
@@ -843,6 +990,7 @@ app.whenReady().then(() => {
   migrateUserData()
   protocol.handle(HTML_VIEWER_SCHEME, serveHtmlViewer)
   registerIpc()
+  startClaudeRegistryWatch()
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

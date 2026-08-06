@@ -284,6 +284,7 @@ function WorktreeCard({
   const line = s.worktreeLastLine(wt.id)
   const cnt = s.sessionsOf(wt.id).length
   const stateDot = s.worktreeState(wt.id)
+  const waitingFor = s.worktreeWaitingFor(wt.id)
   const attention = s.worktreePending(wt.id)
   const durable = s.worktreeDurable(wt.id)
   // Blank whenever the folder just repeats the project header and the branch
@@ -318,7 +319,11 @@ function WorktreeCard({
         {stateDot !== 'none' && (
           <span
             className={`dot dot-${stateDot}`}
-            title={`Agent: ${stateDot === 'busy' ? 'working' : stateDot === 'waiting' ? 'needs input' : 'idle'}`}
+            title={
+              waitingFor
+                ? `Agent: needs input — ${waitingFor}`
+                : `Agent: ${stateDot === 'busy' ? 'working' : stateDot === 'waiting' ? 'needs input' : 'idle'}`
+            }
           />
         )}
         <span className="card-title" title="Drag to reorder worktrees">
@@ -401,6 +406,10 @@ function WorktreeCard({
         )}
       </div>
       {folder && <div className="card-path">{folder}</div>}
+      {/* An attention card is otherwise silent about what it actually wants.
+          Claude reports the reason, so say it rather than making the user
+          switch into the pane to find out. */}
+      {waitingFor && <div className="card-waiting">waiting: {waitingFor}</div>}
       {line && <div className="card-sub">{line}</div>}
       <UsageLine wtId={wt.id} />
       <QuickRespond wtId={wt.id} />
