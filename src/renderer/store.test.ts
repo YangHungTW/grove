@@ -298,6 +298,32 @@ describe('pane sizing goes through the pane-registered refit', () => {
     expect(api.sessionResize).toHaveBeenCalledWith(id, 80, 24)
   })
 
+  it('nudges the agent only on the FIRST show, then repaints locally', async () => {
+    // The rows-1→rows bounce SIGWINCHes the agent into redrawing its whole UI.
+    // Doing that on every reveal is what made switching tabs visibly re-render
+    // the pane. xterm keeps processing output while a pane is hidden, so on a
+    // later reveal its buffer is already correct and only the canvas is stale.
+    const store = new Store()
+    const { wtId, id } = await seedAgentSession(store)
+    const pane = fakePane()
+    store.registerPane(id, pane.term as never, pane.fit as never, undefined, pane.refit)
+
+    await store.selectWorktree('/tmp/repo', wtId) // first show → nudge
+    api.sessionResize.mockClear()
+    pane.term.refresh.mockClear()
+
+    // Hide it, then reveal it again the way a tab switch does.
+    store.activeWorktreeId = '/tmp/other-wt'
+    store.fitVisible()
+    store.activeWorktreeId = wtId
+    store.fitVisible()
+
+    expect(pane.term.refresh).toHaveBeenCalled()
+    // No SIGWINCH: refit() above still resizes the pty if the geometry moved,
+    // but an unchanged size must not reach the agent at all.
+    expect(api.sessionResize).not.toHaveBeenCalled()
+  })
+
   it('a tab switch nudges panes; refocusing the already-active tab does not', async () => {
     const store = new Store()
     const { wtId, id: first } = await seedAgentSession(store)

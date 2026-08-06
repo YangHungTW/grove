@@ -151,6 +151,10 @@ export class Store {
   /** Durable agents that have already done their one-time settle mask (so we
    * don't re-mask on every worktree switch — only on the first attach). */
   private settledOnce = new Set<string>()
+  /** Agent panes that have been shown at least once. The reveal nudge forces the
+   * AGENT to redraw (see fitVisible); after the first show, xterm already holds
+   * the pane's screen and a local repaint is enough. */
+  private shownOnce = new Set<string>()
 
   // Live agents that own a pinned resume id, keyed by session id. On close the
   // entry becomes a ClosedAgent so the agent can be resumed later.
@@ -411,6 +415,7 @@ export class Store {
     this.panes.delete(id)
     this.settling.delete(id)
     this.settledOnce.delete(id)
+    this.shownOnce.delete(id)
     window.clearTimeout(this.atlasTimers.get(id))
     this.atlasTimers.delete(id)
   }
@@ -444,6 +449,20 @@ export class Store {
         // shells don't need it — for them each extra SIGWINCH just reprints
         // the prompt, stacking stale copies in the scrollback.
         if (newlyShown.includes(id) && rows > 1 && this.sessions.get(id)?.kind === 'agent') {
+          const firstShow = !this.shownOnce.has(id)
+          this.shownOnce.add(id)
+          if (!firstShow) {
+            // Revealed again — a tab switch, or coming back to this worktree.
+            // xterm kept processing this pane's output the whole time it was
+            // hidden, so its buffer is already current and only the CANVAS is
+            // stale. Repaint from that buffer instead of falling through to the
+            // rows-1→rows bounce below, which SIGWINCHes the agent into redrawing
+            // its entire UI — the visible "everything re-renders" on every tab
+            // switch. A real size change is still handled: pane.refit() above
+            // resizes the pty when, and only when, the geometry actually moved.
+            this.repaintPane(id)
+            continue
+          }
           if (this.sessions.get(id)?.durable && !this.settledOnce.has(id)) {
             // First (re)attach of a durable agent: tmux replays the old screen and
             // only fully repaints on a real size CHANGE, so the first frames can be
