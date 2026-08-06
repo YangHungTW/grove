@@ -8,6 +8,9 @@ import type { ClosedAgent } from '../core/closedAgentsStore'
 import type { AppSettings } from '../core/settingsStore'
 import type { ResolvedAgent } from '../core/settings'
 import type { SkillDef } from '../core/skills'
+import type { RegistryEntry } from '../core/claudeRegistry'
+
+export type { RegistryEntry }
 
 /** Channel names. Request/response (invoke) and event (send) are split. */
 export const Channels = {
@@ -44,6 +47,9 @@ export const Channels = {
   sessionResize: 'session:resize',
   sessionKill: 'session:kill',
   sessionList: 'session:list',
+  fleetList: 'fleet:list',
+  fleetStop: 'fleet:stop',
+  fleetChange: 'fleet:change',
   fileOpenDialog: 'file:open-dialog',
   fileRead: 'file:read',
   ideOpen: 'ide:open',
@@ -215,6 +221,14 @@ export interface RendererApi {
    * background (the tab menu's "Detach (keep running)"). */
   sessionKill(id: string, detach?: boolean): void
   sessionList(worktreeId?: string): Promise<SessionSnapshot[]>
+  /** Claude sessions running on this machine that are NOT one of Grove's panes:
+   * started in a plain terminal, or dispatched with `claude --bg`. Grove would
+   * otherwise leave them entirely invisible. */
+  fleetList(): Promise<RegistryEntry[]>
+  /** Stop a background (`claude --bg`) session by its short job id. Interactive
+   * sessions have no job id and are not stoppable this way — they belong to the
+   * terminal they are attached to. */
+  fleetStop(jobId: string): void
   /** Open a native picker for a Markdown/HTML file, starting in `defaultPath`
    * (the worktree folder). null if cancelled. */
   fileOpenDialog(defaultPath?: string): Promise<string | null>
@@ -237,4 +251,7 @@ export interface RendererApi {
   onNotifyJump(cb: (e: { id: string }) => void): () => void
   /** A per-project create/remove hook exited non-zero (or failed to spawn). */
   onHookFailed(cb: (e: HookFailedEvent) => void): () => void
+  /** Claude's session registry changed — the fleet list is pushed rather than
+   * polled, since main already watches the directory. */
+  onFleetChange(cb: (e: { sessions: RegistryEntry[] }) => void): () => void
 }

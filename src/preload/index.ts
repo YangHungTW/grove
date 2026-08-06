@@ -3,6 +3,7 @@ import {
   Channels,
   type CreateSessionRequest,
   type HookFailedEvent,
+  type RegistryEntry,
   type RendererApi,
   type SessionDataEvent,
   type SessionExitEvent,
@@ -73,6 +74,10 @@ const api: RendererApi = {
   },
   sessionList: (worktreeId?: string): Promise<SessionSnapshot[]> =>
     ipcRenderer.invoke(Channels.sessionList, worktreeId),
+  fleetList: (): Promise<RegistryEntry[]> => ipcRenderer.invoke(Channels.fleetList),
+  fleetStop: (jobId: string): void => {
+    ipcRenderer.send(Channels.fleetStop, jobId)
+  },
   fileOpenDialog: (defaultPath?: string): Promise<string | null> =>
     ipcRenderer.invoke(Channels.fileOpenDialog, defaultPath),
   fileRead: (filePath: string): Promise<string> => ipcRenderer.invoke(Channels.fileRead, filePath),
@@ -97,7 +102,9 @@ const api: RendererApi = {
     subscribe(Channels.sessionStateChange, cb),
   onSessionExit: (cb: (e: SessionExitEvent) => void) => subscribe(Channels.sessionExit, cb),
   onNotifyJump: (cb: (e: { id: string }) => void) => subscribe(Channels.notifyJump, cb),
-  onHookFailed: (cb: (e: HookFailedEvent) => void) => subscribe(Channels.hookFailed, cb)
+  onHookFailed: (cb: (e: HookFailedEvent) => void) => subscribe(Channels.hookFailed, cb),
+  onFleetChange: (cb: (e: { sessions: RegistryEntry[] }) => void) =>
+    subscribe(Channels.fleetChange, cb)
 }
 
 contextBridge.exposeInMainWorld('api', api)

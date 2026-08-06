@@ -445,6 +445,36 @@ try {
   )
   const registryWaiting = true
 
+  // 6c) ELSEWHERE — a registry record that is NOT one of Grove's panes is a
+  // session running in some other terminal (or `claude --bg`). Grove lists it so
+  // background agents can't burn tokens invisibly.
+  writeFileSync(
+    join(claudeSessionsDir, `${process.ppid}.json`),
+    JSON.stringify({
+      pid: process.ppid,
+      sessionId: 'not-a-grove-pane',
+      cwd: repoB,
+      kind: 'bg',
+      jobId: 'deadbeef',
+      name: 'stray-agent',
+      status: 'busy',
+      startedAt: Date.now() - 3_600_000
+    })
+  )
+  await win.waitForFunction(
+    () =>
+      [...document.querySelectorAll('.elsewhere-row .elsewhere-name')].some(
+        (n) => n.textContent === 'stray-agent'
+      ),
+    { timeout: 8000 }
+  )
+  // The agent Grove itself owns must NOT show up here — it is a tab, not a stray.
+  const elsewhereRows = await win.evaluate(() =>
+    [...document.querySelectorAll('.elsewhere-row .elsewhere-name')].map((n) => n.textContent)
+  )
+  assert.deepEqual(elsewhereRows, ['stray-agent'], 'Elsewhere lists only sessions Grove does not own')
+  const elsewhere = true
+
   // 7) MULTIPLE AGENTS — a second agent is allowed (two agent tabs).
   await addClaudeAgent()
   await win.waitForFunction(
@@ -736,7 +766,7 @@ try {
       `viewerPanes=${viewerPanes} htmlIframe=${htmlIframe} htmlScriptRan=${htmlScriptRan} diffReview=${diffReview} ` +
       `diffAdd=${addLines} diffDel=${delLines} splitDiff=${splitDiff} ideOpen=${ideOpen} finish=${finishFlow} ` +
       `newTask=${newTaskFlow} restored=${restored} glContexts=${gl.contexts}/${gl.visibleTerms} ` +
-      `rendererToggle=${rendererToggle} registryWaiting=${registryWaiting}`
+      `rendererToggle=${rendererToggle} registryWaiting=${registryWaiting} elsewhere=${elsewhere}`
   )
 } catch (err) {
   failed = true

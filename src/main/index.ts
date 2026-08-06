@@ -46,7 +46,12 @@ import type { ResolvedAgent } from '../core/settings'
 import { execFileSync } from 'node:child_process'
 import { detectState } from '../core/stateDetection'
 import { TmuxControlParser, toSendKeysHex } from '../core/tmuxControl'
-import { parseRegistryEntry, registryUpdates, type RegistryEntry } from '../core/claudeRegistry'
+import {
+  parseRegistryEntry,
+  registryUpdates,
+  unjoinedEntries,
+  type RegistryEntry
+} from '../core/claudeRegistry'
 import {
   buildTmuxControlLaunch,
   buildTmuxKill,
@@ -475,6 +480,26 @@ function applyRegistry(): void {
   }
   if (process.env.CCM_DEBUG_REGISTRY)
     console.log(`[registry] ${registryEntries.length} live, ${agentSessionIds.size} joined`)
+  // Pushed, not polled — main already watches the directory, so the sidebar's
+  // Elsewhere list has no reason to ask.
+  send(Channels.fleetChange, { sessions: fleetSessions() })
+}
+
+/** Claude sessions on this machine that are not one of Grove's own panes. */
+function fleetSessions(): RegistryEntry[] {
+  return unjoinedEntries(registryEntries, new Set(agentSessionIds.values()))
+}
+
+/** Stop a background session. `claude stop` takes the short job id; the id rides
+ * as a positional arg so it can never be read as shell (same guard as
+ * killTmuxSessions). */
+function stopFleetSession(jobId: string): void {
+  const shell = process.env.SHELL || '/bin/zsh'
+  try {
+    execFile(shell, ['-lc', 'claude stop "$1"', '--', jobId], () => {})
+  } catch {
+    /* best-effort — the watcher reports the real outcome either way */
+  }
 }
 
 /**
@@ -834,6 +859,8 @@ function registerIpc(): void {
     }
     ptys.get(id)?.resize(cols, rows)
   })
+  ipcMain.handle(Channels.fleetList, () => fleetSessions())
+  ipcMain.on(Channels.fleetStop, (_e, jobId: string) => stopFleetSession(jobId))
   ipcMain.on(Channels.sessionKill, (_e, id: string, detach?: boolean) => {
     // For a control session, killing the pty only exits the -CC client — the tmux
     // session and the agent inside it keep running. Durability is meant to survive

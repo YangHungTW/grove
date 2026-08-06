@@ -4,7 +4,7 @@ import type { SearchAddon } from '@xterm/addon-search'
 import type { SessionKind, SessionState } from '../core/types'
 import type { WorktreeUsage } from '../core/claudeUsage'
 import type { PrInfo } from '../core/gh'
-import type { SessionSnapshot } from '../main/ipc'
+import type { RegistryEntry, SessionSnapshot } from '../main/ipc'
 import type { SessionDescriptor } from '../core/layoutStore'
 import { dedupeByDurableKey } from '../core/layoutDedupe'
 import { hookFailedMessage } from '../core/hookMessage'
@@ -135,6 +135,11 @@ export class Store {
   dialog: DialogState | null = null
   /** Recently-closed resumable agents (most-recent-first), persisted to disk. */
   closedAgents: ClosedAgent[] = []
+  /** Claude sessions running on this machine that are NOT Grove panes — started
+   * in a plain terminal, or dispatched with `claude --bg`. Pushed by main
+   * whenever Claude's registry changes; drives the sidebar's Elsewhere list so
+   * background agents stop being invisible. */
+  fleet: RegistryEntry[] = []
   /** Session temporarily maximized over the whole grid (iTerm-style zoom). */
   zoomedSessionId: string | null = null
   /** Session whose terminal search bar is open (the focused one), or null. */
@@ -1273,6 +1278,12 @@ export class Store {
     }
   }
 
+  /** Stop a background Claude session that isn't one of Grove's panes. The row
+   * disappears on its own: killing the process removes its registry file, which
+   * main is already watching. */
+  stopFleetSession(jobId: string): void {
+    window.api.fleetStop(jobId)
+  }
   /** Close the tab but leave a durable agent running in the background; it comes
    * back (reattached to the same live process) from the recently-closed list. */
   detachSession(id: string): void {
@@ -1709,6 +1720,10 @@ export class Store {
 
   // --- bootstrap ---------------------------------------------------------
   wireEvents(): void {
+    window.api.onFleetChange(({ sessions }) => {
+      this.fleet = sessions
+      this.notify()
+    })
     window.api.onSessionData(({ id, data }) => {
       const term = this.panes.get(id)?.term
       if (term) {
@@ -1795,6 +1810,9 @@ export class Store {
     this.wireEvents()
     this.savedLayout = await window.api.layoutLoad()
     this.closedAgents = await window.api.closedAgentsLoad().catch(() => [])
+    // Seed the fleet: main pushes updates, but its first sweep already ran
+    // before this window existed, so the initial list has to be pulled.
+    this.fleet = await window.api.fleetList().catch(() => [])
     const recent = await window.api.projectListRecent()
     for (const p of recent)
       this.upsertProject(p.repoRoot, p.name, { hookCreate: p.hookCreate, hookRemove: p.hookRemove })

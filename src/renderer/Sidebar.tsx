@@ -15,6 +15,7 @@ import {
 } from './Icons'
 import { slotAt, slotBefore, type DropSlot } from '../core/sidebarOrder'
 import { cardPath } from '../core/cardPath'
+import { timeAgo } from './timeAgo'
 import type { PrInfo } from '../core/gh'
 import groveLogo from './assets/grove-logo.svg'
 
@@ -114,7 +115,61 @@ export function Sidebar(): JSX.Element {
           <ProjectGroup key={p.repoRoot} project={p} slot={slot} />
         ))}
       </div>
+      <Elsewhere />
     </aside>
+  )
+}
+
+/**
+ * Claude sessions running on this machine that Grove does NOT own — started in
+ * a plain terminal, or dispatched with `claude --bg`. Without this they are
+ * completely invisible: an agent can be burning tokens (or holding the machine
+ * awake) with nothing on screen to say so.
+ *
+ * Read-only by design, with one exception. A background session has a job id
+ * and can be stopped; an interactive one is attached to somebody's terminal and
+ * is that terminal's business, so it is listed and left alone.
+ */
+function Elsewhere(): JSX.Element | null {
+  const s = useStore()
+  const [open, setOpen] = useState(true)
+  if (s.fleet.length === 0) return null
+  return (
+    <div className="elsewhere">
+      <div className="section-label">
+        <button className="elsewhere-toggle" onClick={() => setOpen((o) => !o)}>
+          {open ? '▾' : '▸'} Elsewhere <span className="elsewhere-count">{s.fleet.length}</span>
+        </button>
+      </div>
+      {open && (
+        <ul className="elsewhere-list">
+          {s.fleet.map((f) => (
+            <li key={f.sessionId} className="elsewhere-row">
+              <span
+                className={`dot dot-${f.status}`}
+                title={f.waitingFor ? `needs input — ${f.waitingFor}` : f.status}
+              />
+              <span className="elsewhere-name" title={f.cwd}>
+                {f.name ?? f.sessionId.slice(0, 8)}
+              </span>
+              {f.kind === 'bg' && <span className="elsewhere-kind">bg</span>}
+              {f.startedAt !== undefined && (
+                <span className="elsewhere-age">{timeAgo(f.startedAt)}</span>
+              )}
+              {f.jobId && (
+                <button
+                  className="row-x"
+                  title={`Stop this background session (claude stop ${f.jobId})`}
+                  onClick={() => store.stopFleetSession(f.jobId!)}
+                >
+                  <XIcon size={12} />
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   )
 }
 

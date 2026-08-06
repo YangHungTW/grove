@@ -36,7 +36,9 @@ function installApi(): { creates: SessionSnapshot[]; api: Record<string, ReturnT
     onSessionState: vi.fn(),
     onSessionExit: vi.fn(),
     onNotifyJump: vi.fn(),
-    onHookFailed: vi.fn()
+    onHookFailed: vi.fn(),
+    onFleetChange: vi.fn(),
+    fleetList: vi.fn(async () => [])
   }
   // The store reads window.api.* directly. Augment jsdom's window rather than
   // replacing it — the store also uses window.setTimeout/clearTimeout, which a
@@ -799,6 +801,9 @@ describe('sidebar project collapse', () => {
       agentsAvailable: vi.fn(async () => []),
       layoutLoad: vi.fn(async () => []),
       closedAgentsLoad: vi.fn(async () => []),
+      // Listed rather than left to the catch-all below: init awaits this one, and
+      // a bare no-op mock returns undefined rather than a promise.
+      fleetList: vi.fn(async () => []),
       projectListRecent: vi.fn(async () => [{ repoRoot: '/x', name: 'x' }]),
       repoRoot: vi.fn(async () => '/x'),
       projectAdd: vi.fn(async () => ({ repoRoot: '/x', name: 'x' })),
