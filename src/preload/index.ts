@@ -74,6 +74,8 @@ const api: RendererApi = {
   },
   sessionList: (worktreeId?: string): Promise<SessionSnapshot[]> =>
     ipcRenderer.invoke(Channels.sessionList, worktreeId),
+  mcpLaunch: (): Promise<{ handle: string; configPath: string } | null> =>
+    ipcRenderer.invoke(Channels.mcpLaunch),
   fleetList: (): Promise<RegistryEntry[]> => ipcRenderer.invoke(Channels.fleetList),
   fleetStop: (jobId: string): void => {
     ipcRenderer.send(Channels.fleetStop, jobId)

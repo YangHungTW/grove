@@ -10,7 +10,20 @@ import {
 } from 'electron'
 import { join, resolve, basename, dirname } from 'node:path'
 import { execFile } from 'node:child_process'
-import { existsSync, copyFileSync, readdirSync, readFileSync, watch } from 'node:fs'
+import {
+  existsSync,
+  copyFileSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  rmSync,
+  watch
+} from 'node:fs'
+import { randomUUID } from 'node:crypto'
+import { OutputBuffer } from '../core/outputBuffer'
+import { buildMcpConfig } from '../core/mcpConfig'
+import { GroveMcpServer, type McpHost } from './mcpServer'
 import { homedir } from 'node:os'
 import { stat as statAsync, readFile as readFileAsync } from 'node:fs/promises'
 import { SessionRegistry } from '../core/sessionRegistry'
@@ -394,6 +407,102 @@ function killTmuxSessions(names: string[], sync = false): void {
   }
 }
 
+// --- Grove MCP bus -----------------------------------------------------------
+
+/** Recent plain-text output per pane, for the `tail` tool. */
+const outputBuffers = new Map<string, OutputBuffer>()
+/** Launch handles handed to the renderer, mapped to the ticket they stand for.
+ * The ticket itself never leaves main: the renderer only ever sees the opaque
+ * handle and the config path. */
+const mcpPending = new Map<string, string>()
+/** Per-session config file, unlinked when the pane goes away. */
+const mcpConfigPaths = new Map<string, string>()
+let mcpServer: GroveMcpServer | null = null
+
+/** Pane id for a target an agent named — its Grove id, or its exact tab title. */
+function resolvePaneTarget(target: string): string | undefined {
+  if (registry.getSession(target)) return target
+  return registry.all().find((s) => s.title === target && ptys.has(s.id))?.id
+}
+
+const mcpHost: McpHost = {
+  listSessions(callerId) {
+    return registry
+      .all()
+      .filter((s) => ptys.has(s.id))
+      .map((s) => ({
+        id: s.id,
+        title: s.title,
+        worktree: s.worktreeId,
+        cwd: s.cwd,
+        state: s.state,
+        waitingFor: waitingReason.get(s.id),
+        self: s.id === callerId || undefined
+      }))
+  },
+  tail(target, lines) {
+    const id = resolvePaneTarget(target)
+    if (!id) return null
+    return outputBuffers.get(id)?.tail(lines) ?? []
+  },
+  sendTo(target, message, callerId) {
+    const id = resolvePaneTarget(target)
+    if (!id) return false
+    // Attribution travels IN the message rather than as a transient UI badge:
+    // the recipient agent must know this came from another agent and not from
+    // the user (it is not consent for anything), and putting it in the pane's
+    // own transcript is also the clearest thing for the person watching.
+    const from = callerId ? registry.getSession(callerId) : undefined
+    const label = from ? `${from.title} @ ${basename(from.worktreeId)}` : 'another Grove pane'
+    writeToPane(id, `[grove] from ${label}: ${message}\r`)
+    return true
+  }
+}
+
+/** Deliver input to a pane, honouring the tmux control-mode path. */
+function writeToPane(id: string, data: string): void {
+  const c = control.get(id)
+  if (c) {
+    if (data.length) ptys.get(id)?.write(`send-keys -t ${c.name} -H ${toSendKeysHex(data)}\n`)
+    return
+  }
+  ptys.get(id)?.write(data)
+}
+
+/**
+ * Mint one agent's MCP credentials and write its config file. Returns null when
+ * the server never bound — Grove then launches the agent with no flag at all
+ * rather than failing the launch over an optional capability.
+ */
+function mcpLaunchConfig(): { handle: string; configPath: string } | null {
+  if (!mcpServer || mcpServer.port === 0) return null
+  try {
+    const dir = join(app.getPath('userData'), 'mcp')
+    mkdirSync(dir, { recursive: true })
+    const handle = randomUUID()
+    const ticket = mcpServer.mintTicket()
+    const configPath = join(dir, `${handle}.json`)
+    // 0600, and a file rather than an inline --mcp-config JSON string: a command
+    // line is world-readable through `ps`.
+    writeFileSync(configPath, JSON.stringify(buildMcpConfig(mcpServer.port, ticket)), {
+      mode: 0o600
+    })
+    mcpPending.set(handle, ticket)
+    return { handle, configPath }
+  } catch {
+    return null
+  }
+}
+
+/** Drop a pane's MCP credentials and its config file. */
+function forgetMcp(groveId: string): void {
+  mcpServer?.revokeSession(groveId)
+  const path = mcpConfigPaths.get(groveId)
+  if (path) rmSync(path, { force: true })
+  mcpConfigPaths.delete(groveId)
+  outputBuffers.delete(groveId)
+}
+
 // --- Claude session registry -------------------------------------------------
 
 function claudeSessionsDir(): string {
@@ -448,6 +557,7 @@ function registryBacked(groveId: string): boolean {
 function forgetRegistryJoin(groveId: string): void {
   agentSessionIds.delete(groveId)
   waitingReason.delete(groveId)
+  forgetMcp(groveId)
 }
 
 /** Push registry status onto the Grove sessions it backs. The decision of what
@@ -481,9 +591,16 @@ function applyRegistry(): void {
   if (process.env.CCM_DEBUG_REGISTRY)
     console.log(`[registry] ${registryEntries.length} live, ${agentSessionIds.size} joined`)
   // Pushed, not polled — main already watches the directory, so the sidebar's
-  // Elsewhere list has no reason to ask.
-  send(Channels.fleetChange, { sessions: fleetSessions() })
+  // Elsewhere list has no reason to ask. Only when it actually CHANGED, though:
+  // every claude on the machine rewrites its file on each busy/idle flip, and a
+  // renderer notify re-renders the whole tree.
+  const next = JSON.stringify(fleetSessions())
+  if (next !== lastFleetJson) {
+    lastFleetJson = next
+    send(Channels.fleetChange, { sessions: JSON.parse(next) })
+  }
 }
+let lastFleetJson = ''
 
 /** Claude sessions on this machine that are not one of Grove's own panes. */
 function fleetSessions(): RegistryEntry[] {
@@ -564,6 +681,15 @@ function createSession(req: CreateSessionRequest): SessionSnapshot {
   // Join key into Claude's session registry. Recorded before the spawn so the
   // very first registry sweep after startup already sees this session.
   if (req.agentSessionId) agentSessionIds.set(record.id, req.agentSessionId)
+  // Bind the credentials minted for this launch to the pane they ended up
+  // starting, so the MCP server can tell who is calling it.
+  const ticket = req.mcpHandle ? mcpPending.get(req.mcpHandle) : undefined
+  if (ticket && req.mcpHandle) {
+    mcpServer?.bindTicket(ticket, record.id)
+    mcpPending.delete(req.mcpHandle)
+    if (req.mcpConfigPath) mcpConfigPaths.set(record.id, req.mcpConfigPath)
+  }
+  outputBuffers.set(record.id, new OutputBuffer())
   const spec = launchSpecFor(req)
   const tmuxName = durableAgentName(req)
   const pty = new PtySession({
@@ -584,6 +710,7 @@ function createSession(req: CreateSessionRequest): SessionSnapshot {
 
   const forwardOutput = (data: string): void => {
     send(Channels.sessionData, { id: record.id, data })
+    outputBuffers.get(record.id)?.append(data)
     // Claude's registry is authoritative wherever we can join to it; scraping
     // the byte stream is the fallback for everything else. Checked per chunk (not
     // once at spawn) so a session whose registry record disappears mid-flight
@@ -859,6 +986,7 @@ function registerIpc(): void {
     }
     ptys.get(id)?.resize(cols, rows)
   })
+  ipcMain.handle(Channels.mcpLaunch, () => mcpLaunchConfig())
   ipcMain.handle(Channels.fleetList, () => fleetSessions())
   ipcMain.on(Channels.fleetStop, (_e, jobId: string) => stopFleetSession(jobId))
   ipcMain.on(Channels.sessionKill, (_e, id: string, detach?: boolean) => {
@@ -1018,6 +1146,13 @@ app.whenReady().then(() => {
   protocol.handle(HTML_VIEWER_SCHEME, serveHtmlViewer)
   registerIpc()
   startClaudeRegistryWatch()
+  // Config files are per-launch and only useful while their pane lives; a crash
+  // leaves them behind, so clear the directory before minting any new ones.
+  rmSync(join(app.getPath('userData'), 'mcp'), { recursive: true, force: true })
+  mcpServer = new GroveMcpServer(mcpHost)
+  void mcpServer.start().then((port) => {
+    if (process.env.CCM_DEBUG_REGISTRY) console.log(`[mcp] ${port ? `:${port}` : 'not started'}`)
+  })
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -1061,6 +1196,7 @@ app.on('before-quit', (e) => {
 })
 
 app.on('window-all-closed', () => {
+  mcpServer?.close()
   for (const p of ptys.values()) p.kill()
   if (process.platform !== 'darwin') app.quit()
 })

@@ -48,6 +48,7 @@ export const Channels = {
   sessionKill: 'session:kill',
   sessionList: 'session:list',
   fleetList: 'fleet:list',
+  mcpLaunch: 'mcp:launch',
   fleetStop: 'fleet:stop',
   fleetChange: 'fleet:change',
   fileOpenDialog: 'file:open-dialog',
@@ -102,6 +103,11 @@ export interface CreateSessionRequest {
    * reports authoritative busy/idle/waiting instead of the regex guess in
    * core/stateDetection. Absent for agents with no resume support. */
   agentSessionId?: string
+  /** Opaque handle from `mcpLaunch()`, tying this pane to the MCP credentials
+   * minted for it. The bearer ticket itself stays in the main process. */
+  mcpHandle?: string
+  /** The config file written for that handle, so it can be removed with the pane. */
+  mcpConfigPath?: string
   /** Stable per-agent id for durable (tmux) sessions. Folded into the tmux
    * session name so multiple agents in one worktree don't collide onto a single
    * session; persisted + restored so a relaunch reattaches to the right one. */
@@ -224,6 +230,12 @@ export interface RendererApi {
   /** Claude sessions running on this machine that are NOT one of Grove's panes:
    * started in a plain terminal, or dispatched with `claude --bg`. Grove would
    * otherwise leave them entirely invisible. */
+  /** Mint MCP credentials for ONE agent about to launch, and write its config
+   * file. The returned path goes on the launch command (`--mcp-config`) so the
+   * agent gets Grove's list_sessions/tail/send_to tools; the handle is passed
+   * back in sessionCreate to bind those credentials to the resulting pane.
+   * null when the server isn't running — the agent then launches without them. */
+  mcpLaunch(): Promise<{ handle: string; configPath: string } | null>
   fleetList(): Promise<RegistryEntry[]>
   /** Stop a background (`claude --bg`) session by its short job id. Interactive
    * sessions have no job id and are not stoppable this way — they belong to the

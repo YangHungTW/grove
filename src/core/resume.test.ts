@@ -48,4 +48,56 @@ describe('buildAgentLaunch', () => {
     expect(buildAgentLaunch('codex', ID)).toEqual({ command: 'codex' })
     expect(buildAgentLaunch('codex', ID, 'abc-123')).toEqual({ command: 'codex' })
   })
+
+  describe('extraFlags (Grove --mcp-config injection)', () => {
+    const FLAG = '--mcp-config /tmp/grove.json'
+
+    it('reaches EVERY alternative, not just the last one', () => {
+      // A `cmd --flag || cmd || cmd` chain that only flagged the tail would give
+      // the Grove tools to a session only when resuming failed twice.
+      const { command } = buildAgentLaunch('claude', ID, 'abc-123', FLAG)
+      expect(command.split(' || ')).toEqual([
+        `claude ${FLAG} --resume abc-123`,
+        `claude ${FLAG} --session-id abc-123`,
+        `claude ${FLAG}`
+      ])
+    })
+
+    it('applies to a fresh session too', () => {
+      expect(buildAgentLaunch('claude', ID, undefined, FLAG).command).toBe(
+        `claude ${FLAG} --session-id fixed-uuid-0000`
+      )
+    })
+
+    it('goes before the initial prompt, which is appended after this', () => {
+      // withInitialPrompt() single-quotes the prompt onto the end. The flag has
+      // to already be in place, or it would land after a positional argument.
+      const { command } = buildAgentLaunch('claude', ID, undefined, FLAG)
+      expect(command.endsWith('--session-id fixed-uuid-0000')).toBe(true)
+    })
+
+    it('is omitted entirely when there is nothing to inject', () => {
+      expect(buildAgentLaunch('claude', ID).command).toBe('claude --session-id fixed-uuid-0000')
+    })
+
+    it('is never handed to a CLI that would not understand it', () => {
+      // --mcp-config is claude-specific. Passing it to codex would at best be
+      // ignored and at worst abort the launch.
+      expect(buildAgentLaunch('codex', ID, undefined, FLAG)).toEqual({ command: 'codex' })
+    })
+
+    it('is always terminated by another flag, never left to eat a positional', () => {
+      // --mcp-config is VARIADIC: it consumes arguments until the next
+      // `-`-prefixed one. A task prompt is appended after this, so any branch
+      // that can carry one must not end with the config path.
+      for (const resume of [undefined, 'abc-123']) {
+        for (const branch of buildAgentLaunch('claude', ID, resume, FLAG).command.split(' || ')) {
+          const after = branch.slice(branch.indexOf(FLAG) + FLAG.length).trim()
+          // The bare last-resort branch has nothing after it, and is only ever
+          // reached on a resume chain — which never carries a prompt.
+          if (after) expect(after.startsWith('--')).toBe(true)
+        }
+      }
+    })
+  })
 })

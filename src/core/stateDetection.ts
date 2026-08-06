@@ -1,4 +1,5 @@
 import type { SessionState } from './types'
+import { stripAnsi } from './ansi'
 
 /**
  * A detection rule: if `pattern` matches the (stripped) buffer tail, the
@@ -25,13 +26,6 @@ const STRATEGIES: Record<string, DetectRule[]> = {
     { state: 'busy', pattern: /esc to interrupt/i },
     { state: 'busy', pattern: /^[\s]*[✻✽✺✶✳*]\s/m }
   ]
-}
-
-const ANSI = /[][[()#;?]*(?:\d{1,4}(?:;\d{0,4})*)?[0-9A-ORZcf-nqry=><]/g
-
-/** Strip ANSI escape sequences so patterns match the visible text. */
-function stripAnsi(input: string): string {
-  return input.replace(ANSI, '')
 }
 
 /**

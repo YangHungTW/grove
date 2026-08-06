@@ -38,7 +38,9 @@ function installApi(): { creates: SessionSnapshot[]; api: Record<string, ReturnT
     onNotifyJump: vi.fn(),
     onHookFailed: vi.fn(),
     onFleetChange: vi.fn(),
-    fleetList: vi.fn(async () => [])
+    fleetList: vi.fn(async () => []),
+    // Grove's MCP server is optional at launch; null is the "not running" path.
+    mcpLaunch: vi.fn(async () => null)
   }
   // The store reads window.api.* directly. Augment jsdom's window rather than
   // replacing it — the store also uses window.setTimeout/clearTimeout, which a

@@ -10,6 +10,7 @@ import { dedupeByDurableKey } from '../core/layoutDedupe'
 import { hookFailedMessage } from '../core/hookMessage'
 import type { ClosedAgent } from '../core/closedAgentsStore'
 import { buildAgentLaunch } from '../core/resume'
+import { mcpConfigFlag } from '../core/mcpConfig'
 import { withInitialPrompt } from '../core/newTask'
 import { withSkills, type SkillDef } from '../core/skills'
 import { classifyExit } from '../core/sessionExit'
@@ -1024,8 +1025,19 @@ export class Store {
     // Pin a resume id for claude-family agents so we can resume them after close.
     // Grove owns the id (claude doesn't print it): `--session-id` for a fresh
     // session, `--resume` to reopen the one a closed agent left behind.
+    // Grove's own MCP server, so this agent can see and message the other panes
+    // (mcp__grove__list_sessions / tail / send_to). Minted per launch: the flag
+    // goes on EVERY alternative of the resume chain, and the bearer ticket stays
+    // in main — the renderer only handles an opaque handle. null when the server
+    // never bound, in which case the agent simply launches without the tools.
+    const mcp = isAgent ? await window.api.mcpLaunch().catch(() => null) : null
     const launch = isAgent
-      ? buildAgentLaunch(baseCommand, () => crypto.randomUUID(), resumeId)
+      ? buildAgentLaunch(
+          baseCommand,
+          () => crypto.randomUUID(),
+          resumeId,
+          mcp ? mcpConfigFlag(mcp.configPath) : undefined
+        )
       : { command: baseCommand }
     // "New task" flow: hand the agent its task as a positional argument (the
     // claude/codex convention — starts interactive with the prompt submitted).
@@ -1053,6 +1065,8 @@ export class Store {
         // Claude's own session registry, which reports authoritative
         // busy/idle/waiting instead of the regex guess in core/stateDetection.
         agentSessionId: launch.resumeId,
+        mcpHandle: mcp?.handle,
+        mcpConfigPath: mcp?.configPath,
         cwd: wt.path,
         title,
         icon,

@@ -8,12 +8,8 @@
  * for a visible pane; fall back to lastNonEmptyLine only when no live term exists.
  */
 import type { Terminal } from '@xterm/xterm'
+import { stripAnsi } from '../core/ansi'
 
-// Strip ANSI/VT escape sequences INCLUDING the leading ESC (0x1b): CSI (ESC[…),
-// OSC (ESC]… terminated by BEL or ST), and two-char/charset escapes. The old
-// pattern matched the sequence body but left the ESC byte behind.
-// eslint-disable-next-line no-control-regex
-const ANSI_RE = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?|\x1b[@-Z\\-_]|\x1b[()][A-Za-z0-9]/g
 
 /** Best-effort last non-empty line of a raw pty chunk. Used only when a session
  * has no live xterm to read from (a background, non-selected worktree). Strips
@@ -23,8 +19,7 @@ const ANSI_RE = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?|\x
  * emulate cursor-addressed (Ink-style) repaints; a visible pane should use
  * bufferLastLine, which reads the terminal's already-resolved screen. */
 export function lastNonEmptyLine(data: string): string | null {
-  const lines = data
-    .replace(ANSI_RE, '')
+  const lines = stripAnsi(data)
     .split(/\r\n|\r|\n/)
     .map((l) => l.trim())
     .filter(Boolean)
