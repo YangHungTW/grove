@@ -337,17 +337,18 @@ function Pane({
 
   // Renderer choice, re-run whenever transparency, visibility or the setting
   // changes:
-  //  - opaque + on screen → WebGL: lowest input latency (canvas 2D repaints per
+  //  - on screen → WebGL: lowest input latency (canvas 2D repaints per
   //    keystroke and feels laggy on Retina). Force a refresh on attach (WebGL
   //    can leave a fresh pane unpainted) and fall back to canvas on context loss.
+  //    This includes TRANSPARENT panes: the rule "transparent → Canvas" dated
+  //    from when xterm's WebGL renderer ignored allowTransparency; since
+  //    xterm 5.2 it honours it (verified here: rgba background + vibrancy
+  //    render identically on both, and the census shows webgl2 contexts on
+  //    transparent panes). Downgrading was the real cost of the checkbox —
+  //    every visible pane silently dropped to per-keystroke canvas repaints.
   //  - gpuRenderer off → Canvas. An escape hatch for GPUs where xterm's WebGL
-  //    renderer corrupts glyphs (see the setting's doc comment). Until now the
-  //    only way to reach the canvas renderer was to turn ON a transparent
-  //    window, which is an unrelated cosmetic choice to have to accept.
-  //  - transparent → Canvas: xterm's WebGL renderer ignores allowTransparency
-  //    (paints an opaque background), so it would defeat the see-through effect.
-  //    Canvas renders the rgba background transparent while keeping text fully
-  //    opaque — exactly "background shows through, glyphs stay solid".
+  //    renderer corrupts glyphs (see the setting's doc comment); it covers
+  //    transparent windows the same as opaque ones.
   //  - HIDDEN (display:none, i.e. another tab/worktree) → Canvas, because a
   //    WebGL context is a scarce process-wide resource. Grove keeps a live
   //    Terminal for EVERY session, not just the visible ones, so binding WebGL
@@ -443,7 +444,7 @@ function Pane({
         }
       }, webglRetryDelay(retries))
     }
-    if (transparent || !visible || !gpuRenderer) {
+    if (!visible || !gpuRenderer) {
       loadCanvas()
     } else if (!loadWebgl()) {
       // WebGL unavailable (software rendering / blocklisted GPU) — use canvas.

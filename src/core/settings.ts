@@ -142,8 +142,9 @@ export interface AppSettings {
    * in-place-repainted status row rendering as several frames of digits fused
    * together, which a text selection momentarily repairs. That is a renderer
    * fault, not a buffer one (copying the row yields the right text), and the
-   * canvas renderer does not show it. Transparency forces canvas regardless,
-   * since the WebGL renderer ignores allowTransparency. */
+   * canvas renderer does not show it. Applies to transparent windows too —
+   * xterm's WebGL renderer honours allowTransparency (since 5.2), so
+   * transparency no longer forces the canvas downgrade. */
   gpuRenderer: boolean
   /** Whether the sidebar is collapsed. */
   sidebarCollapsed: boolean

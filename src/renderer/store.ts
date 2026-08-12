@@ -78,10 +78,10 @@ interface PaneRef {
    * deduped/debounced pty resize). fitVisible() calls this instead of fit.fit()
    * so the two paths can never disagree about a pane's size. */
   refit?: () => void
-  /** The active renderer addon (WebGL, or Canvas in transparent mode). Both
-   * expose clearTextureAtlas(); the DOM fallback has none. Registered separately
-   * from the term because <Pane> creates it in a later effect (renderer choice
-   * depends on the transparent setting). */
+  /** The active renderer addon (WebGL, or Canvas when GPU rendering is off /
+   * the pane is hidden). Both expose clearTextureAtlas(); the DOM fallback has
+   * none. Registered separately from the term because <Pane> creates it in a
+   * later effect (renderer choice depends on visibility + the GPU setting). */
   renderAddon?: { clearTextureAtlas?: () => void }
 }
 

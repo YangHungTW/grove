@@ -761,6 +761,35 @@ try {
     'renderer: the choice should be persisted'
   )
 
+  // 11) TRANSPARENCY KEEPS WEBGL — "transparent → Canvas" dated from when
+  // xterm's WebGL renderer ignored allowTransparency; it honours it now, and the
+  // silent downgrade was the real cost of the checkbox (per-keystroke canvas
+  // repaints on every visible pane). Turn GPU rendering back on first (10 left
+  // it off), then enable transparency and require the visible panes to still be
+  // on WebGL — the canvas text layer must NOT appear.
+  await win2
+    .locator('.settings-row', { hasText: 'GPU terminal rendering' })
+    .locator('input[type=checkbox]')
+    .check()
+  await win2.waitForFunction(
+    () =>
+      ![...document.querySelectorAll('.pane[style*="block"] canvas')].some(
+        (c) => c.className === 'xterm-text-layer'
+      ),
+    { timeout: 5000 }
+  )
+  await win2
+    .locator('.settings-row', { hasText: 'Transparent window' })
+    .locator('input[type=checkbox]')
+    .check()
+  await win2.waitForTimeout(600) // let the renderer effect re-run
+  const transparentLayers = await paneLayers()
+  const transparentWebgl = !transparentLayers.includes('xterm-text-layer')
+  assert.ok(
+    transparentWebgl,
+    `transparent: visible panes must stay on WebGL, got layers ${JSON.stringify(transparentLayers)}`
+  )
+
   console.log(
     `SMOKE_OK fontLoaded=${fontLoaded} noClip=${noClip} projects=${projectCount} split=${visible} dragResize=${dragResize} roundTrip=true ` +
       `sidebarResize=${sidebarResize} projectCollapse=${projectCollapse} projectReorder=${projectReorder} ` +
@@ -770,7 +799,8 @@ try {
       `viewerPanes=${viewerPanes} htmlIframe=${htmlIframe} htmlScriptRan=${htmlScriptRan} diffReview=${diffReview} ` +
       `diffAdd=${addLines} diffDel=${delLines} splitDiff=${splitDiff} ideOpen=${ideOpen} finish=${finishFlow} ` +
       `newTask=${newTaskFlow} restored=${restored} glContexts=${gl.contexts}/${gl.visibleTerms} ` +
-      `rendererToggle=${rendererToggle} registryWaiting=${registryWaiting} elsewhere=${elsewhere}`
+      `rendererToggle=${rendererToggle} transparentWebgl=${transparentWebgl} ` +
+      `registryWaiting=${registryWaiting} elsewhere=${elsewhere}`
   )
 } catch (err) {
   failed = true
