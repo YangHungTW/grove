@@ -49,6 +49,8 @@ export const Channels = {
   sessionList: 'session:list',
   fleetList: 'fleet:list',
   mcpLaunch: 'mcp:launch',
+  mcpSpawnRequest: 'mcp:spawn-request',
+  mcpSpawnResult: 'mcp:spawn-result',
   fleetStop: 'fleet:stop',
   fleetLogs: 'fleet:logs',
   fleetChange: 'fleet:change',
@@ -127,6 +129,18 @@ export interface IdeOpenRequest {
   /** Working directory for the launched editor / shell (the worktree path). */
   cwd: string
   cols?: number
+}
+
+/** An agent asked (via mcp__grove__spawn_agent) for a new pane. Main forwards
+ * it here because the RENDERER owns layout and launch composition; the renderer
+ * answers on mcpSpawnResult with the same requestId. */
+export interface McpSpawnRequest {
+  requestId: string
+  /** Worktree path as shown by list_sessions. */
+  worktree: string
+  /** Initial task, already carrying the [grove] from-attribution prefix. */
+  prompt: string
+  title?: string
 }
 
 export interface SessionDataEvent {
@@ -274,4 +288,7 @@ export interface RendererApi {
   /** Claude's session registry changed — the fleet list is pushed rather than
    * polled, since main already watches the directory. */
   onFleetChange(cb: (e: { sessions: RegistryEntry[] }) => void): () => void
+  /** An agent asked for a new pane (spawn_agent). Answer via mcpSpawnResult. */
+  onMcpSpawn(cb: (e: McpSpawnRequest) => void): () => void
+  mcpSpawnResult(requestId: string, result: { paneId?: string; error?: string }): void
 }

@@ -1039,10 +1039,17 @@ export class Store {
     titleOverride?: string,
     resumeId?: string,
     durableKey?: string,
-    initialPrompt?: string
-  ): Promise<void> {
-    const wt = this.activeProject()?.worktrees.get(worktreeId)
-    if (!wt) return
+    initialPrompt?: string,
+    // focus:false = a background spawn (mcp spawn_agent): the pane is created
+    // and persisted but must not yank the user's active worktree or focus.
+    opts?: { focus?: boolean }
+  ): Promise<string | undefined> {
+    // Search EVERY project, not just the active one: an agent in project A can
+    // legitimately spawn a helper into project B's worktree.
+    const wt = this.projects.size
+      ? [...this.projects.values()].map((p) => p.worktrees.get(worktreeId)).find(Boolean)
+      : undefined
+    if (!wt) return undefined
     const isAgent = kind === 'agent'
     const icon = isAgent ? (agentDef?.icon ?? '★') : SHELL_ICON
     const baseName = isAgent ? (agentDef?.name?.toLowerCase() ?? 'agent') : 'shell'
@@ -1103,6 +1110,13 @@ export class Store {
       this.sessions.set(snap.id, snap)
       if (launch.resumeId) this.resumeMeta.set(snap.id, { resumeId: launch.resumeId, baseCommand })
       if (dKey) this.durableKeyById.set(snap.id, dKey)
+      if (opts?.focus === false) {
+        // Background spawn: register + persist only. groupsOf() reconciles the
+        // pane into the worktree's layout on that worktree's next render.
+        this.persistLayout()
+        this.notify()
+        return snap.id
+      }
       this.activeWorktreeId = worktreeId
       // Place the new session in the currently-focused group.
       const groups = this.groupsOf(worktreeId) // reconciles: adds snap.id to group 0
@@ -1114,10 +1128,13 @@ export class Store {
       groups[gi].active = snap.id
       this.focusedSessionId = snap.id
       this.persistLayout()
+      this.notify()
+      return snap.id
     } catch (err) {
       this.toast(errMsg(err))
+      this.notify()
+      return undefined
     }
-    this.notify()
   }
   /** Open the "open file" dialog for a worktree (or the active one). */
   promptOpenFile(worktreeId?: string): void {
@@ -1818,6 +1835,27 @@ export class Store {
     window.api.onFleetChange(({ sessions }) => {
       this.fleet = sessions
       this.notify()
+    })
+    // An agent asked for a new pane (mcp__grove__spawn_agent). Spawn WITHOUT
+    // stealing focus — delegation is a background act; the user finds the new
+    // pane under its worktree card, working, not shoved into their face.
+    window.api.onMcpSpawn(async ({ requestId, worktree, prompt, title }) => {
+      const known = this.allWorktrees().some((w) => w.id === worktree)
+      if (!known) {
+        window.api.mcpSpawnResult(requestId, {
+          error: `No open worktree matches "${worktree}". Use a worktree path exactly as list_sessions shows it.`
+        })
+        return
+      }
+      // The first installed agent is what the user would get from the picker.
+      const agentDef = this.availableAgents.find((a) => a.installed) ?? this.availableAgents[0]
+      const paneId = await this.addSession(worktree, 'agent', agentDef, title, undefined, undefined, prompt, {
+        focus: false
+      })
+      window.api.mcpSpawnResult(
+        requestId,
+        paneId ? { paneId } : { error: 'Grove could not launch the agent (see its toast).' }
+      )
     })
     window.api.onSessionData(({ id, data }) => {
       const term = this.panes.get(id)?.term

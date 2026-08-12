@@ -6,14 +6,19 @@ import { GroveMcpServer, type McpHost, type McpSessionView } from './mcpServer'
 // a handshake that is subtly wrong fails silently in Claude Code, with the tools
 // just never appearing.
 
-function makeHost(): McpHost & { sent: { target: string; message: string; from: string | null }[] } {
+function makeHost(): McpHost & {
+  sent: { target: string; message: string; from: string | null }[]
+  spawned: { worktree: string; prompt: string; title?: string; from: string | null }[]
+} {
   const panes: McpSessionView[] = [
     { id: 's1', title: 'claude', worktree: '/wt/api', state: 'busy' },
     { id: 's2', title: 'claude 2', worktree: '/wt/ui', state: 'waiting', waitingFor: 'dialog open' }
   ]
   const sent: { target: string; message: string; from: string | null }[] = []
+  const spawned: { worktree: string; prompt: string; title?: string; from: string | null }[] = []
   return {
     sent,
+    spawned,
     listSessions: (callerId) => panes.map((p) => ({ ...p, self: p.id === callerId || undefined })),
     tail: (target) =>
       target === 's1' ? { lines: ['line one', 'line two'] } : { error: `No Grove pane matches "${target}". Call list_sessions first.` },
@@ -21,6 +26,11 @@ function makeHost(): McpHost & { sent: { target: string; message: string; from: 
       if (target !== 's2') return { error: `No Grove pane matches "${target}". Call list_sessions first.` }
       sent.push({ target, message, from })
       return { ok: true }
+    },
+    spawnAgent: async (worktree, prompt, title, from) => {
+      if (worktree !== '/wt/ui') return { error: `No open worktree matches "${worktree}".` }
+      spawned.push({ worktree, prompt, title, from })
+      return { paneId: 's9' }
     }
   }
 }
@@ -81,10 +91,45 @@ describe('GroveMcpServer', () => {
     expect(await res.text()).toBe('')
   })
 
-  it('advertises exactly the three tools', async () => {
+  it('advertises exactly the four tools', async () => {
     const res = await rpc({ jsonrpc: '2.0', id: 2, method: 'tools/list' })
     const names = (await res.json()).result.tools.map((t: { name: string }) => t.name)
-    expect(names).toEqual(['list_sessions', 'tail', 'send_to'])
+    expect(names).toEqual(['list_sessions', 'tail', 'send_to', 'spawn_agent'])
+  })
+
+  it('spawn_agent delegates to the host and reports the new pane', async () => {
+    const res = await rpc({
+      jsonrpc: '2.0',
+      id: 8,
+      method: 'tools/call',
+      params: { name: 'spawn_agent', arguments: { worktree: '/wt/ui', prompt: 'fix the tests', title: 'fixer' } }
+    })
+    const body = (await res.json()).result
+    expect(body.isError).toBeFalsy()
+    expect(body.content[0].text).toContain('s9')
+    expect(host.spawned).toEqual([{ worktree: '/wt/ui', prompt: 'fix the tests', title: 'fixer', from: 's1' }])
+  })
+
+  it('spawn_agent surfaces an unknown worktree as a tool error', async () => {
+    const res = await rpc({
+      jsonrpc: '2.0',
+      id: 9,
+      method: 'tools/call',
+      params: { name: 'spawn_agent', arguments: { worktree: '/nope', prompt: 'x' } }
+    })
+    const body = (await res.json()).result
+    expect(body.isError).toBe(true)
+    expect(host.spawned).toHaveLength(0)
+  })
+
+  it('spawn_agent requires both worktree and prompt', async () => {
+    const res = await rpc({
+      jsonrpc: '2.0',
+      id: 10,
+      method: 'tools/call',
+      params: { name: 'spawn_agent', arguments: { worktree: '/wt/ui' } }
+    })
+    expect((await res.json()).result.isError).toBe(true)
   })
 
   it('marks the readers read-only and the writer as neither read-only nor destructive', async () => {

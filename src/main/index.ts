@@ -451,6 +451,10 @@ function paneRefs(): PaneRef[] {
     }))
 }
 
+// spawn_agent round-trips through the renderer (which owns layout + launch
+// composition); each pending request resolves on mcpSpawnResult or times out.
+const spawnPending = new Map<string, (r: { paneId: string } | { error: string }) => void>()
+
 const mcpHost: McpHost = {
   listSessions(callerId) {
     return registry
@@ -488,6 +492,34 @@ const mcpHost: McpHost = {
     const label = from ? `${from.title} @ ${basename(from.worktreeId)}` : 'another Grove pane'
     writeToPane(r.pane.id, `[grove] from ${label}: ${message}\r`)
     return { ok: true }
+  },
+  spawnAgent(worktree, prompt, title, callerId) {
+    if (!mainWindow || mainWindow.isDestroyed())
+      return Promise.resolve({ error: 'Grove has no window to spawn into.' })
+    const from = callerId ? registry.getSession(callerId) : undefined
+    const label = from ? `${from.title} @ ${basename(from.worktreeId)}` : 'another Grove pane'
+    const requestId = randomUUID()
+    return new Promise((resolve) => {
+      // The renderer may be mid-reload or wedged; a spawn that never answers
+      // must fail the tool call, not hang the agent's turn.
+      const timer = setTimeout(() => {
+        spawnPending.delete(requestId)
+        resolve({ error: 'Spawn timed out — Grove did not answer.' })
+      }, 15_000)
+      spawnPending.set(requestId, (r) => {
+        clearTimeout(timer)
+        spawnPending.delete(requestId)
+        resolve(r)
+      })
+      send(Channels.mcpSpawnRequest, {
+        requestId,
+        worktree,
+        // Same attribution convention as send_to: the new agent must know its
+        // task came from another agent, and the user watching the pane sees it.
+        prompt: `[grove] from ${label}: ${prompt}`,
+        title
+      })
+    })
   }
 }
 
@@ -1085,6 +1117,14 @@ function registerIpc(): void {
     ptys.get(id)?.resize(cols, rows)
   })
   ipcMain.handle(Channels.mcpLaunch, (_e, durableKey?: string) => mcpLaunchConfig(durableKey))
+  ipcMain.on(
+    Channels.mcpSpawnResult,
+    (_e, requestId: string, result: { paneId?: string; error?: string }) => {
+      spawnPending.get(requestId)?.(
+        result.paneId ? { paneId: result.paneId } : { error: result.error ?? 'spawn failed' }
+      )
+    }
+  )
   ipcMain.handle(Channels.fleetList, () => fleetSessions())
   ipcMain.on(Channels.fleetStop, (_e, jobId: string) => stopFleetSession(jobId))
   ipcMain.handle(

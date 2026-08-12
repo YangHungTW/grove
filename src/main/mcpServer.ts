@@ -35,6 +35,15 @@ export interface McpHost {
   tail(target: string, lines: number): { lines: string[] } | { error: string }
   /** Deliver a message into a pane's pty. */
   sendTo(target: string, message: string, callerId: string | null): { ok: true } | { error: string }
+  /** Open a NEW agent pane in an open worktree, primed with an initial prompt.
+   * Round-trips through the renderer (which owns layout and launch), so it is
+   * async — and can fail for a worktree Grove doesn't have open. */
+  spawnAgent(
+    worktree: string,
+    prompt: string,
+    title: string | undefined,
+    callerId: string | null
+  ): Promise<{ paneId: string } | { error: string }>
 }
 
 export interface McpSessionView {
@@ -95,6 +104,22 @@ const TOOLS = [
     },
     // Not read-only, but not destructive either: it types a visible, attributed
     // message that the recipient (and the user watching the pane) can see.
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }
+  },
+  {
+    name: 'spawn_agent',
+    description:
+      "Open a NEW agent pane in one of this Grove window's worktrees, primed with an initial task prompt. Use it to delegate a self-contained piece of work to a fresh agent in the right worktree instead of doing everything yourself. The worktree must be one that appears in list_sessions (or the worktree of an existing pane); the new agent starts with your prompt as its task and knows it came from you, not from the user.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        worktree: { type: 'string', description: 'Worktree path exactly as shown by list_sessions.' },
+        prompt: { type: 'string', description: 'The task the new agent starts with.' },
+        title: { type: 'string', description: 'Optional tab title for the new pane.' }
+      },
+      required: ['worktree', 'prompt'],
+      additionalProperties: false
+    },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }
   }
 ] as const
@@ -210,7 +235,7 @@ export class GroveMcpServer {
       res.writeHead(400).end()
       return
     }
-    const reply = this.dispatch(rpc, caller)
+    const reply = await this.dispatch(rpc, caller)
     if (!reply) {
       // A notification (no id) expects no body — `notifications/initialized`
       // arrives this way right after the handshake.
@@ -221,7 +246,7 @@ export class GroveMcpServer {
     res.end(JSON.stringify(reply))
   }
 
-  private dispatch(rpc: JsonRpcRequest, caller: string | null): object | null {
+  private async dispatch(rpc: JsonRpcRequest, caller: string | null): Promise<object | null> {
     const { id, method, params } = rpc
     if (id === undefined || id === null) return null // notification
     const ok = (result: object): object => ({ jsonrpc: '2.0', id, result })
@@ -255,6 +280,17 @@ export class GroveMcpServer {
           const r = this.host.sendTo(target, message, caller)
           if ('error' in r) return text(r.error, true)
           return text(`Delivered to "${target}".`)
+        }
+        if (name === 'spawn_agent') {
+          const worktree = String(args.worktree ?? '')
+          const prompt = String(args.prompt ?? '')
+          if (!worktree || !prompt) return text('worktree and prompt are required', true)
+          const title = typeof args.title === 'string' && args.title ? args.title : undefined
+          const r = await this.host.spawnAgent(worktree, prompt, title, caller)
+          if ('error' in r) return text(r.error, true)
+          return text(
+            `Spawned pane ${r.paneId} in ${worktree}. It starts on your prompt; check on it with tail or list_sessions.`
+          )
         }
         return text(`Unknown tool: ${String(name)}`, true)
       }

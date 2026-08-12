@@ -3,6 +3,7 @@ import {
   Channels,
   type CreateSessionRequest,
   type HookFailedEvent,
+  type McpSpawnRequest,
   type RegistryEntry,
   type RendererApi,
   type SessionDataEvent,
@@ -107,7 +108,11 @@ const api: RendererApi = {
   onNotifyJump: (cb: (e: { id: string }) => void) => subscribe(Channels.notifyJump, cb),
   onHookFailed: (cb: (e: HookFailedEvent) => void) => subscribe(Channels.hookFailed, cb),
   onFleetChange: (cb: (e: { sessions: RegistryEntry[] }) => void) =>
-    subscribe(Channels.fleetChange, cb)
+    subscribe(Channels.fleetChange, cb),
+  onMcpSpawn: (cb: (e: McpSpawnRequest) => void) => subscribe(Channels.mcpSpawnRequest, cb),
+  mcpSpawnResult: (requestId: string, result: { paneId?: string; error?: string }): void => {
+    ipcRenderer.send(Channels.mcpSpawnResult, requestId, result)
+  }
 }
 
 contextBridge.exposeInMainWorld('api', api)

@@ -38,6 +38,8 @@ function installApi(): { creates: SessionSnapshot[]; api: Record<string, ReturnT
     onNotifyJump: vi.fn(),
     onHookFailed: vi.fn(),
     onFleetChange: vi.fn(),
+    onMcpSpawn: vi.fn(),
+    mcpSpawnResult: vi.fn(),
     fleetList: vi.fn(async () => []),
     // Grove's MCP server is optional at launch; null is the "not running" path.
     mcpLaunch: vi.fn(async () => null)
@@ -896,6 +898,60 @@ describe('waitingFor rides along with the state event', () => {
     emit({ id: 's1', state: 'busy' })
     expect(store.sessions.get('s1')!.waitingFor).toBeUndefined()
     expect(store.worktreeWaitingFor('/tmp/repo-wt-feat')).toBeUndefined()
+  })
+})
+
+// mcp__grove__spawn_agent: main forwards an agent's spawn request; the renderer
+// creates the pane and answers with its id. Delegation is a background act — it
+// must never yank the user's active worktree or keyboard focus.
+describe('onMcpSpawn (spawn_agent round-trip)', () => {
+  async function wired(): Promise<{
+    store: Store
+    api: Record<string, ReturnType<typeof vi.fn>>
+    spawn: (e: { requestId: string; worktree: string; prompt: string; title?: string }) => Promise<void>
+  }> {
+    const { api } = installApi()
+    const store = new Store()
+    const project = seedProject(store)
+    for (const wtId of ['/tmp/repo-wt-a', '/tmp/repo-wt-b'])
+      project.worktrees.set(wtId, { id: wtId, path: wtId, branch: wtId.slice(-1), primary: false })
+    await store.selectWorktree(project.repoRoot, '/tmp/repo-wt-a')
+    store.availableAgents = [
+      { id: 'claude', name: 'Claude', command: 'claude', icon: '★', installed: true }
+    ] as never
+    store.wireEvents()
+    const handler = api.onMcpSpawn.mock.calls[0][0] as (e: unknown) => Promise<void>
+    return { store, api, spawn: handler as never }
+  }
+
+  it('creates the pane in the requested worktree and answers with its id', async () => {
+    const { api, spawn } = await wired()
+    await spawn({ requestId: 'r1', worktree: '/tmp/repo-wt-b', prompt: 'do the thing' })
+    const req = api.sessionCreate.mock.calls.at(-1)![0] as Record<string, string>
+    expect(req.worktreeId).toBe('/tmp/repo-wt-b')
+    expect(req.command).toContain("'do the thing'") // prompt rides as the task argument
+    const [id, result] = api.mcpSpawnResult.mock.calls.at(-1)!
+    expect(id).toBe('r1')
+    expect((result as { paneId?: string }).paneId).toBeTruthy()
+  })
+
+  it('does NOT steal the active worktree or focus', async () => {
+    const { store, spawn } = await wired()
+    const focusBefore = store.focusedSessionId
+    await spawn({ requestId: 'r2', worktree: '/tmp/repo-wt-b', prompt: 'background work' })
+    expect(store.activeWorktreeId).toBe('/tmp/repo-wt-a')
+    expect(store.focusedSessionId).toBe(focusBefore)
+    // The pane exists and is persisted — it's just not shoved into view.
+    expect(store.sessionsOf('/tmp/repo-wt-b')).toHaveLength(1)
+  })
+
+  it('answers with an error for a worktree Grove has not opened', async () => {
+    const { api, spawn } = await wired()
+    api.sessionCreate.mockClear()
+    await spawn({ requestId: 'r3', worktree: '/not/open', prompt: 'x' })
+    expect(api.sessionCreate).not.toHaveBeenCalled()
+    const [, result] = api.mcpSpawnResult.mock.calls.at(-1)!
+    expect((result as { error?: string }).error).toContain('/not/open')
   })
 })
 
