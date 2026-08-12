@@ -24,6 +24,7 @@ import { randomUUID } from 'node:crypto'
 import { OutputBuffer } from '../core/outputBuffer'
 import { buildMcpConfig } from '../core/mcpConfig'
 import { GroveMcpServer, type McpHost } from './mcpServer'
+import { resolveTarget, sendGuard, type PaneRef } from '../core/paneTargets'
 import { homedir } from 'node:os'
 import { stat as statAsync, readFile as readFileAsync } from 'node:fs/promises'
 import { SessionRegistry } from '../core/sessionRegistry'
@@ -425,10 +426,18 @@ function mcpDir(): string {
   return process.env.CCM_MCP_DIR ?? join(app.getPath('userData'), 'mcp')
 }
 
-/** Pane id for a target an agent named — its Grove id, or its exact tab title. */
-function resolvePaneTarget(target: string): string | undefined {
-  if (registry.getSession(target)) return target
-  return registry.all().find((s) => s.title === target && ptys.has(s.id))?.id
+/** The addressable panes, in core/paneTargets' shape (live ptys only). */
+function paneRefs(): PaneRef[] {
+  return registry
+    .all()
+    .filter((s) => ptys.has(s.id))
+    .map((s) => ({
+      id: s.id,
+      title: s.title,
+      worktree: s.worktreeId,
+      state: s.state,
+      waitingFor: waitingReason.get(s.id)
+    }))
 }
 
 const mcpHost: McpHost = {
@@ -447,21 +456,27 @@ const mcpHost: McpHost = {
       }))
   },
   tail(target, lines) {
-    const id = resolvePaneTarget(target)
-    if (!id) return null
-    return outputBuffers.get(id)?.tail(lines) ?? []
+    const r = resolveTarget(target, paneRefs())
+    if ('error' in r) return r
+    return { lines: outputBuffers.get(r.pane.id)?.tail(lines) ?? [] }
   },
   sendTo(target, message, callerId) {
-    const id = resolvePaneTarget(target)
-    if (!id) return false
+    const r = resolveTarget(target, paneRefs())
+    if ('error' in r) return r
+    // What the injected bytes MEAN depends on what the pane is showing: a
+    // waiting pane's dialog reads the trailing Enter as "confirm", and a
+    // starting pane is a bare shell that would EXECUTE the text. Refuse those
+    // rather than queueing — the state may be long gone by the time it drains.
+    const refusal = sendGuard(r.pane)
+    if (refusal) return { error: refusal }
     // Attribution travels IN the message rather than as a transient UI badge:
     // the recipient agent must know this came from another agent and not from
     // the user (it is not consent for anything), and putting it in the pane's
     // own transcript is also the clearest thing for the person watching.
     const from = callerId ? registry.getSession(callerId) : undefined
     const label = from ? `${from.title} @ ${basename(from.worktreeId)}` : 'another Grove pane'
-    writeToPane(id, `[grove] from ${label}: ${message}\r`)
-    return true
+    writeToPane(r.pane.id, `[grove] from ${label}: ${message}\r`)
+    return { ok: true }
   }
 }
 
@@ -642,15 +657,30 @@ function startClaudeRegistryWatch(): void {
     liveRegistryUuids = new Set(registryEntries.map((e) => e.sessionId))
     applyRegistry()
   }
+  const retry = (): void => {
+    setTimeout(attach, 30_000).unref?.()
+  }
   const attach = (): void => {
     refresh()
     try {
-      watch(claudeSessionsDir(), () => {
+      const w = watch(claudeSessionsDir(), () => {
         if (debounce) clearTimeout(debounce)
         debounce = setTimeout(refresh, 150)
       })
+      // A watcher dies silently if the directory is removed (e.g. a cleanup
+      // wiping ~/.claude) — without this, every tab's state would freeze until
+      // an app restart. Close and re-attach on the same slow timer as a
+      // missing directory at startup.
+      w.on('error', () => {
+        try {
+          w.close()
+        } catch {
+          /* already closed */
+        }
+        retry()
+      })
     } catch {
-      setTimeout(attach, 30_000).unref?.()
+      retry()
     }
   }
   attach()

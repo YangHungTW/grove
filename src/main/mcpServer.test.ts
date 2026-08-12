@@ -15,11 +15,12 @@ function makeHost(): McpHost & { sent: { target: string; message: string; from: 
   return {
     sent,
     listSessions: (callerId) => panes.map((p) => ({ ...p, self: p.id === callerId || undefined })),
-    tail: (target) => (target === 's1' ? ['line one', 'line two'] : null),
+    tail: (target) =>
+      target === 's1' ? { lines: ['line one', 'line two'] } : { error: `No Grove pane matches "${target}". Call list_sessions first.` },
     sendTo: (target, message, from) => {
-      if (target !== 's2') return false
+      if (target !== 's2') return { error: `No Grove pane matches "${target}". Call list_sessions first.` }
       sent.push({ target, message, from })
-      return true
+      return { ok: true }
     }
   }
 }
@@ -84,6 +85,32 @@ describe('GroveMcpServer', () => {
     const res = await rpc({ jsonrpc: '2.0', id: 2, method: 'tools/list' })
     const names = (await res.json()).result.tools.map((t: { name: string }) => t.name)
     expect(names).toEqual(['list_sessions', 'tail', 'send_to'])
+  })
+
+  it('marks the readers read-only and the writer as neither read-only nor destructive', async () => {
+    // The annotations are what lets the client's permission layer treat
+    // list/tail more leniently than a send into someone else's session.
+    const res = await rpc({ jsonrpc: '2.0', id: 2, method: 'tools/list' })
+    const tools = (await res.json()).result.tools
+    const ann = Object.fromEntries(tools.map((t: { name: string; annotations?: object }) => [t.name, t.annotations]))
+    expect(ann.list_sessions).toMatchObject({ readOnlyHint: true })
+    expect(ann.tail).toMatchObject({ readOnlyHint: true })
+    expect(ann.send_to).toMatchObject({ readOnlyHint: false, destructiveHint: false })
+  })
+
+  it('relays a host refusal to the caller verbatim as a tool error', async () => {
+    // e.g. the send guard refusing a waiting pane — the caller must see WHY,
+    // not a generic failure it would just retry.
+    host.sendTo = () => ({ error: 'Not delivered: "x" is waiting on the USER (dialog open).' })
+    const res = await rpc({
+      jsonrpc: '2.0',
+      id: 4,
+      method: 'tools/call',
+      params: { name: 'send_to', arguments: { target: 's2', message: 'hi' } }
+    })
+    const body = (await res.json()).result
+    expect(body.isError).toBe(true)
+    expect(body.content[0].text).toContain('waiting on the USER')
   })
 
   it('marks the calling pane as self so an agent does not message itself', async () => {

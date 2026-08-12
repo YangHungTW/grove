@@ -24,14 +24,17 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomBytes } from 'node:crypto'
 import { negotiateProtocol } from '../core/mcpConfig'
 
-/** What the host (main/index.ts) plugs into the server. */
+/** What the host (main/index.ts) plugs into the server. Errors come back as
+ * strings — resolution failures (ambiguous titles) and refused sends (a target
+ * whose pty would misread the input, see core/paneTargets) both need to reach
+ * the calling agent verbatim, so it can react instead of retrying blindly. */
 export interface McpHost {
   /** Every Grove pane an agent may address, with live state. */
   listSessions(callerId: string | null): McpSessionView[]
   /** Recent output of a pane, oldest line first. */
-  tail(target: string, lines: number): string[] | null
-  /** Deliver a message into a pane's pty. Returns false for an unknown target. */
-  sendTo(target: string, message: string, callerId: string | null): boolean
+  tail(target: string, lines: number): { lines: string[] } | { error: string }
+  /** Deliver a message into a pane's pty. */
+  sendTo(target: string, message: string, callerId: string | null): { ok: true } | { error: string }
 }
 
 export interface McpSessionView {
@@ -56,8 +59,11 @@ const TOOLS = [
   {
     name: 'list_sessions',
     description:
-      "List the other Grove panes in this window: their id, title, git worktree, and whether each is idle, working, or waiting on the user. Use this before send_to or tail to find the right target, and to check on work you delegated. The pane you are running in is marked with self: true.",
-    inputSchema: { type: 'object', properties: {}, additionalProperties: false }
+      "List the other Grove panes in this window: their id, title, git worktree, and whether each is idle, working, or waiting on the user. Use this before send_to or tail to find the right target, and to check on work you delegated. The pane you are running in is marked with self: true. Titles repeat across worktrees — prefer ids when targeting.",
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    // MCP tool annotations (2025-03-26+): hints the client's permission layer
+    // can use to treat pure reads more leniently than the write below.
+    annotations: { readOnlyHint: true, openWorldHint: false }
   },
   {
     name: 'tail',
@@ -71,7 +77,8 @@ const TOOLS = [
       },
       required: ['target'],
       additionalProperties: false
-    }
+    },
+    annotations: { readOnlyHint: true, openWorldHint: false }
   },
   {
     name: 'send_to',
@@ -85,7 +92,10 @@ const TOOLS = [
       },
       required: ['target', 'message'],
       additionalProperties: false
-    }
+    },
+    // Not read-only, but not destructive either: it types a visible, attributed
+    // message that the recipient (and the user watching the pane) can see.
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }
   }
 ] as const
 
@@ -203,19 +213,17 @@ export class GroveMcpServer {
         const args = (params?.arguments ?? {}) as Record<string, unknown>
         if (name === 'list_sessions') return text(JSON.stringify(this.host.listSessions(caller)))
         if (name === 'tail') {
-          const target = String(args.target ?? '')
-          const lines = this.host.tail(target, Number(args.lines) || 50)
-          return lines === null
-            ? text(`No Grove pane matches "${target}". Call list_sessions first.`, true)
-            : text(lines.join('\n') || '(no output yet)')
+          const r = this.host.tail(String(args.target ?? ''), Number(args.lines) || 50)
+          if ('error' in r) return text(r.error, true)
+          return text(r.lines.join('\n') || '(no output yet)')
         }
         if (name === 'send_to') {
           const target = String(args.target ?? '')
           const message = String(args.message ?? '')
           if (!message) return text('message is required', true)
-          return this.host.sendTo(target, message, caller)
-            ? text(`Delivered to "${target}".`)
-            : text(`No Grove pane matches "${target}". Call list_sessions first.`, true)
+          const r = this.host.sendTo(target, message, caller)
+          if ('error' in r) return text(r.error, true)
+          return text(`Delivered to "${target}".`)
         }
         return text(`Unknown tool: ${String(name)}`, true)
       }
