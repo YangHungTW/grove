@@ -106,20 +106,30 @@ export class GroveMcpServer {
 
   constructor(private readonly host: McpHost) {}
 
-  /** Bind to an ephemeral loopback port. Resolves to the port, or 0 if the
-   * server could not start — in which case Grove simply launches agents without
-   * the flag rather than failing the launch. */
-  async start(): Promise<number> {
-    return new Promise((resolve) => {
-      const server = createServer((req, res) => void this.handle(req, res))
-      server.on('error', () => resolve(0))
-      server.listen(0, '127.0.0.1', () => {
-        const addr = server.address()
-        this.boundPort = typeof addr === 'object' && addr ? addr.port : 0
-        this.server = server
-        resolve(this.boundPort)
+  /** Bind to a loopback port — `preferredPort` first, so that durable agents
+   * launched by a PREVIOUS Grove (whose config baked this port in at startup)
+   * keep reaching us after a restart; an ephemeral port as the fallback when
+   * it is taken. Resolves to the bound port, or 0 if nothing could bind — in
+   * which case Grove simply launches agents without the flag rather than
+   * failing the launch. */
+  async start(preferredPort = 0): Promise<number> {
+    const tryListen = (port: number): Promise<number> =>
+      new Promise((resolve) => {
+        const server = createServer((req, res) => void this.handle(req, res))
+        server.once('error', () => {
+          server.close()
+          resolve(-1)
+        })
+        server.listen(port, '127.0.0.1', () => {
+          const addr = server.address()
+          this.boundPort = typeof addr === 'object' && addr ? addr.port : 0
+          this.server = server
+          resolve(this.boundPort)
+        })
       })
-    })
+    let port = preferredPort > 0 ? await tryListen(preferredPort) : -1
+    if (port < 0) port = await tryListen(0)
+    return Math.max(0, port)
   }
 
   get port(): number {
@@ -139,10 +149,31 @@ export class GroveMcpServer {
     if (this.tickets.has(ticket)) this.tickets.set(ticket, groveSessionId)
   }
 
+  /** Re-accept a ticket persisted by a previous Grove (durable agents). No-op
+   * when the ticket is already known, so re-registering can never unbind a
+   * ticket a live pane is using. */
+  registerTicket(ticket: string): void {
+    if (!this.tickets.has(ticket)) this.tickets.set(ticket, '')
+  }
+
   /** Revoke a torn-down pane's ticket so a lingering process can't keep using it. */
   revokeSession(groveSessionId: string): void {
     for (const [ticket, id] of this.tickets)
       if (id === groveSessionId) this.tickets.delete(ticket)
+  }
+
+  /** Revoke one ticket by value (a durable agent being TERMINATED — its
+   * persisted credential must die with the process). */
+  revokeTicket(ticket: string): void {
+    this.tickets.delete(ticket)
+  }
+
+  /** Detach a pane from its ticket but leave the ticket VALID. Used when a
+   * durable pane closes while its tmux process lives on: the agent keeps its
+   * tools, it just no longer maps to a pane (caller shows as unbound). */
+  unbindSession(groveSessionId: string): void {
+    for (const [ticket, id] of this.tickets)
+      if (id === groveSessionId) this.tickets.set(ticket, '')
   }
 
   close(): void {

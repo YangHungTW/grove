@@ -25,6 +25,7 @@ import { OutputBuffer } from '../core/outputBuffer'
 import { buildMcpConfig } from '../core/mcpConfig'
 import { GroveMcpServer, type McpHost } from './mcpServer'
 import { resolveTarget, sendGuard, type PaneRef } from '../core/paneTargets'
+import { McpStateStore, pruneDurable } from '../core/mcpStateStore'
 import { homedir } from 'node:os'
 import { stat as statAsync, readFile as readFileAsync } from 'node:fs/promises'
 import { SessionRegistry } from '../core/sessionRegistry'
@@ -425,6 +426,15 @@ let mcpServer: GroveMcpServer | null = null
 function mcpDir(): string {
   return process.env.CCM_MCP_DIR ?? join(app.getPath('userData'), 'mcp')
 }
+/** Persisted port + durable tickets (see core/mcpStateStore). Lives inside the
+ * mcp dir so the CCM_MCP_DIR override isolates tests completely. */
+let mcpStateStore: McpStateStore | null = null
+function mcpState(): McpStateStore {
+  if (!mcpStateStore) mcpStateStore = new McpStateStore(join(mcpDir(), 'state.json'))
+  return mcpStateStore
+}
+/** Grove session id → durableKey, for the unbind-vs-revoke decision on close. */
+const mcpDurableKeyById = new Map<string, string>()
 
 /** The addressable panes, in core/paneTargets' shape (live ptys only). */
 function paneRefs(): PaneRef[] {
@@ -495,14 +505,39 @@ function writeToPane(id: string, data: string): void {
  * the server never bound — Grove then launches the agent with no flag at all
  * rather than failing the launch over an optional capability.
  */
-function mcpLaunchConfig(): { handle: string; configPath: string } | null {
+/**
+ * A DURABLE launch (durableKey + durable mode on) reuses the ticket persisted
+ * for that key and a config path named by it: the tmux process outlives Grove
+ * with port+ticket baked in at startup, so reattach — and every restart after —
+ * must present the same pair or the agent's tools die with the old server.
+ */
+function mcpLaunchConfig(durableKey?: string): { handle: string; configPath: string } | null {
   if (!mcpServer || mcpServer.port === 0) return null
   try {
     const dir = mcpDir()
     mkdirSync(dir, { recursive: true })
+    const forced = process.env.CCM_TMUX === 'control'
+    const durable =
+      !!durableKey &&
+      (forced || durableEnabled(settings().load().durableSessions, commandExists('tmux')))
     const handle = randomUUID()
-    const ticket = mcpServer.mintTicket()
-    const configPath = join(dir, `${handle}.json`)
+    let ticket: string
+    let configPath: string
+    if (durable) {
+      const st = mcpState().load()
+      const persisted = st.durable[durableKey]
+      if (persisted) {
+        ticket = persisted
+        mcpServer.registerTicket(ticket)
+      } else {
+        ticket = mcpServer.mintTicket()
+        mcpState().save({ ...st, durable: { ...st.durable, [durableKey]: ticket } })
+      }
+      configPath = join(dir, `durable-${durableKey}.json`)
+    } else {
+      ticket = mcpServer.mintTicket()
+      configPath = join(dir, `${handle}.json`)
+    }
     // 0600, and a file rather than an inline --mcp-config JSON string: a command
     // line is world-readable through `ps`.
     writeFileSync(configPath, JSON.stringify(buildMcpConfig(mcpServer.port, ticket)), {
@@ -515,13 +550,36 @@ function mcpLaunchConfig(): { handle: string; configPath: string } | null {
   }
 }
 
-/** Drop a pane's MCP credentials and its config file. */
+/** Drop a pane's MCP bookkeeping. A durable pane whose ticket is persisted is
+ * only UNBOUND — its tmux process lives on (detach, or Grove quitting with
+ * "keep running") and keeps calling with that ticket, so credential and config
+ * file both survive. Real termination goes through mcpRevokeDurable. */
 function forgetMcp(groveId: string): void {
+  outputBuffers.delete(groveId)
+  const dKey = mcpDurableKeyById.get(groveId)
+  mcpDurableKeyById.delete(groveId)
+  if (dKey && mcpState().load().durable[dKey]) {
+    mcpServer?.unbindSession(groveId)
+    mcpConfigPaths.delete(groveId) // map entry only — the FILE stays for reattach
+    return
+  }
   mcpServer?.revokeSession(groveId)
   const path = mcpConfigPaths.get(groveId)
   if (path) rmSync(path, { force: true })
   mcpConfigPaths.delete(groveId)
-  outputBuffers.delete(groveId)
+}
+
+/** A durable agent is being TERMINATED: its persisted credential dies with the
+ * process — revoke the ticket, drop it from the state file, remove the config. */
+function mcpRevokeDurable(dKey: string): void {
+  const st = mcpState().load()
+  const ticket = st.durable[dKey]
+  if (!ticket) return
+  const durable = { ...st.durable }
+  delete durable[dKey]
+  mcpState().save({ ...st, durable })
+  mcpServer?.revokeTicket(ticket)
+  rmSync(join(mcpDir(), `durable-${dKey}.json`), { force: true })
 }
 
 // --- Claude session registry -------------------------------------------------
@@ -724,6 +782,9 @@ function createSession(req: CreateSessionRequest): SessionSnapshot {
     mcpServer?.bindTicket(ticket, record.id)
     mcpPending.delete(req.mcpHandle)
     if (req.mcpConfigPath) mcpConfigPaths.set(record.id, req.mcpConfigPath)
+    // Remembered for close time: whether this pane's ticket is a persisted
+    // durable credential decides unbind-vs-revoke in forgetMcp.
+    if (req.durableKey) mcpDurableKeyById.set(record.id, req.durableKey)
   }
   outputBuffers.set(record.id, new OutputBuffer())
   const spec = launchSpecFor(req)
@@ -1022,7 +1083,7 @@ function registerIpc(): void {
     }
     ptys.get(id)?.resize(cols, rows)
   })
-  ipcMain.handle(Channels.mcpLaunch, () => mcpLaunchConfig())
+  ipcMain.handle(Channels.mcpLaunch, (_e, durableKey?: string) => mcpLaunchConfig(durableKey))
   ipcMain.handle(Channels.fleetList, () => fleetSessions())
   ipcMain.on(Channels.fleetStop, (_e, jobId: string) => stopFleetSession(jobId))
   ipcMain.on(Channels.sessionKill, (_e, id: string, detach?: boolean) => {
@@ -1034,7 +1095,13 @@ function registerIpc(): void {
     // menu's "Detach (keep running)" — which keeps the old behaviour.
     const c = control.get(id)
     ptys.get(id)?.kill()
-    if (c && !detach) killTmuxSessions([c.name])
+    if (c && !detach) {
+      killTmuxSessions([c.name])
+      // Terminating (not detaching) a durable agent: its persisted MCP ticket
+      // dies with the process. Read the key BEFORE forgetRegistryJoin drops it.
+      const dKey = mcpDurableKeyById.get(id)
+      if (dKey) mcpRevokeDurable(dKey)
+    }
     control.delete(id)
     forgetRegistryJoin(id)
     registry.removeSession(id)
@@ -1182,11 +1249,35 @@ app.whenReady().then(() => {
   protocol.handle(HTML_VIEWER_SCHEME, serveHtmlViewer)
   registerIpc()
   startClaudeRegistryWatch()
-  // Config files are per-launch and only useful while their pane lives; a crash
-  // leaves them behind, so clear the directory before minting any new ones.
-  rmSync(mcpDir(), { recursive: true, force: true })
+  // Durable continuity: a durable agent outlives Grove with the OLD server's
+  // port + ticket baked in at its launch, so the new server must come up on the
+  // same port and accept the same tickets or every reattached agent's tools
+  // die. Tickets are kept only while something can still reattach the agent
+  // (the layout or the recently-closed list references its durableKey) — an
+  // unreferenced ticket is a live credential with no owner.
+  const referenced = new Set(
+    [...layout().load(), ...closedAgents().load()]
+      .map((d) => d.durableKey)
+      .filter((k): k is string => !!k)
+  )
+  const st = pruneDurable(mcpState().load(), referenced)
+  // Clear stale per-launch config files (a crash leaves them behind), sparing
+  // the state file and the durable configs whose tickets survived the prune.
+  try {
+    for (const name of readdirSync(mcpDir())) {
+      if (name === 'state.json') continue
+      const m = /^durable-(.+)\.json$/.exec(name)
+      if (m && st.durable[m[1]]) continue
+      rmSync(join(mcpDir(), name), { force: true })
+    }
+  } catch {
+    /* no mcp dir yet */
+  }
   mcpServer = new GroveMcpServer(mcpHost)
-  void mcpServer.start().then((port) => {
+  void mcpServer.start(st.port ?? 0).then((port) => {
+    if (port) for (const ticket of Object.values(st.durable)) mcpServer!.registerTicket(ticket)
+    // A failed bind keeps the old preferred port so the next boot retries it.
+    mcpState().save({ ...st, port: port || st.port })
     if (process.env.CCM_DEBUG_REGISTRY) console.log(`[mcp] ${port ? `:${port}` : 'not started'}`)
   })
   createWindow()
@@ -1209,6 +1300,7 @@ app.on('before-quit', (e) => {
   if (process.env.CCM_NO_QUIT_PROMPT) {
     quitAnswered = true
     killTmuxSessions(names, true)
+    for (const dKey of [...mcpDurableKeyById.values()]) mcpRevokeDurable(dKey)
     return
   }
   const n = names.length
@@ -1228,7 +1320,13 @@ app.on('before-quit', (e) => {
     return
   }
   quitAnswered = true
-  if (choice === 0) killTmuxSessions(names, true)
+  if (choice === 0) {
+    killTmuxSessions(names, true)
+    // Every durable process is dead — their persisted tickets must die too.
+    for (const dKey of [...mcpDurableKeyById.values()]) mcpRevokeDurable(dKey)
+  }
+  // "Keep running" leaves tickets persisted: the surviving agents keep calling
+  // with them, and the next Grove re-registers them at boot.
 })
 
 app.on('window-all-closed', () => {

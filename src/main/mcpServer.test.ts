@@ -141,6 +141,55 @@ describe('GroveMcpServer', () => {
     expect(host.sent).toHaveLength(0)
   })
 
+  describe('durable continuity (restart survival)', () => {
+    it('binds the preferred port when it is free', async () => {
+      // A durable agent baked "port X + ticket Y" in at launch; a restarted
+      // Grove must come back on X or that agent's tools die.
+      const s2 = new GroveMcpServer(makeHost())
+      const preferred = port + 7 // near-certainly free in the ephemeral range
+      const got = await s2.start(preferred)
+      s2.close()
+      expect(got).toBe(preferred)
+    })
+
+    it('falls back to an ephemeral port when the preferred one is taken', async () => {
+      const s2 = new GroveMcpServer(makeHost())
+      const got = await s2.start(port) // `server` from beforeEach holds it
+      s2.close()
+      expect(got).toBeGreaterThan(0)
+      expect(got).not.toBe(port)
+    })
+
+    it('accepts a re-registered ticket from a previous run, unbound', async () => {
+      server.registerTicket('persisted-ticket')
+      const res = await rpc(
+        { jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'list_sessions', arguments: {} } },
+        'Bearer persisted-ticket'
+      )
+      expect(res.status).toBe(200)
+      // Unbound caller: no pane is marked self.
+      const sessions = JSON.parse((await res.json()).result.content[0].text)
+      expect(sessions.every((s: McpSessionView) => s.self === undefined)).toBe(true)
+    })
+
+    it('re-registering a ticket never unbinds the live pane using it', async () => {
+      server.registerTicket(ticket) // bound to s1 in beforeEach
+      const sessions = JSON.parse(await call('list_sessions'))
+      expect(sessions.find((s: McpSessionView) => s.id === 's1').self).toBe(true)
+    })
+
+    it('unbindSession keeps the ticket valid — a detached agent keeps its tools', async () => {
+      server.unbindSession('s1')
+      const res = await rpc({ jsonrpc: '2.0', id: 6, method: 'tools/list' })
+      expect(res.status).toBe(200)
+    })
+
+    it('revokeTicket kills a credential by value — terminated durable agent', async () => {
+      server.revokeTicket(ticket)
+      expect((await rpc({ jsonrpc: '2.0', id: 7, method: 'tools/list' })).status).toBe(401)
+    })
+  })
+
   describe('authentication', () => {
     it('rejects a request with no ticket', async () => {
       expect((await rpc({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, '')).status).toBe(401)

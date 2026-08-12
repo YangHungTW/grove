@@ -234,8 +234,11 @@ export interface RendererApi {
    * file. The returned path goes on the launch command (`--mcp-config`) so the
    * agent gets Grove's list_sessions/tail/send_to tools; the handle is passed
    * back in sessionCreate to bind those credentials to the resulting pane.
-   * null when the server isn't running — the agent then launches without them. */
-  mcpLaunch(): Promise<{ handle: string; configPath: string } | null>
+   * null when the server isn't running — the agent then launches without them.
+   * Pass the agent's durableKey: when durable mode is on, the ticket for that
+   * key is persisted and reused, which is what keeps a tmux-surviving agent's
+   * tools alive across reattach and Grove restarts. */
+  mcpLaunch(durableKey?: string): Promise<{ handle: string; configPath: string } | null>
   fleetList(): Promise<RegistryEntry[]>
   /** Stop a background (`claude --bg`) session by its short job id. Interactive
    * sessions have no job id and are not stoppable this way — they belong to the

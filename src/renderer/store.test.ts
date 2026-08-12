@@ -928,6 +928,20 @@ describe('closing a tab terminates a durable agent (no background leak)', () => 
     expect(store.sessionsOf(wtId)).toHaveLength(0)
   })
 
+  it('hands the durableKey to the MCP mint, so durable tickets can persist', async () => {
+    const { store, api, wtId } = await openAgent()
+    expect(api.mcpLaunch).toHaveBeenCalledTimes(1)
+    // The key passed to mcpLaunch must be the SAME stable id the session was
+    // created with — it is what a restarted Grove uses to find the ticket the
+    // still-running tmux process is presenting.
+    const minted = api.mcpLaunch.mock.calls[0][0]
+    const created = api.sessionCreate.mock.calls.at(-1)![0] as { durableKey?: string }
+    expect(minted).toBeTruthy()
+    expect(created.durableKey).toBe(minted)
+    void store
+    void wtId
+  })
+
   it('detachSession is the explicit opt-out and leaves the agent running', async () => {
     const { store, api, wtId } = await openAgent()
     const id = store.sessionsOf(wtId)[0].id

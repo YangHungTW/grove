@@ -1044,12 +1044,18 @@ export class Store {
     // Pin a resume id for claude-family agents so we can resume them after close.
     // Grove owns the id (claude doesn't print it): `--session-id` for a fresh
     // session, `--resume` to reopen the one a closed agent left behind.
+    // Stable per-agent id for durable (tmux) naming. Distinct from resumeId
+    // (which is claude-only): EVERY agent gets one so two agents in a worktree
+    // can't collide onto one tmux session. Reused on restore so reattach finds
+    // the right live session. Generated once per logical agent here — and
+    // needed BEFORE the MCP mint below, which keys durable tickets off it.
+    const dKey = isAgent ? (durableKey ?? crypto.randomUUID()) : undefined
     // Grove's own MCP server, so this agent can see and message the other panes
     // (mcp__grove__list_sessions / tail / send_to). Minted per launch: the flag
     // goes on EVERY alternative of the resume chain, and the bearer ticket stays
     // in main — the renderer only handles an opaque handle. null when the server
     // never bound, in which case the agent simply launches without the tools.
-    const mcp = isAgent ? await window.api.mcpLaunch().catch(() => null) : null
+    const mcp = isAgent ? await window.api.mcpLaunch(dKey).catch(() => null) : null
     const launch = isAgent
       ? buildAgentLaunch(
           baseCommand,
@@ -1062,11 +1068,6 @@ export class Store {
     // claude/codex convention — starts interactive with the prompt submitted).
     // Never combined with resumeId, so it can't end up on a --resume chain.
     const command = isAgent ? withInitialPrompt(launch.command, initialPrompt) : launch.command
-    // Stable per-agent id for durable (tmux) naming. Distinct from resumeId
-    // (which is claude-only): EVERY agent gets one so two agents in a worktree
-    // can't collide onto one tmux session. Reused on restore so reattach finds
-    // the right live session. Generated once per logical agent here.
-    const dKey = isAgent ? (durableKey ?? crypto.randomUUID()) : undefined
     const n = this.sessionsOf(worktreeId).filter((x) => x.icon === icon).length
     const title = titleOverride ?? (n === 0 ? baseName : `${baseName} ${n + 1}`)
     // Estimate columns so the shell's first prompt renders at ~the right width
