@@ -197,16 +197,43 @@ export class Store {
   private scrollPanes = new Set<string>()
   private scrollTimer: ReturnType<typeof setTimeout> | undefined
 
-  private version = 0
+  // Change tracking is split into SLICES so the noisy producers stop
+  // re-rendering the whole tree. useSyncExternalStore re-renders a component
+  // only when ITS snapshot number moved, so components choose what they hear:
+  //   ui    — layout, sessions, focus, settings, dialogs (everything, default)
+  //   meta  — sidebar card data: git status, usage, PR, last lines. Refreshed
+  //           on 20s/60s timers and a 600ms ticker while agents stream; before
+  //           the split, every streaming agent re-rendered PaneGrid, every tab
+  //           strip and the settings panel each tick.
+  //   fleet — the Elsewhere list; bumped whenever ANY claude on the machine
+  //           flips busy/idle, which with a few live agents is constant.
+  // Only the Sidebar renders meta/fleet data, so only it subscribes to them
+  // (useStoreAll); everything else listens to ui alone.
+  private versions = { ui: 0, meta: 0, fleet: 0 }
   private listeners = new Set<() => void>()
   subscribe = (cb: () => void): (() => void) => {
     this.listeners.add(cb)
     return () => this.listeners.delete(cb)
   }
-  getVersion = (): number => this.version
-  private notify(): void {
-    this.version++
+  getVersion = (): number => this.versions.ui
+  /** Strictly increases when ANY slice bumps — the Sidebar's snapshot. */
+  getAllVersion = (): number => this.versions.ui + this.versions.meta + this.versions.fleet
+  private emit(): void {
     this.listeners.forEach((l) => l())
+  }
+  private notify(): void {
+    this.versions.ui++
+    this.emit()
+  }
+  /** Sidebar-card data changed (wtStatus/usage/PR/lastLine) — nothing outside
+   * the sidebar reads it, so the rest of the tree stays quiet. */
+  private notifyMeta(): void {
+    this.versions.meta++
+    this.emit()
+  }
+  private notifyFleet(): void {
+    this.versions.fleet++
+    this.emit()
   }
 
   // --- selectors ---------------------------------------------------------
@@ -413,7 +440,10 @@ export class Store {
     this.lineRefreshScheduled = true
     setTimeout(() => {
       this.lineRefreshScheduled = false
-      this.notify()
+      // Meta slice: the last line only feeds the sidebar cards. While an agent
+      // streams, this fires every 600ms — on the ui slice it re-rendered every
+      // pane, tab strip and panel in the app each tick.
+      this.notifyMeta()
     }, 600)
   }
   unregisterPane(id: string): void {
@@ -651,7 +681,7 @@ export class Store {
         // stays current (it was otherwise only set on the initial load).
         const wt = this.worktreeOf(wtId)
         if (wt && s.branch && wt.branch !== s.branch) wt.branch = s.branch
-        this.notify()
+        this.notifyMeta()
       })
       .catch(() => {})
     window.api
@@ -660,7 +690,7 @@ export class Store {
         const had = this.wtUsage.has(wtId)
         if (u) this.wtUsage.set(wtId, u)
         else this.wtUsage.delete(wtId)
-        if (u || had) this.notify()
+        if (u || had) this.notifyMeta()
       })
       .catch(() => {})
   }
@@ -673,7 +703,7 @@ export class Store {
         const had = this.wtPr.has(wtId)
         if (pr) this.wtPr.set(wtId, pr)
         else this.wtPr.delete(wtId)
-        if (pr || had) this.notify()
+        if (pr || had) this.notifyMeta()
       })
       .catch(() => {})
   }
@@ -1834,7 +1864,9 @@ export class Store {
   wireEvents(): void {
     window.api.onFleetChange(({ sessions }) => {
       this.fleet = sessions
-      this.notify()
+      // Fleet slice: only the Elsewhere list renders this, and it changes every
+      // time any claude on the machine flips busy/idle.
+      this.notifyFleet()
     })
     // An agent asked for a new pane (mcp__grove__spawn_agent). Spawn WITHOUT
     // stealing focus — delegation is a background act; the user finds the new

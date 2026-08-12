@@ -901,6 +901,49 @@ describe('waitingFor rides along with the state event', () => {
   })
 })
 
+// Change tracking is split into slices (ui / meta / fleet) so the noisy
+// producers stop re-rendering the whole tree: useSyncExternalStore re-renders a
+// component only when ITS snapshot number moved. getVersion is what every
+// non-sidebar component reads; getAllVersion is the Sidebar's.
+describe('store slices (per-slice subscriptions)', () => {
+  beforeEach(() => {
+    installApi()
+    vi.useFakeTimers()
+  })
+  afterEach(() => vi.useRealTimers())
+
+  it('the streaming last-line ticker leaves the ui slice alone', () => {
+    const store = new Store()
+    const ui = store.getVersion()
+    const all = store.getAllVersion()
+    ;(store as unknown as { setLastLine: (id: string, l: string) => void }).setLastLine('s1', 'x')
+    vi.advanceTimersByTime(700)
+    // Sidebar re-renders (its cards show the line); PaneGrid/tabs must not.
+    expect(store.getVersion()).toBe(ui)
+    expect(store.getAllVersion()).toBeGreaterThan(all)
+  })
+
+  it('a fleet push bumps only the fleet slice', () => {
+    const { api } = installApi()
+    const store = new Store()
+    store.wireEvents()
+    const onFleet = api.onFleetChange.mock.calls[0][0] as (e: { sessions: unknown[] }) => void
+    const ui = store.getVersion()
+    const all = store.getAllVersion()
+    onFleet({ sessions: [] })
+    expect(store.getVersion()).toBe(ui)
+    expect(store.getAllVersion()).toBeGreaterThan(all)
+  })
+
+  it('focus changes still reach everyone through the ui slice', () => {
+    const store = new Store()
+    store.sessions.set('s1', { id: 's1', worktreeId: '/wt', kind: 'agent' } as never)
+    const ui = store.getVersion()
+    store.focusSession('s1')
+    expect(store.getVersion()).toBeGreaterThan(ui)
+  })
+})
+
 // mcp__grove__spawn_agent: main forwards an agent's spawn request; the renderer
 // creates the pane and answers with its id. Delegation is a background act — it
 // must never yank the user's active worktree or keyboard focus.

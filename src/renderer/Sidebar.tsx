@@ -1,5 +1,5 @@
 import { useState, type DragEvent, type MouseEvent } from 'react'
-import { useStore } from './useStore'
+import { useStoreAll } from './useStore'
 import { store, type ProjectView, type WorktreeView } from './store'
 import { formatTokens, formatUsd, shortModel } from './usageFormat'
 import {
@@ -60,7 +60,7 @@ function slotClass(slot: DropSlot | null, id: string): string {
 }
 
 export function Sidebar(): JSX.Element {
-  const s = useStore()
+  const s = useStoreAll()
   const anyExpanded = s.anyProjectExpanded()
   // The list, not each header, hit-tests project drags: a group is as tall as
   // its expanded worktrees, so aiming at headers alone meant threading a ~28px
@@ -131,7 +131,7 @@ export function Sidebar(): JSX.Element {
  * is that terminal's business, so it is listed and left alone.
  */
 function Elsewhere(): JSX.Element | null {
-  const s = useStore()
+  const s = useStoreAll()
   const [open, setOpen] = useState(true)
   // One background session's recent output, expanded inline under its row.
   const [peek, setPeek] = useState<{ jobId: string; text: string | null } | null>(null)
@@ -214,7 +214,7 @@ function ProjectGroup({
   project: ProjectView
   slot: DropSlot | null
 }): JSX.Element {
-  const s = useStore()
+  const s = useStoreAll()
   // Worktree cards are hit-tested by their container for the same reason
   // projects are — see Sidebar. Held here so the whole list shares one slot.
   const [cardSlot, setCardSlot] = useState<DropSlot | null>(null)
@@ -368,7 +368,7 @@ function WorktreeCard({
   active: boolean
   slot: DropSlot | null
 }): JSX.Element {
-  const s = useStore()
+  const s = useStoreAll()
   const st = s.wtStatus.get(wt.id)
   const line = s.worktreeLastLine(wt.id)
   const cnt = s.sessionsOf(wt.id).length
@@ -534,7 +534,7 @@ function PrBadge({ pr }: { pr?: PrInfo }): JSX.Element | null {
 
 /** Today's Claude token/cost footprint for this worktree (from transcripts). */
 function UsageLine({ wtId }: { wtId: string }): JSX.Element | null {
-  const s = useStore()
+  const s = useStoreAll()
   const u = s.wtUsage.get(wtId)
   if (!u) return null
   const total = u.input + u.output + u.cacheRead + u.cacheWrite
@@ -556,7 +556,7 @@ function UsageLine({ wtId }: { wtId: string }): JSX.Element | null {
  * without switching panes. "1" approves, "2" picks the second option, Esc
  * cancels — Claude's permission menus select on the bare keypress. */
 function QuickRespond({ wtId }: { wtId: string }): JSX.Element | null {
-  const s = useStore()
+  const s = useStoreAll()
   const waiting = s.sessionsOf(wtId).find((x) => x.kind === 'agent' && x.state === 'waiting')
   if (!waiting) return null
   const send = (e: MouseEvent, data: string): void => {
