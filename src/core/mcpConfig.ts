@@ -17,6 +17,7 @@
  * the ticket must never round-trip through the renderer as a value it could
  * read back for another pane.
  */
+import { shellQuote } from './shellQuote'
 
 /** The `.mcp.json`-shaped config handed to one agent via `--mcp-config`. */
 export interface McpConfigFile {
@@ -52,11 +53,17 @@ export function buildMcpConfig(port: number, ticket: string): McpConfigFile {
  * resume chain — see the note there about why this is not appended to the
  * finished command string.
  *
+ * The path MUST be quoted. It lives under Electron's userData, which on macOS is
+ * `~/Library/Application Support/Grove` — a path with a space in it. The command
+ * is handed to `$SHELL -ilc`, so an unquoted path splits into two words, and
+ * because `--mcp-config` is variadic it swallows both and reports each half as a
+ * missing config file.
+ *
  * `--strict-mcp-config` is deliberately NOT set: it would drop the user's own
  * MCP servers for any agent Grove launches.
  */
 export function mcpConfigFlag(configPath: string): string {
-  return `--mcp-config ${configPath}`
+  return `--mcp-config ${shellQuote(configPath)}`
 }
 
 /** MCP spec revisions this server can speak. */

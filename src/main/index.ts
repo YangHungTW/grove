@@ -419,6 +419,12 @@ const mcpPending = new Map<string, string>()
 const mcpConfigPaths = new Map<string, string>()
 let mcpServer: GroveMcpServer | null = null
 
+/** Where per-agent MCP config files live. Overridable so a test run cannot
+ * touch — or wipe, see the boot-time clear — a real Grove's live configs. */
+function mcpDir(): string {
+  return process.env.CCM_MCP_DIR ?? join(app.getPath('userData'), 'mcp')
+}
+
 /** Pane id for a target an agent named — its Grove id, or its exact tab title. */
 function resolvePaneTarget(target: string): string | undefined {
   if (registry.getSession(target)) return target
@@ -477,7 +483,7 @@ function writeToPane(id: string, data: string): void {
 function mcpLaunchConfig(): { handle: string; configPath: string } | null {
   if (!mcpServer || mcpServer.port === 0) return null
   try {
-    const dir = join(app.getPath('userData'), 'mcp')
+    const dir = mcpDir()
     mkdirSync(dir, { recursive: true })
     const handle = randomUUID()
     const ticket = mcpServer.mintTicket()
@@ -1148,7 +1154,7 @@ app.whenReady().then(() => {
   startClaudeRegistryWatch()
   // Config files are per-launch and only useful while their pane lives; a crash
   // leaves them behind, so clear the directory before minting any new ones.
-  rmSync(join(app.getPath('userData'), 'mcp'), { recursive: true, force: true })
+  rmSync(mcpDir(), { recursive: true, force: true })
   mcpServer = new GroveMcpServer(mcpHost)
   void mcpServer.start().then((port) => {
     if (process.env.CCM_DEBUG_REGISTRY) console.log(`[mcp] ${port ? `:${port}` : 'not started'}`)

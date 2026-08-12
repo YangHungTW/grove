@@ -69,6 +69,10 @@ const launchOpts = {
     // path (passed as "$1" by openInEditor) into a marker we can assert on.
     CCM_IDE_CMD: `node -e "require('fs').writeFileSync(process.argv[1], process.argv[2])" '${ideMarker}'`,
     CCM_CLAUDE_SESSIONS: claudeSessionsDir,
+    // Per-agent MCP configs. Kept out of the real userData: Grove clears this
+    // directory at boot, so an unpointed test run would delete the live configs
+    // of a Grove the user has open.
+    CCM_MCP_DIR: join(storeDir, 'mcp'),
     // Quitting with durable agents alive normally asks whether to terminate them.
     // There is nobody to click it here, so app.close() would hang on the modal.
     CCM_NO_QUIT_PROMPT: '1'
