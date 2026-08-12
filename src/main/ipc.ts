@@ -50,6 +50,7 @@ export const Channels = {
   fleetList: 'fleet:list',
   mcpLaunch: 'mcp:launch',
   fleetStop: 'fleet:stop',
+  fleetLogs: 'fleet:logs',
   fleetChange: 'fleet:change',
   fileOpenDialog: 'file:open-dialog',
   fileRead: 'file:read',
@@ -244,6 +245,10 @@ export interface RendererApi {
    * sessions have no job id and are not stoppable this way — they belong to the
    * terminal they are attached to. */
   fleetStop(jobId: string): void
+  /** Recent terminal output of a background session (`claude logs <id>`),
+   * ANSI-stripped. Empty string when the CLI has nothing (or errors) — a peek
+   * is best-effort, not a hard dependency. */
+  fleetLogs(jobId: string): Promise<string>
   /** Open a native picker for a Markdown/HTML file, starting in `defaultPath`
    * (the worktree folder). null if cancelled. */
   fileOpenDialog(defaultPath?: string): Promise<string | null>

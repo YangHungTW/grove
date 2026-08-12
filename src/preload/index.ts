@@ -80,6 +80,7 @@ const api: RendererApi = {
   fleetStop: (jobId: string): void => {
     ipcRenderer.send(Channels.fleetStop, jobId)
   },
+  fleetLogs: (jobId: string): Promise<string> => ipcRenderer.invoke(Channels.fleetLogs, jobId),
   fileOpenDialog: (defaultPath?: string): Promise<string | null> =>
     ipcRenderer.invoke(Channels.fileOpenDialog, defaultPath),
   fileRead: (filePath: string): Promise<string> => ipcRenderer.invoke(Channels.fileRead, filePath),

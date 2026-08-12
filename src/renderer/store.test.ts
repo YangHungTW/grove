@@ -899,6 +899,64 @@ describe('waitingFor rides along with the state event', () => {
   })
 })
 
+// Attaching a background fleet session (`claude attach <jobId>`) pulls it into a
+// Grove pane. The pane is a WINDOW onto a daemon-owned process, which shapes
+// everything: it joins the registry by the session's existing uuid, and it must
+// never be persisted — a layout-restore would spawn a brand-new claude in its
+// place instead of reattaching.
+describe('attachFleetSession', () => {
+  const FLEET = {
+    pid: 1,
+    sessionId: 'fleet-uuid',
+    cwd: '/tmp/repo-wt-feat/src',
+    kind: 'bg' as const,
+    jobId: 'a8e23050',
+    name: 'stray',
+    status: 'busy' as const
+  }
+
+  async function seeded(): Promise<{ store: Store; api: Record<string, ReturnType<typeof vi.fn>> }> {
+    const { api } = installApi()
+    const store = new Store()
+    const project = seedProject(store)
+    const wtId = '/tmp/repo-wt-feat'
+    project.worktrees.set(wtId, { id: wtId, path: wtId, branch: 'feat', primary: false })
+    await store.selectWorktree(project.repoRoot, wtId)
+    return { store, api }
+  }
+
+  it('runs claude attach in the worktree containing the session cwd, joined by its uuid', async () => {
+    const { store, api } = await seeded()
+    await store.attachFleetSession(FLEET as never)
+    const req = api.sessionCreate.mock.calls.at(-1)![0] as Record<string, unknown>
+    expect(req.worktreeId).toBe('/tmp/repo-wt-feat')
+    expect(req.command).toBe("claude attach 'a8e23050'")
+    expect(req.agentSessionId).toBe('fleet-uuid') // registry state from first paint
+    expect(req.cwd).toBe('/tmp/repo-wt-feat/src')
+  })
+
+  it('never persists the attach pane to the layout', async () => {
+    const { store, api } = await seeded()
+    await store.attachFleetSession(FLEET as never)
+    const saved = (api.layoutSave.mock.calls.at(-1)?.[0] ?? []) as { title: string }[]
+    expect(saved.some((d) => d.title === 'stray')).toBe(false)
+  })
+
+  it('declines when no open worktree contains the session cwd', async () => {
+    const { store, api } = await seeded()
+    api.sessionCreate.mockClear()
+    await store.attachFleetSession({ ...FLEET, cwd: '/somewhere/else' } as never)
+    expect(api.sessionCreate).not.toHaveBeenCalled()
+  })
+
+  it('declines a session with no job id — interactive sessions are not attachable', async () => {
+    const { store, api } = await seeded()
+    api.sessionCreate.mockClear()
+    await store.attachFleetSession({ ...FLEET, jobId: undefined } as never)
+    expect(api.sessionCreate).not.toHaveBeenCalled()
+  })
+})
+
 // Closing a tab used to only DETACH a durable (tmux) agent: the control client
 // died, the agent kept running forever. Nothing ever reaped those, so a day of
 // opening and closing tabs left a pile of live agent processes behind.

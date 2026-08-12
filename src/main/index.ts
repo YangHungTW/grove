@@ -26,6 +26,7 @@ import { buildMcpConfig } from '../core/mcpConfig'
 import { GroveMcpServer, type McpHost } from './mcpServer'
 import { resolveTarget, sendGuard, type PaneRef } from '../core/paneTargets'
 import { McpStateStore, pruneDurable } from '../core/mcpStateStore'
+import { stripAnsi } from '../core/ansi'
 import { homedir } from 'node:os'
 import { stat as statAsync, readFile as readFileAsync } from 'node:fs/promises'
 import { SessionRegistry } from '../core/sessionRegistry'
@@ -1086,6 +1087,22 @@ function registerIpc(): void {
   ipcMain.handle(Channels.mcpLaunch, (_e, durableKey?: string) => mcpLaunchConfig(durableKey))
   ipcMain.handle(Channels.fleetList, () => fleetSessions())
   ipcMain.on(Channels.fleetStop, (_e, jobId: string) => stopFleetSession(jobId))
+  ipcMain.handle(
+    Channels.fleetLogs,
+    (_e, jobId: string) =>
+      new Promise<string>((resolve) => {
+        // Same posture as fleetStop: login shell (tmux/claude PATH), job id as a
+        // positional arg so a value from another program's state file can never
+        // be read as shell. tail-capped — the peek shows a glimpse, not a log.
+        const shell = process.env.SHELL || '/bin/zsh'
+        execFile(
+          shell,
+          ['-lc', 'claude logs "$1" 2>&1 | tail -n 40', '--', jobId],
+          { timeout: 15_000 },
+          (_err, stdout) => resolve(stripAnsi(String(stdout ?? '')).trim())
+        )
+      })
+  )
   ipcMain.on(Channels.sessionKill, (_e, id: string, detach?: boolean) => {
     // For a control session, killing the pty only exits the -CC client — the tmux
     // session and the agent inside it keep running. Durability is meant to survive

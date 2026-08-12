@@ -11,6 +11,7 @@ import { hookFailedMessage } from '../core/hookMessage'
 import type { ClosedAgent } from '../core/closedAgentsStore'
 import { buildAgentLaunch } from '../core/resume'
 import { mcpConfigFlag } from '../core/mcpConfig'
+import { buildAttachCommand, worktreeForCwd } from '../core/fleet'
 import { withInitialPrompt } from '../core/newTask'
 import { withSkills, type SkillDef } from '../core/skills'
 import { classifyExit } from '../core/sessionExit'
@@ -159,6 +160,11 @@ export class Store {
   // Live agents that own a pinned resume id, keyed by session id. On close the
   // entry becomes a ClosedAgent so the agent can be resumed later.
   private resumeMeta = new Map<string, { resumeId: string; baseCommand: string }>()
+  // Sessions that must NOT be persisted to the layout: an attached fleet pane is
+  // a window onto a daemon-owned process — restoring it as a fresh agent on the
+  // next launch would spawn a NEW claude instead. The session lives in Elsewhere
+  // again after a restart, which is the honest representation.
+  private transientSessions = new Set<string>()
   // Stable per-agent durable (tmux) key, keyed by session id. Persisted in the
   // layout so a relaunch reattaches to the same tmux session; distinct per agent
   // so two agents in one worktree never share one. See [[tmuxSessionName]].
@@ -509,6 +515,7 @@ export class Store {
         for (const s of this.sessionsOf(wt.id)) {
           // Viewer/diff panes are transient views — not worth restoring.
           if (s.kind === 'viewer' || s.kind === 'diff') continue
+          if (this.transientSessions.has(s.id)) continue
           out.push({
             repoRoot: project.repoRoot,
             worktreePath: wt.path,
@@ -1317,6 +1324,60 @@ export class Store {
    * main is already watching. */
   stopFleetSession(jobId: string): void {
     window.api.fleetStop(jobId)
+  }
+  /** Every open worktree across every project — the search space for filing an
+   * attached fleet session under the right card. */
+  private allWorktrees(): { id: string; path: string }[] {
+    const out: { id: string; path: string }[] = []
+    for (const p of this.projects.values())
+      for (const wt of p.worktrees.values()) out.push({ id: wt.id, path: wt.path })
+    return out
+  }
+  /**
+   * Pull a background fleet session into a Grove pane: a new pane runs
+   * `claude attach <jobId>` in the worktree whose checkout contains the
+   * session's cwd. The pane joins Claude's registry by the session's own uuid,
+   * so its state dot is authoritative from the first paint — and the Elsewhere
+   * row disappears by itself, because a joined session is no longer "elsewhere".
+   * Closing the tab kills only the attach client; the daemon-owned session
+   * lives on and returns to Elsewhere.
+   */
+  async attachFleetSession(f: RegistryEntry): Promise<void> {
+    if (!f.jobId) return
+    const command = buildAttachCommand(f.jobId)
+    if (!command) {
+      this.toast(`Job id looks malformed: ${f.jobId}`)
+      return
+    }
+    const wtId = worktreeForCwd(f.cwd, this.allWorktrees())
+    const repoRoot = wtId ? this.repoRootOf(wtId) : undefined
+    if (!wtId || !repoRoot) {
+      this.toast(`Open the project containing ${f.cwd} to attach this session`)
+      return
+    }
+    await this.selectWorktree(repoRoot, wtId)
+    const root = document.getElementById('panes')
+    const cols = root ? Math.max(20, Math.floor(root.clientWidth / 7.8)) : 80
+    try {
+      const snap = await window.api.sessionCreate({
+        worktreeId: wtId,
+        kind: 'agent',
+        command,
+        agent: 'claude',
+        // The join key IS the fleet session's uuid — no minting, it exists.
+        agentSessionId: f.sessionId,
+        cwd: f.cwd,
+        title: f.name ?? `attached ${f.jobId}`,
+        icon: '★',
+        cols
+      })
+      this.transientSessions.add(snap.id)
+      this.sessions.set(snap.id, snap)
+      this.placePane(wtId, snap)
+    } catch (err) {
+      this.toast(errMsg(err))
+    }
+    this.notify()
   }
   /** Close the tab but leave a durable agent running in the background; it comes
    * back (reattached to the same live process) from the recently-closed list. */

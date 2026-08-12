@@ -133,7 +133,20 @@ export function Sidebar(): JSX.Element {
 function Elsewhere(): JSX.Element | null {
   const s = useStore()
   const [open, setOpen] = useState(true)
+  // One background session's recent output, expanded inline under its row.
+  const [peek, setPeek] = useState<{ jobId: string; text: string | null } | null>(null)
   if (s.fleet.length === 0) return null
+  const togglePeek = (jobId: string): void => {
+    if (peek?.jobId === jobId) {
+      setPeek(null)
+      return
+    }
+    setPeek({ jobId, text: null }) // null = loading
+    void window.api.fleetLogs(jobId).then((text) => {
+      // Only land the result if this peek is still the open one.
+      setPeek((cur) => (cur?.jobId === jobId ? { jobId, text: text || '(no output)' } : cur))
+    })
+  }
   return (
     <div className="elsewhere">
       <div className="section-label">
@@ -144,26 +157,47 @@ function Elsewhere(): JSX.Element | null {
       {open && (
         <ul className="elsewhere-list">
           {s.fleet.map((f) => (
-            <li key={f.sessionId} className="elsewhere-row">
-              <span
-                className={`dot dot-${f.status}`}
-                title={f.waitingFor ? `needs input — ${f.waitingFor}` : f.status}
-              />
-              <span className="elsewhere-name" title={f.cwd}>
-                {f.name ?? f.sessionId.slice(0, 8)}
-              </span>
-              {f.kind === 'bg' && <span className="elsewhere-kind">bg</span>}
-              {f.startedAt !== undefined && (
-                <span className="elsewhere-age">{timeAgo(f.startedAt)}</span>
-              )}
-              {f.jobId && (
-                <button
-                  className="row-x"
-                  title={`Stop this background session (claude stop ${f.jobId})`}
-                  onClick={() => store.stopFleetSession(f.jobId!)}
-                >
-                  <XIcon size={12} />
-                </button>
+            <li key={f.sessionId}>
+              <div className="elsewhere-row">
+                <span
+                  className={`dot dot-${f.status}`}
+                  title={f.waitingFor ? `needs input — ${f.waitingFor}` : f.status}
+                />
+                <span className="elsewhere-name" title={f.cwd}>
+                  {f.name ?? f.sessionId.slice(0, 8)}
+                </span>
+                {f.kind === 'bg' && <span className="elsewhere-kind">bg</span>}
+                {f.startedAt !== undefined && (
+                  <span className="elsewhere-age">{timeAgo(f.startedAt)}</span>
+                )}
+                {f.jobId && (
+                  <>
+                    <button
+                      className={'elsewhere-act' + (peek?.jobId === f.jobId ? ' active' : '')}
+                      title={`Peek at recent output (claude logs ${f.jobId})`}
+                      onClick={() => togglePeek(f.jobId!)}
+                    >
+                      logs
+                    </button>
+                    <button
+                      className="elsewhere-act"
+                      title="Attach this session as a Grove pane (closing the pane detaches; the session keeps running)"
+                      onClick={() => void store.attachFleetSession(f)}
+                    >
+                      attach
+                    </button>
+                    <button
+                      className="row-x"
+                      title={`Stop this background session (claude stop ${f.jobId})`}
+                      onClick={() => store.stopFleetSession(f.jobId!)}
+                    >
+                      <XIcon size={12} />
+                    </button>
+                  </>
+                )}
+              </div>
+              {peek !== null && peek.jobId === f.jobId && (
+                <pre className="elsewhere-peek">{peek.text ?? 'loading…'}</pre>
               )}
             </li>
           ))}
