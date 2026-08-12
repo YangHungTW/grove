@@ -31,8 +31,10 @@ import { negotiateProtocol } from '../core/mcpConfig'
 export interface McpHost {
   /** Every Grove pane an agent may address, with live state. */
   listSessions(callerId: string | null): McpSessionView[]
-  /** Recent output of a pane, oldest line first. */
-  tail(target: string, lines: number): { lines: string[] } | { error: string }
+  /** Recent output of a pane, oldest line first. Async: the answer comes from
+   * xterm's resolved buffer in the renderer — the only place a
+   * cursor-addressed TUI's screen exists as readable lines. */
+  tail(target: string, lines: number): Promise<{ lines: string[] } | { error: string }>
   /** Deliver a message into a pane's pty. */
   sendTo(target: string, message: string, callerId: string | null): { ok: true } | { error: string }
   /** Open a NEW agent pane in an open worktree, primed with an initial prompt.
@@ -269,7 +271,7 @@ export class GroveMcpServer {
         const args = (params?.arguments ?? {}) as Record<string, unknown>
         if (name === 'list_sessions') return text(JSON.stringify(this.host.listSessions(caller)))
         if (name === 'tail') {
-          const r = this.host.tail(String(args.target ?? ''), Number(args.lines) || 50)
+          const r = await this.host.tail(String(args.target ?? ''), Number(args.lines) || 50)
           if ('error' in r) return text(r.error, true)
           return text(r.lines.join('\n') || '(no output yet)')
         }

@@ -13,7 +13,15 @@
  */
 import { _electron as electron } from 'playwright'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, rmSync, existsSync, writeFileSync, readFileSync } from 'node:fs'
+import {
+  mkdtempSync,
+  mkdirSync,
+  rmSync,
+  existsSync,
+  writeFileSync,
+  readFileSync,
+  readdirSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, basename } from 'node:path'
 import assert from 'node:assert/strict'
@@ -479,6 +487,40 @@ try {
   assert.deepEqual(elsewhereRows, ['stray-agent'], 'Elsewhere lists only sessions Grove does not own')
   const elsewhere = true
 
+  // 6d) MCP TAIL — drive Grove's own MCP server the way an agent would: read a
+  // launched agent's config (port + ticket) from the mcp dir and call `tail` on
+  // the agent pane. The answer must come from xterm's RESOLVED buffer — the
+  // shell typed the CCM_AGENT_CMD bootstrap into that pane, so the marker path
+  // is on screen. (A raw-stream tail died on cursor-addressed repaints.)
+  const mcpCfgFile = readdirSync(join(storeDir, 'mcp')).find((f) => /^[0-9a-f-]+\.json$/.test(f))
+  assert.ok(mcpCfgFile, 'mcp: an agent launch should have written a per-agent config')
+  const mcpCfg = JSON.parse(readFileSync(join(storeDir, 'mcp', mcpCfgFile), 'utf8')).mcpServers.grove
+  const mcpCall = async (name, args, id = 1) => {
+    const res = await fetch(mcpCfg.url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: mcpCfg.headers.Authorization },
+      body: JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } })
+    })
+    return (await res.json()).result
+  }
+  const mcpSessions = JSON.parse((await mcpCall('list_sessions', {})).content[0].text)
+  assert.ok(
+    mcpSessions.some((s) => s.title === 'claude'),
+    'mcp: list_sessions should include the claude agent pane'
+  )
+  // Tail the shell that TYPED a command earlier (the round-trip step): its
+  // resolved buffer holds the p10k prompt and the typed `touch` line. The fake
+  // agent pane is useless here — CCM_AGENT_CMD runs silently, so its screen is
+  // legitimately empty.
+  const shellPane = mcpSessions.find((s) => s.title === 'shell')
+  assert.ok(shellPane, 'mcp: list_sessions should include the first shell pane')
+  const tailText = (await mcpCall('tail', { target: shellPane.id, lines: 30 }, 2)).content[0].text
+  assert.ok(
+    tailText.includes('touch') || tailText.includes('╭─'),
+    `mcp tail: expected the shell's rendered screen (typed command or prompt), got: ${tailText.slice(0, 200)}`
+  )
+  const mcpTail = true
+
   // 7) MULTIPLE AGENTS — a second agent is allowed (two agent tabs).
   await addClaudeAgent()
   await win.waitForFunction(
@@ -800,7 +842,7 @@ try {
       `diffAdd=${addLines} diffDel=${delLines} splitDiff=${splitDiff} ideOpen=${ideOpen} finish=${finishFlow} ` +
       `newTask=${newTaskFlow} restored=${restored} glContexts=${gl.contexts}/${gl.visibleTerms} ` +
       `rendererToggle=${rendererToggle} transparentWebgl=${transparentWebgl} ` +
-      `registryWaiting=${registryWaiting} elsewhere=${elsewhere}`
+      `registryWaiting=${registryWaiting} elsewhere=${elsewhere} mcpTail=${mcpTail}`
   )
 } catch (err) {
   failed = true

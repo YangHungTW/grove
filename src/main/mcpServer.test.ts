@@ -20,7 +20,7 @@ function makeHost(): McpHost & {
     sent,
     spawned,
     listSessions: (callerId) => panes.map((p) => ({ ...p, self: p.id === callerId || undefined })),
-    tail: (target) =>
+    tail: async (target) =>
       target === 's1' ? { lines: ['line one', 'line two'] } : { error: `No Grove pane matches "${target}". Call list_sessions first.` },
     sendTo: (target, message, from) => {
       if (target !== 's2') return { error: `No Grove pane matches "${target}". Call list_sessions first.` }

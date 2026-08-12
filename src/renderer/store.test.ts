@@ -40,6 +40,8 @@ function installApi(): { creates: SessionSnapshot[]; api: Record<string, ReturnT
     onFleetChange: vi.fn(),
     onMcpSpawn: vi.fn(),
     mcpSpawnResult: vi.fn(),
+    onMcpTail: vi.fn(),
+    mcpTailResult: vi.fn(),
     fleetList: vi.fn(async () => []),
     // Grove's MCP server is optional at launch; null is the "not running" path.
     mcpLaunch: vi.fn(async () => null)
@@ -941,6 +943,36 @@ describe('store slices (per-slice subscriptions)', () => {
     const ui = store.getVersion()
     store.focusSession('s1')
     expect(store.getVersion()).toBeGreaterThan(ui)
+  })
+})
+
+// mcp__grove__tail: answered from xterm's RESOLVED buffer, because a claude
+// pane repaints with cursor addressing — the raw pty stream holds interleaved
+// stale frames and chunk-split escapes (found live: tail returned a stale
+// "Enter to confirm" scrap with a raw \x1b[41;3H glued on).
+describe('onMcpTail (tail served from the xterm buffer)', () => {
+  it('returns the pane resolved rows', () => {
+    const { api } = installApi()
+    const store = new Store()
+    const pane = fakePane()
+    // fakePane's buffer resolves every row to 'status row'.
+    store.registerPane('s1', pane.term as never, pane.fit as never)
+    store.wireEvents()
+    const onTail = api.onMcpTail.mock.calls[0][0] as (e: unknown) => void
+    onTail({ requestId: 't1', sessionId: 's1', lines: 3 })
+    const [id, result] = api.mcpTailResult.mock.calls.at(-1)!
+    expect(id).toBe('t1')
+    expect((result as { lines: string[] }).lines).toContain('status row')
+  })
+
+  it('answers with an error when the pane has no live terminal', () => {
+    const { api } = installApi()
+    const store = new Store()
+    store.wireEvents()
+    const onTail = api.onMcpTail.mock.calls[0][0] as (e: unknown) => void
+    onTail({ requestId: 't2', sessionId: 'nope', lines: 3 })
+    const [, result] = api.mcpTailResult.mock.calls.at(-1)!
+    expect((result as { error: string }).error).toBeTruthy()
   })
 })
 

@@ -21,7 +21,6 @@ import {
   watch
 } from 'node:fs'
 import { randomUUID } from 'node:crypto'
-import { OutputBuffer } from '../core/outputBuffer'
 import { buildMcpConfig } from '../core/mcpConfig'
 import { GroveMcpServer, type McpHost } from './mcpServer'
 import { resolveTarget, sendGuard, type PaneRef } from '../core/paneTargets'
@@ -412,8 +411,12 @@ function killTmuxSessions(names: string[], sync = false): void {
 
 // --- Grove MCP bus -----------------------------------------------------------
 
-/** Recent plain-text output per pane, for the `tail` tool. */
-const outputBuffers = new Map<string, OutputBuffer>()
+// tail answers come from xterm's RESOLVED buffer in the renderer, not from the
+// raw pty stream: a claude pane repaints with cursor addressing, so the byte
+// stream holds interleaved stale frames and chunk-split escapes — the lesson
+// lastLine.ts already documents. Each pending request resolves on mcpTailResult
+// or times out.
+const tailPending = new Map<string, (r: { lines: string[] } | { error: string }) => void>()
 /** Launch handles handed to the renderer, mapped to the ticket they stand for.
  * The ticket itself never leaves main: the renderer only ever sees the opaque
  * handle and the config path. */
@@ -472,8 +475,22 @@ const mcpHost: McpHost = {
   },
   tail(target, lines) {
     const r = resolveTarget(target, paneRefs())
-    if ('error' in r) return r
-    return { lines: outputBuffers.get(r.pane.id)?.tail(lines) ?? [] }
+    if ('error' in r) return Promise.resolve(r)
+    if (!mainWindow || mainWindow.isDestroyed())
+      return Promise.resolve({ error: 'Grove has no window to read from.' })
+    const requestId = randomUUID()
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        tailPending.delete(requestId)
+        resolve({ error: 'Tail timed out — Grove did not answer.' })
+      }, 5_000)
+      tailPending.set(requestId, (res) => {
+        clearTimeout(timer)
+        tailPending.delete(requestId)
+        resolve(res)
+      })
+      send(Channels.mcpTailRequest, { requestId, sessionId: r.pane.id, lines })
+    })
   },
   sendTo(target, message, callerId) {
     const r = resolveTarget(target, paneRefs())
@@ -588,7 +605,6 @@ function mcpLaunchConfig(durableKey?: string): { handle: string; configPath: str
  * "keep running") and keeps calling with that ticket, so credential and config
  * file both survive. Real termination goes through mcpRevokeDurable. */
 function forgetMcp(groveId: string): void {
-  outputBuffers.delete(groveId)
   const dKey = mcpDurableKeyById.get(groveId)
   mcpDurableKeyById.delete(groveId)
   if (dKey && mcpState().load().durable[dKey]) {
@@ -819,7 +835,6 @@ function createSession(req: CreateSessionRequest): SessionSnapshot {
     // durable credential decides unbind-vs-revoke in forgetMcp.
     if (req.durableKey) mcpDurableKeyById.set(record.id, req.durableKey)
   }
-  outputBuffers.set(record.id, new OutputBuffer())
   const spec = launchSpecFor(req)
   const tmuxName = durableAgentName(req)
   const pty = new PtySession({
@@ -840,7 +855,6 @@ function createSession(req: CreateSessionRequest): SessionSnapshot {
 
   const forwardOutput = (data: string): void => {
     send(Channels.sessionData, { id: record.id, data })
-    outputBuffers.get(record.id)?.append(data)
     // Claude's registry is authoritative wherever we can join to it; scraping
     // the byte stream is the fallback for everything else. Checked per chunk (not
     // once at spawn) so a session whose registry record disappears mid-flight
@@ -1122,6 +1136,14 @@ function registerIpc(): void {
     (_e, requestId: string, result: { paneId?: string; error?: string }) => {
       spawnPending.get(requestId)?.(
         result.paneId ? { paneId: result.paneId } : { error: result.error ?? 'spawn failed' }
+      )
+    }
+  )
+  ipcMain.on(
+    Channels.mcpTailResult,
+    (_e, requestId: string, result: { lines?: string[]; error?: string }) => {
+      tailPending.get(requestId)?.(
+        result.lines ? { lines: result.lines } : { error: result.error ?? 'tail failed' }
       )
     }
   )

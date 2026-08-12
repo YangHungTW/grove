@@ -37,3 +37,22 @@ export function bufferLastLine(term: Terminal): string | null {
   }
   return null
 }
+
+/**
+ * The last `n` non-empty rows exactly as xterm rendered them, oldest first —
+ * scrollback included. Serves the MCP `tail` tool: a claude pane repaints with
+ * cursor addressing, so the raw pty stream holds interleaved stale frames and
+ * chunk-split escapes; only the resolved buffer holds the screen as lines.
+ * The scan is capped so a huge scrollback can't stall the renderer.
+ */
+export function bufferTail(term: Terminal, n: number, maxScan = 2000): string[] {
+  const buf = term.buffer.active
+  const out: string[] = []
+  const end = buf.baseY + term.rows - 1
+  const floor = Math.max(0, end - maxScan)
+  for (let y = end; y >= floor && out.length < n; y--) {
+    const text = buf.getLine(y)?.translateToString(true).trimEnd() ?? ''
+    if (text.trim()) out.push(text)
+  }
+  return out.reverse()
+}

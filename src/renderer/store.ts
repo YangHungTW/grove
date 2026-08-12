@@ -19,7 +19,7 @@ import { isHttpUrl } from '../core/openTarget'
 import { wrapIndex } from '../core/cycle'
 import { canOpenInIde } from '../core/ideLaunch'
 import { moveBefore, reorderMap } from '../core/sidebarOrder'
-import { bufferLastLine, lastNonEmptyLine } from './lastLine'
+import { bufferLastLine, bufferTail, lastNonEmptyLine } from './lastLine'
 import {
   DEFAULT_SETTINGS,
   SHELL_ICON,
@@ -1867,6 +1867,18 @@ export class Store {
       // Fleet slice: only the Elsewhere list renders this, and it changes every
       // time any claude on the machine flips busy/idle.
       this.notifyFleet()
+    })
+    // An agent asked for another pane's recent output (mcp__grove__tail).
+    // Answered from xterm's RESOLVED buffer: Grove keeps a live Terminal for
+    // every session, visible or not, and only that buffer holds a
+    // cursor-addressed TUI's screen as readable lines.
+    window.api.onMcpTail(({ requestId, sessionId, lines }) => {
+      const term = this.panes.get(sessionId)?.term
+      if (!term) {
+        window.api.mcpTailResult(requestId, { error: 'That pane has no terminal to read.' })
+        return
+      }
+      window.api.mcpTailResult(requestId, { lines: bufferTail(term, Math.min(lines, 200)) })
     })
     // An agent asked for a new pane (mcp__grove__spawn_agent). Spawn WITHOUT
     // stealing focus — delegation is a background act; the user finds the new

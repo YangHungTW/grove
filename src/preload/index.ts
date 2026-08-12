@@ -112,6 +112,11 @@ const api: RendererApi = {
   onMcpSpawn: (cb: (e: McpSpawnRequest) => void) => subscribe(Channels.mcpSpawnRequest, cb),
   mcpSpawnResult: (requestId: string, result: { paneId?: string; error?: string }): void => {
     ipcRenderer.send(Channels.mcpSpawnResult, requestId, result)
+  },
+  onMcpTail: (cb: (e: { requestId: string; sessionId: string; lines: number }) => void) =>
+    subscribe(Channels.mcpTailRequest, cb),
+  mcpTailResult: (requestId: string, result: { lines?: string[]; error?: string }): void => {
+    ipcRenderer.send(Channels.mcpTailResult, requestId, result)
   }
 }
 

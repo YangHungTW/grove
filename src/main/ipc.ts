@@ -51,6 +51,8 @@ export const Channels = {
   mcpLaunch: 'mcp:launch',
   mcpSpawnRequest: 'mcp:spawn-request',
   mcpSpawnResult: 'mcp:spawn-result',
+  mcpTailRequest: 'mcp:tail-request',
+  mcpTailResult: 'mcp:tail-result',
   fleetStop: 'fleet:stop',
   fleetLogs: 'fleet:logs',
   fleetChange: 'fleet:change',
@@ -291,4 +293,9 @@ export interface RendererApi {
   /** An agent asked for a new pane (spawn_agent). Answer via mcpSpawnResult. */
   onMcpSpawn(cb: (e: McpSpawnRequest) => void): () => void
   mcpSpawnResult(requestId: string, result: { paneId?: string; error?: string }): void
+  /** An agent asked for a pane's recent output (tail). The renderer answers
+   * from xterm's RESOLVED buffer — the only place a cursor-addressed TUI's
+   * screen actually exists as lines. Answer via mcpTailResult. */
+  onMcpTail(cb: (e: { requestId: string; sessionId: string; lines: number }) => void): () => void
+  mcpTailResult(requestId: string, result: { lines?: string[]; error?: string }): void
 }

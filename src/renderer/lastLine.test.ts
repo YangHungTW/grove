@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { Terminal } from '@xterm/xterm'
-import { bufferLastLine, lastNonEmptyLine } from './lastLine'
+import { bufferLastLine, bufferTail, lastNonEmptyLine } from './lastLine'
 
 const ESC = '\x1b'
 
@@ -76,5 +76,38 @@ describe('bufferLastLine (xterm-resolved screen)', () => {
 
   it('returns null when the visible screen is empty', () => {
     expect(bufferLastLine(fakeTerm(['', '', '']))).toBeNull()
+  })
+})
+
+describe('bufferTail (MCP tail source)', () => {
+  it('returns the last n non-empty rows, oldest first', () => {
+    expect(bufferTail(fakeTerm(['one', 'two', 'three', 'four']), 2)).toEqual(['three', 'four'])
+  })
+
+  it('skips blank rows so padding does not eat the window', () => {
+    // A TUI leaves blank rows between its panels — they carry no information,
+    // and counting them would let ten blanks push the real content out.
+    expect(bufferTail(fakeTerm(['a', '', '  ', 'b', '']), 2)).toEqual(['a', 'b'])
+  })
+
+  it('reaches back INTO scrollback, unlike bufferLastLine', () => {
+    // 'older' is above baseY (scrollback); tail wants history, not just the
+    // visible screen.
+    expect(bufferTail(fakeTerm(['older', 'newer', ''], 2), 5)).toEqual(['older', 'newer'])
+  })
+
+  it('returns fewer rows when the buffer has fewer', () => {
+    expect(bufferTail(fakeTerm(['only']), 50)).toEqual(['only'])
+  })
+
+  it('caps how far back it scans so a huge scrollback cannot stall', () => {
+    const rows = ['needle', ...Array.from({ length: 50 }, () => '')]
+    // maxScan smaller than the blank run: the needle is out of reach — by
+    // design, the scan must be bounded even when nothing has matched yet.
+    expect(bufferTail(fakeTerm(rows), 5, 10)).toEqual([])
+  })
+
+  it('returns empty for an empty screen', () => {
+    expect(bufferTail(fakeTerm(['', '', '']), 5)).toEqual([])
   })
 })
