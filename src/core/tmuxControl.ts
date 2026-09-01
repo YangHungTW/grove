@@ -21,6 +21,10 @@ export interface TmuxControlEvents {
   onExit: (reason?: string) => void
   /** Reply body of a command we sent (between %begin and %end/%error). */
   onReply?: (num: number, lines: string[], error: boolean) => void
+  /** tmux resized the window (`%layout-change`). NOT always our doing: any other
+   * client attached to the same tmux session drags the window to its own size,
+   * which silently shrinks the agent's drawing area inside our full-size pane. */
+  onLayoutChange?: (windowId: string, cols: number, rows: number) => void
   /** A `%`-notification we don't handle — surfaced for debug logging. */
   onOther?: (line: string) => void
 }
@@ -45,6 +49,17 @@ export function unescapeOutput(s: string): string {
     }
   }
   return out
+}
+
+/**
+ * The window geometry out of a tmux layout string. The layout is
+ * `<checksum>,<w>x<h>,<x>,<y>[,...]` — the FIRST `WxH` is the window itself
+ * (later ones are its panes), e.g. `ae5d,80x23,0,0,0` for a window tmux has
+ * dragged down to a stray 80x24 client's size.
+ */
+export function parseLayoutSize(layout: string): { cols: number; rows: number } | undefined {
+  const m = /^[0-9a-f]+,(\d+)x(\d+),/.exec(layout.trim())
+  return m ? { cols: Number(m[1]), rows: Number(m[2]) } : undefined
 }
 
 export class TmuxControlParser {
@@ -110,8 +125,15 @@ export class TmuxControlParser {
       this.ev.onExit(line.length > 6 ? line.slice(6) : undefined)
       return
     }
-    // Everything else (%layout-change, %window-add, %session-changed, ...) is
-    // not needed to render a single pane — surface for debug only.
+    if (line.startsWith('%layout-change ')) {
+      // `%layout-change @0 <window-layout> <window-visible-layout> <flags>`
+      const [, windowId, layout] = line.split(' ')
+      const size = layout ? parseLayoutSize(layout) : undefined
+      if (size) this.ev.onLayoutChange?.(windowId, size.cols, size.rows)
+      return
+    }
+    // Everything else (%window-add, %session-changed, ...) is not needed to
+    // render a single pane — surface for debug only.
     this.ev.onOther?.(line)
   }
 }

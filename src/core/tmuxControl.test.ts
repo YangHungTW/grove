@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { TmuxControlParser, unescapeOutput, toSendKeysHex } from './tmuxControl'
+import {
+  TmuxControlParser,
+  unescapeOutput,
+  toSendKeysHex,
+  parseLayoutSize
+} from './tmuxControl'
 
 describe('unescapeOutput', () => {
   it('passes printable ASCII through literally', () => {
@@ -108,5 +113,47 @@ describe('TmuxControlParser', () => {
     })
     p.feed('%window-add @3\n')
     expect(others).toEqual(['%window-add @3'])
+  })
+
+  it('reports the window geometry from %layout-change', () => {
+    const sizes: { cols: number; rows: number }[] = []
+    const others: string[] = []
+    const p = new TmuxControlParser({
+      onOutput: () => {},
+      onExit: () => {},
+      onLayoutChange: (_w, cols, rows) => sizes.push({ cols, rows }),
+      onOther: (l) => others.push(l)
+    })
+    // Verified against tmux 3.6b: a stray 80x24 client drags the window down.
+    p.feed('%layout-change @0 ae5d,80x23,0,0,0 ae5d,80x23,0,0,0 *\n')
+    expect(sizes).toEqual([{ cols: 80, rows: 23 }])
+    expect(others).toEqual([]) // handled, not passed through as unknown
+  })
+
+  it('ignores a %layout-change whose layout it cannot parse', () => {
+    const sizes: unknown[] = []
+    const p = new TmuxControlParser({
+      onOutput: () => {},
+      onExit: () => {},
+      onLayoutChange: (_w, cols, rows) => sizes.push({ cols, rows })
+    })
+    p.feed('%layout-change @0\n')
+    expect(sizes).toEqual([])
+  })
+})
+
+describe('parseLayoutSize', () => {
+  it('takes the WINDOW size, not the first pane', () => {
+    expect(parseLayoutSize('ac9d,200x50,0,0,0')).toEqual({ cols: 200, rows: 50 })
+    // Split window: `<window>{<pane>,<pane>}` — the window geometry still leads.
+    expect(parseLayoutSize('a1b2,200x50,0,0{ac9d,100x50,0,0,1,ae5d,99x50,101,0,2}')).toEqual({
+      cols: 200,
+      rows: 50
+    })
+  })
+
+  it('returns undefined for a malformed layout', () => {
+    expect(parseLayoutSize('')).toBeUndefined()
+    expect(parseLayoutSize('nope')).toBeUndefined()
   })
 })

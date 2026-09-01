@@ -103,7 +103,7 @@ const ptys = new Map<string, PtySession>()
 // Control-mode (CCM_TMUX=control) sessions: the pty runs `tmux -CC`, so its
 // stdin/out is the tmux protocol, not raw terminal I/O. Input/resize must be
 // translated to tmux commands instead of written to the pty directly.
-const control = new Map<string, { name: string }>()
+const control = new Map<string, { name: string; want?: { cols: number; rows: number }; fixes: number }>()
 // Claude's own session registry (~/.claude/sessions/<pid>.json): authoritative
 // busy/idle/waiting, computed from the CLI's UI state rather than scraped out of
 // its output. `agentSessionIds` is the join — Grove session id → the uuid Grove
@@ -550,6 +550,56 @@ function writeToPane(id: string, data: string): void {
   ptys.get(id)?.write(data)
 }
 
+/** How many times one disagreement with tmux is worth re-asserting. A foreign
+ * client BIGGER than our pane keeps winning under `window-size largest`, and
+ * re-sending forever would be a write loop against the control connection. */
+const MAX_SIZE_FIXES = 3
+
+/**
+ * Size the tmux window to the pane, and remember the size we asked for so a
+ * later %layout-change that disagrees can be corrected.
+ *
+ * `refresh-client -C` (never `resize-window`, which freezes window-size to
+ * manual and makes every later refresh-client a no-op) — verified against tmux
+ * 3.6b.
+ */
+function sizeTmuxWindow(id: string, cols: number, rows: number): void {
+  const c = control.get(id)
+  if (!c) return
+  c.want = { cols, rows }
+  c.fixes = 0
+  ptys.get(id)?.write(`refresh-client -C ${cols}x${rows}\n`)
+}
+
+/**
+ * tmux resized the window behind our back. This is what makes an agent's UI
+ * "suddenly shrink to half the pane and stay there": ANY other client on the
+ * same tmux session (a stray `tmux attach`, a duplicate pane that reattached to
+ * the same durable key, a leftover client from a crashed Grove) drags the window
+ * to its own geometry — 80x23 for a default terminal, about half a Grove pane —
+ * and the agent redraws into that corner of a full-size xterm. Nothing else ever
+ * corrects it: the renderer only sends a resize when ITS OWN geometry moves, so
+ * the pane stays broken for the life of the session.
+ *
+ * `window-size largest` (set at launch) keeps a smaller stray client from
+ * winning; this re-assert covers the rest.
+ */
+function onTmuxLayoutChange(id: string, cols: number, rows: number): void {
+  const c = control.get(id)
+  if (!c?.want) return
+  if (cols === c.want.cols && rows === c.want.rows) {
+    c.fixes = 0
+    return
+  }
+  if (process.env.CCM_DEBUG_RESIZE)
+    console.log(
+      `[resize] ${id} tmux window went to ${cols}x${rows}, want ${c.want.cols}x${c.want.rows}`
+    )
+  if (c.fixes >= MAX_SIZE_FIXES) return
+  c.fixes++
+  ptys.get(id)?.write(`refresh-client -C ${c.want.cols}x${c.want.rows}\n`)
+}
+
 /**
  * Mint one agent's MCP credentials and write its config file. Returns null when
  * the server never bound — Grove then launches the agent with no flag at all
@@ -882,10 +932,11 @@ function createSession(req: CreateSessionRequest): SessionSnapshot {
         control.delete(record.id)
         forgetRegistryJoin(record.id)
       },
+      onLayoutChange: (_win, cols, rows) => onTmuxLayoutChange(record.id, cols, rows),
       onOther: process.env.CCM_TMUX_DEBUG ? (l) => console.error('[tmux]', l) : undefined
     })
     pty.onData((d) => parser.feed(d))
-    control.set(record.id, { name: tmuxName })
+    control.set(record.id, { name: tmuxName, fixes: 0 })
   } else {
     pty.onData(forwardOutput)
   }
@@ -920,7 +971,14 @@ function createSession(req: CreateSessionRequest): SessionSnapshot {
   // initial sizing also makes tmux replay the pane so reattach shows content. The
   // renderer's first FitAddon resize is a different size → the resulting SIGWINCH
   // makes the agent repaint (needed because a bare replay does not).
-  if (tmuxName) pty.write(`refresh-client -C ${req.cols ?? 120}x${req.rows ?? 40}\n`)
+  if (tmuxName) {
+    // tmux's default `window-size latest` lets ANY other client on this session
+    // (see onTmuxLayoutChange) shrink the window to its own size — an 80x24
+    // terminal halves the agent's drawing area inside our pane, permanently.
+    // `largest` keeps the biggest client, which is the Grove pane.
+    pty.write(`set-option -t ${tmuxName} window-size largest\n`)
+    sizeTmuxWindow(record.id, req.cols ?? 120, req.rows ?? 40)
+  }
   record.pid = pty.pid
   return snapshot(record)
 }
@@ -1125,7 +1183,7 @@ function registerIpc(): void {
       // Size the tmux window via the control client (auto-released on detach —
       // never resize-window, which freezes window-size to manual). This first
       // resize is also what makes tmux replay the screen at the correct geometry.
-      ptys.get(id)?.write(`refresh-client -C ${cols}x${rows}\n`)
+      sizeTmuxWindow(id, cols, rows)
       return
     }
     ptys.get(id)?.resize(cols, rows)
