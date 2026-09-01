@@ -3,7 +3,9 @@ import {
   TmuxControlParser,
   unescapeOutput,
   toSendKeysHex,
-  parseLayoutSize
+  parseLayoutSize,
+  sendKeysCommands,
+  SEND_KEYS_CHUNK_BYTES
 } from './tmuxControl'
 
 describe('unescapeOutput', () => {
@@ -155,5 +157,35 @@ describe('parseLayoutSize', () => {
   it('returns undefined for a malformed layout', () => {
     expect(parseLayoutSize('')).toBeUndefined()
     expect(parseLayoutSize('nope')).toBeUndefined()
+  })
+})
+
+describe('sendKeysCommands', () => {
+  it('sends a keystroke as a single command', () => {
+    expect(sendKeysCommands('grove-1', 'a')).toEqual(['send-keys -t grove-1 -H 61\n'])
+  })
+
+  it('splits a paste into byte-sized chunks (a single command line stalls tmux)', () => {
+    const paste = 'x'.repeat(1000)
+    const cmds = sendKeysCommands('p1', paste)
+    expect(cmds).toHaveLength(Math.ceil(1000 / SEND_KEYS_CHUNK_BYTES))
+    const bytes = cmds.flatMap((c) => c.trim().split(' -H ')[1].split(' '))
+    expect(bytes).toHaveLength(1000)
+    expect(Buffer.from(bytes.join(''), 'hex').toString('utf8')).toBe(paste)
+  })
+
+  it('chunks on bytes, so a multibyte character can straddle two commands', () => {
+    // 中 is 3 bytes; pad so it starts one byte before a chunk boundary.
+    const text = 'a'.repeat(SEND_KEYS_CHUNK_BYTES - 1) + '中文'
+    const cmds = sendKeysCommands('p1', text)
+    expect(cmds).toHaveLength(2)
+    const bytes = cmds.flatMap((c) => c.trim().split(' -H ')[1].split(' '))
+    // Round-trips exactly: the split character is reassembled from raw bytes,
+    // never re-encoded per chunk (which would yield U+FFFD).
+    expect(Buffer.from(bytes.join(''), 'hex').toString('utf8')).toBe(text)
+  })
+
+  it('sends nothing for empty input', () => {
+    expect(sendKeysCommands('p1', '')).toEqual([])
   })
 })

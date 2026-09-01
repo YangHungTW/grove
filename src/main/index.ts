@@ -60,7 +60,7 @@ import { SettingsStore, type AppSettings } from '../core/settingsStore'
 import type { ResolvedAgent } from '../core/settings'
 import { execFileSync } from 'node:child_process'
 import { detectState } from '../core/stateDetection'
-import { TmuxControlParser, toSendKeysHex } from '../core/tmuxControl'
+import { TmuxControlParser, sendKeysCommands } from '../core/tmuxControl'
 import {
   parseRegistryEntry,
   registryUpdates,
@@ -544,7 +544,8 @@ const mcpHost: McpHost = {
 function writeToPane(id: string, data: string): void {
   const c = control.get(id)
   if (c) {
-    if (data.length) ptys.get(id)?.write(`send-keys -t ${c.name} -H ${toSendKeysHex(data)}\n`)
+    const pty = ptys.get(id)
+    for (const cmd of sendKeysCommands(c.name, data)) pty?.write(cmd)
     return
   }
   ptys.get(id)?.write(data)
@@ -1171,7 +1172,10 @@ function registerIpc(): void {
     const c = control.get(id)
     if (c) {
       // Control mode: deliver keystrokes as hex via send-keys, not raw pty write.
-      if (data.length) ptys.get(id)?.write(`send-keys -t ${c.name} -H ${toSendKeysHex(data)}\n`)
+      // Chunked — one command per 256 bytes; see SEND_KEYS_CHUNK_BYTES for why a
+      // whole paste in a single send-keys stalls and then loses the input.
+      const pty = ptys.get(id)
+      for (const cmd of sendKeysCommands(c.name, data)) pty?.write(cmd)
       return
     }
     ptys.get(id)?.write(data)

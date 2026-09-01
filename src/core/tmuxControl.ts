@@ -142,3 +142,37 @@ export class TmuxControlParser {
 export function toSendKeysHex(data: string): string {
   return [...Buffer.from(data, 'utf8')].map((b) => b.toString(16).padStart(2, '0')).join(' ')
 }
+
+/**
+ * Input BYTES per `send-keys -H` command.
+ *
+ * `-H` spends one command ARGUMENT per byte, so a pasted document becomes a
+ * single command line with tens of thousands of arguments — and tmux's parse of
+ * that is badly superlinear. Measured against tmux 3.6b, round-trip for a paste
+ * echoed back by the pane:
+ *
+ *     paste     one command        256-byte chunks
+ *       8 KB    169 ms                    24 ms
+ *      32 KB    never arrived             58 ms
+ *     128 KB    never arrived            236 ms
+ *
+ * Above ~16 KB the paste is not merely slow, it is LOST — which is what a paste
+ * that "types itself in one character at a time" and then stalls actually is.
+ * Chunking is on BYTES, never on the JS string: splitting a string mid-character
+ * would re-encode the halves as U+FFFD. tmux reassembles a multibyte character
+ * split across two commands (verified byte-identical with CJK + emoji).
+ */
+export const SEND_KEYS_CHUNK_BYTES = 256
+
+/** The `send-keys` commands that deliver `data` to a control-mode pane, in order. */
+export function sendKeysCommands(target: string, data: string): string[] {
+  const bytes = Buffer.from(data, 'utf8')
+  const out: string[] = []
+  for (let i = 0; i < bytes.length; i += SEND_KEYS_CHUNK_BYTES) {
+    const hex = [...bytes.subarray(i, i + SEND_KEYS_CHUNK_BYTES)]
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join(' ')
+    out.push(`send-keys -t ${target} -H ${hex}\n`)
+  }
+  return out
+}
