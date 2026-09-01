@@ -60,7 +60,7 @@ import { SettingsStore, type AppSettings } from '../core/settingsStore'
 import type { ResolvedAgent } from '../core/settings'
 import { execFileSync } from 'node:child_process'
 import { detectState } from '../core/stateDetection'
-import { TmuxControlParser, sendKeysCommands } from '../core/tmuxControl'
+import { TmuxControlParser, sendKeysCommands, paneIdFromReply } from '../core/tmuxControl'
 import {
   parseRegistryEntry,
   registryUpdates,
@@ -103,7 +103,10 @@ const ptys = new Map<string, PtySession>()
 // Control-mode (CCM_TMUX=control) sessions: the pty runs `tmux -CC`, so its
 // stdin/out is the tmux protocol, not raw terminal I/O. Input/resize must be
 // translated to tmux commands instead of written to the pty directly.
-const control = new Map<string, { name: string; want?: { cols: number; rows: number }; fixes: number }>()
+const control = new Map<
+  string,
+  { name: string; want?: { cols: number; rows: number }; fixes: number; pane?: string }
+>()
 // Claude's own session registry (~/.claude/sessions/<pid>.json): authoritative
 // busy/idle/waiting, computed from the CLI's UI state rather than scraped out of
 // its output. `agentSessionIds` is the join — Grove session id → the uuid Grove
@@ -924,7 +927,25 @@ function createSession(req: CreateSessionRequest): SessionSnapshot {
     // pane's real bytes — and they're clean (no tmux chrome), so state detection
     // runs on exactly what xterm renders.
     const parser = new TmuxControlParser({
-      onOutput: (_pane, data) => forwardOutput(data),
+      // Only OUR pane. tmux reports every pane in the window, and an agent can
+      // add panes to it: claude's swarm backend, seeing itself inside tmux, puts
+      // each teammate in the current window with `split-window`. Grove can render
+      // only one pane, so a teammate's output blended into this one is pure
+      // corruption on screen. The launch now hides tmux from the agent (see
+      // buildTmuxControlLaunch), which stops the split happening at all; this is
+      // the second line of defence — a pane split by hand, or one left in a
+      // session Grove reattaches to, must not paint over the agent.
+      onOutput: (pane, data) => {
+        const c = control.get(record.id)
+        if (c?.pane && pane !== c.pane) return
+        forwardOutput(data)
+      },
+      onReply: (_num, lines, error) => {
+        if (error) return
+        const pane = paneIdFromReply(lines)
+        const c = control.get(record.id)
+        if (pane && c && !c.pane) c.pane = pane
+      },
       onExit: () => {
         if (record.state === 'exited') return
         record.state = 'exited'
@@ -979,6 +1000,10 @@ function createSession(req: CreateSessionRequest): SessionSnapshot {
     // `largest` keeps the biggest client, which is the Grove pane.
     pty.write(`set-option -t ${tmuxName} window-size largest\n`)
     sizeTmuxWindow(record.id, req.cols ?? 120, req.rows ?? 40)
+    // Which pane is ours: the one the session was created with (index 0), not
+    // whatever an agent may later split into the window. Read back through
+    // onReply — the only reply Grove takes a pane id from.
+    pty.write(`list-panes -t ${tmuxName} -f '#{==:#{pane_index},0}' -F '#{pane_id}'\n`)
   }
   record.pid = pty.pid
   return snapshot(record)

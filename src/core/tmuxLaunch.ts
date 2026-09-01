@@ -72,6 +72,21 @@ function shSingleQuote(s: string): string {
  * shell that runs the agent is INTERACTIVE (`-ilc`) so it sources .zshrc and the
  * agent inherits the user's real PATH + aliases (e.g. a `claude` alias that adds
  * `--plugin-dir`) — matching the non-durable path and the user's own terminal.
+ *
+ * TMUX/TMUX_PANE are UNSET for the agent. tmux sets them in every pane, and an
+ * agent that sees them concludes the user is sitting in a tmux window and starts
+ * treating it as usable space: claude's swarm backend gates on exactly
+ * `!!process.env.TMUX`, and when it is set it puts each teammate in the CURRENT
+ * window with `split-window -t <pane> -h -l 70%` — which leaves the agent itself
+ * on 30% of the window, then a quarter, as teammates arrive. Grove renders ONE
+ * pane, so a split window is not a layout it can show: the agent's UI appears to
+ * shrink to a corner and stay there, with the teammates' output painted over the
+ * same screen. Unset, the same backend puts its teammates in a separate tmux
+ * session (`tmux attach -t claude` to watch them) and Grove's pane stays whole.
+ *
+ * This is Grove's tmux session being an implementation detail leaking into the
+ * agent: durability is the only reason it exists, and from inside the pane it
+ * should look like the plain terminal the user thinks they are looking at.
  */
 export function buildTmuxControlLaunch(
   shell: string,
@@ -82,6 +97,6 @@ export function buildTmuxControlLaunch(
 ): { command: string; args: string[] } {
   const tmuxCmd =
     `exec tmux -CC new-session -A -s ${name} -x ${cols} -y ${rows} ` +
-    `${shell} -ilc ${shSingleQuote(agentCmd)}`
+    `${shell} -ilc ${shSingleQuote(`unset TMUX TMUX_PANE; ${agentCmd}`)}`
   return { command: shell, args: ['-lc', tmuxCmd] }
 }

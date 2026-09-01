@@ -62,6 +62,21 @@ export function parseLayoutSize(layout: string): { cols: number; rows: number } 
   return m ? { cols: Number(m[1]), rows: Number(m[2]) } : undefined
 }
 
+/**
+ * Our own pane id out of the reply to `list-panes -f '#{==:#{pane_index},0}'`.
+ *
+ * Grove renders exactly ONE pane, but %output carries every pane in the window —
+ * and an agent can add panes to it (claude's swarm splits the current window for
+ * each teammate). Blending those into one screen is the visible half of that bug.
+ * Fails safe by design: only a reply that is exactly one pane id is adopted, and
+ * with none adopted nothing is filtered, so a tmux that does not understand the
+ * query leaves the stream exactly as it was.
+ */
+export function paneIdFromReply(lines: string[]): string | undefined {
+  const ids = lines.filter((l) => l.trim().length)
+  return ids.length === 1 && /^%\d+$/.test(ids[0].trim()) ? ids[0].trim() : undefined
+}
+
 export class TmuxControlParser {
   private buf = ''
   private inBlock = false

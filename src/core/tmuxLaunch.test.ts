@@ -61,14 +61,25 @@ describe('buildTmuxControlLaunch', () => {
     expect(args[1]).toContain('-x 120 -y 40')
     // ...but the INNER shell that runs the agent is interactive (-ilc) so it
     // sources .zshrc and inherits the user's PATH + aliases.
-    expect(args[1]).toContain("/bin/zsh -ilc 'claude'")
+    expect(args[1]).toContain("/bin/zsh -ilc 'unset TMUX TMUX_PANE; claude'")
     expect(args[1].startsWith('exec ')).toBe(true)
   })
 
   it('single-quotes the agent command and escapes embedded quotes', () => {
     const { args } = buildTmuxControlLaunch('/bin/zsh', 'g', 80, 24, "claude --resume 'a b'")
     // The embedded single quotes become the '\'' escape sequence.
-    expect(args[1]).toContain("-ilc 'claude --resume '\\''a b'\\'''")
+    expect(args[1]).toContain("-ilc 'unset TMUX TMUX_PANE; claude --resume '\\''a b'\\'''")
+  })
+
+  it('hides tmux from the agent so it does not split the pane out from under us', () => {
+    // claude's swarm backend gates on !!process.env.TMUX: with it set, every
+    // teammate is a split-window in the CURRENT window, which drops the agent
+    // itself to 30% of a window Grove can only render one pane of. Unset, the
+    // teammates go to the backend's own tmux session instead.
+    const { args } = buildTmuxControlLaunch('/bin/zsh', 'g', 80, 24, 'claude')
+    expect(args[1]).toContain('unset TMUX TMUX_PANE;')
+    // Unset INSIDE the pane's shell — the outer tmux -CC still needs its own env.
+    expect(args[1].indexOf('unset TMUX')).toBeGreaterThan(args[1].indexOf('new-session'))
   })
 })
 

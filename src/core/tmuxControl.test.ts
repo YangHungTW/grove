@@ -4,6 +4,7 @@ import {
   unescapeOutput,
   toSendKeysHex,
   parseLayoutSize,
+  paneIdFromReply,
   sendKeysCommands,
   SEND_KEYS_CHUNK_BYTES
 } from './tmuxControl'
@@ -187,5 +188,21 @@ describe('sendKeysCommands', () => {
 
   it('sends nothing for empty input', () => {
     expect(sendKeysCommands('p1', '')).toEqual([])
+  })
+})
+
+describe('paneIdFromReply', () => {
+  it('adopts the single pane id the list-panes query returns', () => {
+    expect(paneIdFromReply(['%0'])).toBe('%0')
+    expect(paneIdFromReply(['%12', ''])).toBe('%12')
+  })
+
+  it('adopts nothing from any other reply, so filtering fails safe', () => {
+    expect(paneIdFromReply([])).toBeUndefined()
+    expect(paneIdFromReply([''])).toBeUndefined()
+    // An older tmux that cannot filter would answer with every pane — taking the
+    // first would be a guess, and guessing wrong blanks the pane.
+    expect(paneIdFromReply(['%0', '%1'])).toBeUndefined()
+    expect(paneIdFromReply(['grove_x: 1 windows'])).toBeUndefined()
   })
 })
