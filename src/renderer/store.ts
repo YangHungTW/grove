@@ -146,6 +146,7 @@ export class Store {
   zoomedSessionId: string | null = null
   /** Session whose terminal search bar is open (the focused one), or null. */
   searchSessionId: string | null = null
+  private prewarmTimer: number | undefined
   /** Durable agent panes masked while their tmux (re)attach settles (so no
    * half-painted reattach frame is shown). */
   private settling = new Set<string>()
@@ -334,6 +335,13 @@ export class Store {
   ): void {
     const prev = this.panes.get(id)
     this.panes.set(id, { term, fit, search, refit, renderAddon: prev?.renderAddon })
+    // A restored worktree's panes mount one by one, after the fitVisible() that
+    // selectWorktree fired — so the pass that would prewarm this tab (or that
+    // this tab's box would let prewarm the others) has already run. Coalesce the
+    // arrivals into one more pass. Repeat passes are cheap: prevVisible is
+    // already current, so nothing counts as newly shown.
+    window.clearTimeout(this.prewarmTimer)
+    this.prewarmTimer = window.setTimeout(() => this.fitVisible(), 60)
   }
   /** Register (or clear) the pane's renderer addon so imperative repaint paths
    * can reach clearTextureAtlas(). Called by <Pane> when it (re)loads WebGL or
@@ -460,6 +468,46 @@ export class Store {
     return this.settling.has(id)
   }
 
+  /** The ids sharing a pane box with `id` — the tabs of its editor group. */
+  private groupTabsOf(id: string): string[] {
+    const wt = this.sessions.get(id)?.worktreeId
+    if (!wt) return []
+    return this.groupsOf(wt).find((g) => g.ids.includes(id))?.ids ?? []
+  }
+
+  /**
+   * Hand a group's HIDDEN agent tabs the box their visible sibling just measured,
+   * and let their agents redraw into it while nobody is looking.
+   *
+   * A tab that has never been shown sits at xterm's default 80x24, so the first
+   * click on it is not a repaint — it is a resize: SIGWINCH, the agent redraws
+   * its entire UI, and a durable/tmux pane holds the reveal behind the settle
+   * mask (~750ms) while tmux replays the screen. That is the "click a tab, wait
+   * a second, then it appears", paid once per tab AT the click. The hidden tabs
+   * occupy the same grid cell as the visible one, so their size is known long
+   * before the click; doing the work here turns the reveal into a plain repaint
+   * (the settledOnce fast path in fitVisible).
+   *
+   * Only a REAL size change is worth pre-forcing: it is itself the redraw
+   * trigger, and it is what makes tmux fully repaint a replayed screen instead
+   * of leaving it half-painted. A tab that already has the right box is left to
+   * the ordinary reveal path.
+   */
+  private prewarmGroupTabs(visibleId: string, cols: number, rows: number): void {
+    // Zoom gives the pane the whole grid, which is NOT the box these tabs get
+    // back once it is released — prewarming them to it would be wrong.
+    if (cols < 2 || rows < 2 || this.isZoomed()) return
+    for (const id of this.groupTabsOf(visibleId)) {
+      if (id === visibleId || this.settledOnce.has(id)) continue
+      const pane = this.panes.get(id)
+      if (!pane || this.sessions.get(id)?.kind !== 'agent') continue
+      if (pane.term.cols === cols && pane.term.rows === rows) continue
+      this.settledOnce.add(id)
+      pane.term.resize(cols, rows)
+      window.api.sessionResize(id, cols, rows)
+    }
+  }
+
   /** Fit + resize visible panes; nudge newly-shown panes so TUIs repaint. */
   fitVisible(): void {
     const visible = this.visibleSessions()
@@ -481,14 +529,18 @@ export class Store {
           window.api.sessionResize(id, pane.term.cols, pane.term.rows)
         }
         const { cols, rows } = pane.term
+        // The tabs behind this one share its box — get them ready off the click.
+        this.prewarmGroupTabs(id, cols, rows)
         // The rows-1→rows bounce forces a full-screen TUI to repaint. Plain
         // shells don't need it — for them each extra SIGWINCH just reprints
         // the prompt, stacking stale copies in the scrollback.
         if (newlyShown.includes(id) && rows > 1 && this.sessions.get(id)?.kind === 'agent') {
           const firstShow = !this.shownOnce.has(id)
           this.shownOnce.add(id)
-          if (!firstShow) {
-            // Revealed again — a tab switch, or coming back to this worktree.
+          if (!firstShow || this.settledOnce.has(id)) {
+            // Revealed again — a tab switch, or coming back to this worktree —
+            // or shown for the first time after prewarmGroupTabs() already gave
+            // the agent this box to redraw into.
             // xterm kept processing this pane's output the whole time it was
             // hidden, so its buffer is already current and only the CANVAS is
             // stale. Repaint from that buffer instead of falling through to the

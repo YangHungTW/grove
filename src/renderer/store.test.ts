@@ -328,6 +328,63 @@ describe('pane sizing goes through the pane-registered refit', () => {
     expect(api.sessionResize).not.toHaveBeenCalled()
   })
 
+  it('sizes a hidden tab to its group box up front, so revealing it is a repaint', async () => {
+    // A never-shown tab sits at xterm's default 80x24. Left alone, the first
+    // click on it resizes the pty — SIGWINCH, the agent redraws its whole UI,
+    // and a durable pane waits out the settle mask — which is the "click a tab,
+    // wait a second" stall. It shares a grid cell with the visible tab, so the
+    // box is known before the click.
+    const store = new Store()
+    const { wtId, id: first } = await seedAgentSession(store)
+    await store.addSession(wtId, 'agent', {
+      id: 'claude',
+      name: 'Claude',
+      command: 'claude',
+      icon: '★'
+    } as never)
+    const second = store.sessionsOf(wtId)[1].id // added last → the active tab
+    const paneA = fakePane()
+    const paneB = fakePane()
+    store.registerPane(first, paneA.term as never, paneA.fit as never, undefined, paneA.refit)
+    store.registerPane(second, paneB.term as never, paneB.fit as never, undefined, paneB.refit)
+    // The visible tab measured a real pane; the hidden one is still at 80x24.
+    paneB.term.cols = 200
+    paneB.term.rows = 50
+
+    store.fitVisible()
+
+    expect(paneA.term.resize).toHaveBeenCalledWith(200, 50)
+    expect(api.sessionResize).toHaveBeenCalledWith(first, 200, 50)
+
+    // Now reveal it: no second SIGWINCH, just a local repaint.
+    api.sessionResize.mockClear()
+    paneA.term.refresh.mockClear()
+    store.focusSession(first)
+    expect(paneA.term.refresh).toHaveBeenCalled()
+    expect(api.sessionResize).not.toHaveBeenCalled()
+  })
+
+  it('leaves a hidden tab that already has the right box to the normal path', async () => {
+    const store = new Store()
+    const { wtId, id: first } = await seedAgentSession(store)
+    await store.addSession(wtId, 'agent', {
+      id: 'claude',
+      name: 'Claude',
+      command: 'claude',
+      icon: '★'
+    } as never)
+    const paneA = fakePane()
+    const paneB = fakePane()
+    const second = store.sessionsOf(wtId)[1].id
+    store.registerPane(first, paneA.term as never, paneA.fit as never, undefined, paneA.refit)
+    store.registerPane(second, paneB.term as never, paneB.fit as never, undefined, paneB.refit)
+
+    store.fitVisible() // both panes are 80x24 — nothing to force
+
+    expect(paneA.term.resize).not.toHaveBeenCalled()
+    expect(api.sessionResize).not.toHaveBeenCalledWith(first, 80, 24)
+  })
+
   it('a tab switch nudges panes; refocusing the already-active tab does not', async () => {
     const store = new Store()
     const { wtId, id: first } = await seedAgentSession(store)
