@@ -34,6 +34,11 @@ import {
  * output is flowing — see scheduleAtlasClear. */
 const ATLAS_SETTLE_MS = 180
 
+/** How long to give a refresh() before treating the pane as latched off (see
+ * verifyRepaint). xterm renders on the next animation frame, so this is a few
+ * frames of slack, not a guess at how long a repaint takes. */
+const REPAINT_VERIFY_MS = 120
+
 export interface WorktreeView {
   id: string // = path
   path: string
@@ -84,6 +89,9 @@ interface PaneRef {
    * none. Registered separately from the term because <Pane> creates it in a
    * later effect (renderer choice depends on visibility + the GPU setting). */
   renderAddon?: { clearTextureAtlas?: () => void }
+  /** The pane's own element. Needed to un-stick a terminal whose renderer has
+   * been latched off-screen — see Store.unstickPane. */
+  el?: HTMLElement
 }
 
 /** Grove's terminal search (xterm SearchAddon) traverses the full buffer
@@ -186,6 +194,11 @@ export class Store {
   // We coalesce a full refresh per output burst to flush those missed rows.
   private refreshPanes = new Set<string>()
   private refreshScheduled = false
+  /** Panes with a pending "did that refresh actually paint?" check. */
+  private repaintChecks = new Map<string, number>()
+  /** Panes already given the un-stick layout toggle for their current stuck
+   * episode — cleared as soon as one of their refreshes paints again. */
+  private paneUnstuck = new Set<string>()
   // A plain refresh() redraws rows but reuses the GPU glyph atlas, so an
   // in-place rewrite can leave a stale glyph OVERLAID on the fresh one — visible
   // as "doubled" characters in an agent's status row. clearTextureAtlas() forces
@@ -331,10 +344,11 @@ export class Store {
     term: Terminal,
     fit: FitAddon,
     search?: SearchAddon,
-    refit?: () => void
+    refit?: () => void,
+    el?: HTMLElement
   ): void {
     const prev = this.panes.get(id)
-    this.panes.set(id, { term, fit, search, refit, renderAddon: prev?.renderAddon })
+    this.panes.set(id, { term, fit, search, refit, el, renderAddon: prev?.renderAddon })
     // A restored worktree's panes mount one by one, after the fitVisible() that
     // selectWorktree fired — so the pass that would prewarm this tab (or that
     // this tab's box would let prewarm the others) has already run. Coalesce the
@@ -352,9 +366,9 @@ export class Store {
     if (pane) pane.renderAddon = addon ?? undefined
   }
   /** Drop the pane's cached glyph textures so the next redraw re-rasterizes from
-   * scratch. Callers must follow with a refresh() — clearing the atlas alone
-   * does not repaint. Used by the resize/reshow path (fitVisible/<Pane>.refit),
-   * where there is no incoming data to trigger scheduleAtlasClear. */
+   * scratch. Clearing the atlas alone does not repaint, so prefer repaintPane(),
+   * which does both AND checks that the repaint landed. This is the bare
+   * primitive, kept separate because scheduleAtlasClear owns its own timing. */
   clearPaneAtlas(id: string): void {
     this.panes.get(id)?.renderAddon?.clearTextureAtlas?.()
   }
@@ -375,7 +389,98 @@ export class Store {
     const pane = this.panes.get(id)
     if (!pane) return
     pane.renderAddon?.clearTextureAtlas?.()
-    pane.term.refresh(0, pane.term.rows - 1)
+    this.refreshChecked(id)
+  }
+
+  /**
+   * Refresh a pane, confirm the frame it should have produced actually reached
+   * the screen, and un-stick the pane if it did not.
+   *
+   * xterm's `refresh()` is a REQUEST, not a repaint, and two private latches can
+   * swallow it for good:
+   *
+   *  - `RenderService._isPaused`. An IntersectionObserver on the screen element
+   *    pauses rendering whenever the element is off-screen (which is every
+   *    hidden Grove tab). While paused, refreshRows() only sets a "needs full
+   *    refresh" flag; the ONLY thing that clears the pause is a later
+   *    intersection callback.
+   *  - `RenderDebouncer._animationFrame`. refresh() schedules one animation
+   *    frame and returns early for every later call until that frame runs. A
+   *    frame queued while the window was not being painted (still coming up at
+   *    launch, occluded, on another Space) can be dropped, and the debouncer
+   *    then rejects every subsequent refresh forever.
+   *
+   * Both are invisible from the public API, and every Grove repaint path —
+   * incoming pty output, the reveal/resize refit, the atlas clear, the occlusion
+   * repaint — funnels through the same two gates. A latched pane therefore shows
+   * a permanently black screen over a perfectly good buffer, and stays black
+   * through typing and window resizes (both just call refresh again). Dragging a
+   * selection across it paints it, because selection is the one path that
+   * reaches the renderer directly. That is also the way out.
+   *
+   * Cheap by construction: a healthy pane fires onRender within a frame and
+   * nothing else happens.
+   */
+  private refreshChecked(id: string): void {
+    const pane = this.panes.get(id)
+    if (!pane) return
+    const { term } = pane
+    // Don't judge a pane that is off screen. A hidden tab is paused BY DESIGN —
+    // that is xterm's observer doing its job, and the pane repaints on reveal —
+    // so nudging it would charge every hidden streaming agent a full redraw per
+    // burst for something nobody can see. A check already in flight judges for us.
+    if (this.repaintChecks.has(id) || pane.el?.style.display === 'none') {
+      term.refresh(0, term.rows - 1)
+      return
+    }
+    // Subscribe BEFORE asking, so a renderer that paints synchronously counts.
+    let painted = false
+    const sub = term.onRender(() => {
+      painted = true
+    })
+    term.refresh(0, term.rows - 1)
+    this.repaintChecks.set(
+      id,
+      window.setTimeout(() => {
+        this.repaintChecks.delete(id)
+        sub.dispose()
+        if (painted) {
+          this.paneUnstuck.delete(id)
+          return
+        }
+        this.unstickPane(id)
+      }, REPAINT_VERIFY_MS)
+    )
+  }
+
+  /** Force a latched pane to paint. Step 1 cures `_isPaused` by making the
+   * screen element leave and re-enter the viewport, so xterm's own observer
+   * fires and flushes the full refresh it queued. Step 2 covers the debouncer
+   * latch, which nothing can reset from outside: a selection change reaches the
+   * renderer directly, past both gates. Step 1 runs at most once per stuck
+   * episode (it costs a layout and a SIGWINCH); step 2 runs every time, so a
+   * pane that stays latched still repaints on each burst of output. */
+  private unstickPane(id: string): void {
+    const pane = this.panes.get(id)
+    if (!pane) return
+    const paint = (): void => {
+      // Only when the user has no selection of their own: clearing theirs would
+      // undo the very thing they used to read the pane.
+      if (!pane.term.hasSelection()) pane.term.clearSelection()
+    }
+    const el = pane.el
+    if (el && !this.paneUnstuck.has(id) && el.style.display !== 'none') {
+      this.paneUnstuck.add(id)
+      el.style.display = 'none'
+      requestAnimationFrame(() => {
+        // React owns this style and will set it back on its next render; writing
+        // it here keeps the pane visible in the meantime.
+        el.style.display = 'block'
+        requestAnimationFrame(paint)
+      })
+      return
+    }
+    paint()
   }
   /** Repaint a pane on the trailing edge of a wheel burst.
    *
@@ -405,8 +510,10 @@ export class Store {
     setTimeout(() => {
       this.refreshScheduled = false
       for (const pid of this.refreshPanes) {
-        const term = this.panes.get(pid)?.term
-        if (term) term.refresh(0, term.rows - 1)
+        // No atlas clear here (that is scheduleAtlasClear's job, and paying for
+        // it per burst was measured as pure cost) — but every burst is still a
+        // chance to notice a pane whose renderer has latched off, and to fix it.
+        this.refreshChecked(pid)
       }
       this.refreshPanes.clear()
     }, 80)
@@ -462,6 +569,9 @@ export class Store {
     this.shownOnce.delete(id)
     window.clearTimeout(this.atlasTimers.get(id))
     this.atlasTimers.delete(id)
+    window.clearTimeout(this.repaintChecks.get(id))
+    this.repaintChecks.delete(id)
+    this.paneUnstuck.delete(id)
   }
   /** True while a durable agent pane is masked during its (re)attach settle. */
   isSettling(id: string): boolean {

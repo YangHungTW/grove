@@ -286,8 +286,9 @@ function Pane({
             // Drop the glyph atlas before repainting: a resize/reshow is a prime
             // spot for a stale glyph left overlaid by an agent's in-place status
             // rewrite, and no incoming data will trigger scheduleAtlasClear here.
-            store.clearPaneAtlas(session.id)
-            term.refresh(0, term.rows - 1) // full repaint (new/reshown pane)
+            // Via the store, so the repaint is CHECKED (see verifyRepaint): a
+            // reshow is exactly where xterm's renderer can still be latched off.
+            store.repaintPane(session.id) // full repaint (new/reshown pane)
             repainted = true
           }
         }
@@ -297,8 +298,7 @@ function Pane({
       // A pane re-shown at the SAME size skips the resize above — but the WebGL
       // renderer can come back blank/stale from display:none, so repaint anyway.
       if (reshown && !repainted) {
-        store.clearPaneAtlas(session.id)
-        term.refresh(0, term.rows - 1)
+        store.repaintPane(session.id)
       }
       if (lastSent.cols < 0) {
         sendResize()
@@ -309,7 +309,7 @@ function Pane({
     }
     const ro = new ResizeObserver(refit)
     ro.observe(el)
-    store.registerPane(session.id, term, fit, search, refit)
+    store.registerPane(session.id, term, fit, search, refit, el)
 
     // Scrolling past the end of the scrollback blanks the WebGL canvas and
     // nothing asks for a redraw afterwards (see Store.scheduleScrollRepaint).

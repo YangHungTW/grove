@@ -226,18 +226,39 @@ describe('startTask (New task flow)', () => {
 // term.resize mirrors xterm (updates cols/rows) so the bounce logic in
 // fitVisible reads back what it wrote.
 function fakePane(): {
-  term: { cols: number; rows: number } & Record<string, ReturnType<typeof vi.fn>>
+  term: { cols: number; rows: number; paints: boolean; selected: boolean } & Record<
+    string,
+    ReturnType<typeof vi.fn>
+  >
   fit: { fit: ReturnType<typeof vi.fn> }
   refit: ReturnType<typeof vi.fn>
 } {
+  const rendered = new Set<() => void>()
   const term = {
     cols: 80,
     rows: 24,
+    // Whether a refresh() actually reaches the screen. Real xterm can silently
+    // swallow it (a paused render service, or a debouncer holding an animation
+    // frame that never ran) — see Store.verifyRepaint. Flip this to false to be
+    // a latched pane.
+    paints: true,
+    selected: false,
     resize: vi.fn((c: number, r: number) => {
       term.cols = c
       term.rows = r
     }),
-    refresh: vi.fn(),
+    refresh: vi.fn(() => {
+      if (term.paints) for (const cb of rendered) cb()
+    }),
+    onRender: vi.fn((cb: () => void) => {
+      rendered.add(cb)
+      return { dispose: () => rendered.delete(cb) }
+    }),
+    hasSelection: vi.fn(() => term.selected),
+    // The one repaint path neither of xterm's gates can swallow.
+    clearSelection: vi.fn(() => {
+      for (const cb of rendered) cb()
+    }),
     focus: vi.fn(),
     dispose: vi.fn(),
     // Enough of the write/read surface for the onSessionData path: xterm parses
@@ -450,6 +471,118 @@ describe('renderer-atlas plumbing (stale-glyph / doubled status-row fix)', () =>
 
     store.clearPaneAtlas('s1')
     expect(clearTextureAtlas).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('a pane whose renderer has latched off still gets painted', () => {
+  // xterm's refresh() is a request, not a repaint: RenderService drops it while
+  // its IntersectionObserver has the screen marked off-screen, and RenderDebouncer
+  // drops it while an animation frame it queued has never run. Either latch leaves
+  // a black pane over a good buffer, and neither clears on its own — typing and
+  // resizing just call refresh again. Grove must notice and force the paint.
+  beforeEach(() => {
+    installApi()
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  const register = (store: Store, pane: ReturnType<typeof fakePane>): HTMLElement => {
+    const el = document.createElement('div')
+    el.style.display = 'block'
+    document.body.appendChild(el)
+    store.registerPane('s1', pane.term as never, pane.fit as never, undefined, pane.refit, el)
+    return el
+  }
+
+  it('a healthy pane is left alone — no selection nudge, no layout toggle', async () => {
+    const store = new Store()
+    const pane = fakePane()
+    const el = register(store, pane)
+
+    store.repaintPane('s1')
+    await vi.advanceTimersByTimeAsync(500)
+
+    expect(pane.term.refresh).toHaveBeenCalled()
+    expect(pane.term.clearSelection).not.toHaveBeenCalled()
+    expect(el.style.display).toBe('block')
+  })
+
+  it('a latched pane is forced to paint via the selection path', async () => {
+    const store = new Store()
+    const pane = fakePane()
+    pane.term.paints = false // refresh() reaches nothing
+    register(store, pane)
+
+    store.repaintPane('s1')
+    await vi.advanceTimersByTimeAsync(500)
+
+    expect(pane.term.clearSelection).toHaveBeenCalled()
+  })
+
+  it('leaves a selection the user made alone — it is how they are reading the pane', async () => {
+    const store = new Store()
+    const pane = fakePane()
+    pane.term.paints = false
+    pane.term.selected = true
+    register(store, pane)
+
+    store.repaintPane('s1')
+    await vi.advanceTimersByTimeAsync(500)
+
+    expect(pane.term.clearSelection).not.toHaveBeenCalled()
+  })
+
+  it('keeps forcing the paint on later output, so a still-latched pane stays live', async () => {
+    const store = new Store()
+    const pane = fakePane()
+    pane.term.paints = false
+    register(store, pane)
+
+    store.repaintPane('s1')
+    await vi.advanceTimersByTimeAsync(500)
+    const first = pane.term.clearSelection.mock.calls.length
+    expect(first).toBeGreaterThan(0)
+
+    // A burst of agent output arrives: the ordinary refresh is swallowed again,
+    // so the pane must be forced again rather than going stale.
+    store.repaintPane('s1')
+    await vi.advanceTimersByTimeAsync(500)
+    expect(pane.term.clearSelection.mock.calls.length).toBeGreaterThan(first)
+  })
+
+  it('leaves a HIDDEN pane paused — that is xterm doing its job, not a fault', async () => {
+    const store = new Store()
+    const pane = fakePane()
+    pane.term.paints = false
+    const el = register(store, pane)
+    el.style.display = 'none' // another tab is on screen
+
+    // A hidden agent streaming output must not be charged a forced full redraw
+    // per burst for a screen nobody is looking at; it repaints on reveal.
+    store.repaintPane('s1')
+    await vi.advanceTimersByTimeAsync(500)
+
+    expect(pane.term.refresh).toHaveBeenCalled()
+    expect(pane.term.clearSelection).not.toHaveBeenCalled()
+    expect(el.style.display).toBe('none')
+  })
+
+  it('stops forcing once the pane paints again', async () => {
+    const store = new Store()
+    const pane = fakePane()
+    pane.term.paints = false
+    register(store, pane)
+    store.repaintPane('s1')
+    await vi.advanceTimersByTimeAsync(500)
+    pane.term.clearSelection.mockClear()
+
+    pane.term.paints = true // the latch cleared
+    store.repaintPane('s1')
+    await vi.advanceTimersByTimeAsync(500)
+
+    expect(pane.term.clearSelection).not.toHaveBeenCalled()
   })
 })
 

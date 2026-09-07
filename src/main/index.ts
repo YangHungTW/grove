@@ -989,10 +989,15 @@ function createSession(req: CreateSessionRequest): SessionSnapshot {
     registry.removeSession(record.id)
     throw err
   }
-  // A control client is inert at tmux's default 80x23 until told its size; this
-  // initial sizing also makes tmux replay the pane so reattach shows content. The
-  // renderer's first FitAddon resize is a different size → the resulting SIGWINCH
-  // makes the agent repaint (needed because a bare replay does not).
+  // A control client is inert at tmux's default 80x23 until told its size.
+  //
+  // Note what this does NOT do: tmux control mode never replays a pane's screen.
+  // Measured against tmux 3.6b — attaching to a live session, with or without
+  // this refresh-client, produces no %output at all. Everything a reattached
+  // pane shows is the AGENT redrawing itself on SIGWINCH, which is why the
+  // renderer forces a real size change on reveal (see Store.fitVisible's durable
+  // settle bounce). An agent that ignores SIGWINCH comes back to a blank pane
+  // until it prints something of its own.
   if (tmuxName) {
     // tmux's default `window-size latest` lets ANY other client on this session
     // (see onTmuxLayoutChange) shrink the window to its own size — an 80x24
