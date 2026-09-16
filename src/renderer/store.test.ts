@@ -669,14 +669,17 @@ describe('atlas clear under sustained output (garbled cost row while an agent ru
   ): {
     store: Store
     clears: Record<string, ReturnType<typeof vi.fn>>
+    terms: Record<string, ReturnType<typeof fakePane>['term']>
     emit: (id: string) => void
   } {
     const { api } = installApi()
     const store = new Store()
     const wtId = '/tmp/repo-wt'
     const clears: Record<string, ReturnType<typeof vi.fn>> = {}
+    const terms: Record<string, ReturnType<typeof fakePane>['term']> = {}
     for (const id of ids) {
       const pane = fakePane()
+      terms[id] = pane.term
       store.sessions.set(id, { id, worktreeId: wtId, kind: 'agent' } as never)
       store.registerPane(id, pane.term as never, pane.fit as never)
       clears[id] = vi.fn()
@@ -690,7 +693,7 @@ describe('atlas clear under sustained output (garbled cost row while an agent ru
     store.activeWorktreeId = hidden ? '/tmp/other-wt' : wtId
     store.wireEvents()
     const onData = api.onSessionData.mock.calls[0][0] as (e: { id: string; data: string }) => void
-    return { store, clears, emit: (id) => onData({ id, data: 'cost: $5.03\r' }) }
+    return { store, clears, terms, emit: (id) => onData({ id, data: 'cost: $5.03\r' }) }
   }
 
   function streamingPane(): { clearTextureAtlas: ReturnType<typeof vi.fn>; emit: () => void } {
@@ -698,22 +701,53 @@ describe('atlas clear under sustained output (garbled cost row while an agent ru
     return { clearTextureAtlas: clears.s1, emit: () => emit('s1') }
   }
 
+
   beforeEach(() => vi.useFakeTimers())
   afterEach(() => vi.useRealTimers())
 
-  it('does NOT clear while a pane is streaming — deliberately', () => {
+  it('repairs a STREAMING pane too, on a bounded cadence', () => {
     const { clearTextureAtlas, emit } = streamingPane()
-    // A live agent: one chunk every 50ms for a second, all inside the 180ms
-    // settle window. 0.9.2 made the clear fire ~2.5x a second here, to try to
-    // repair a garbled cost row; it did not (that is a fault in xterm's WebGL
-    // renderer), and it charged every streaming pane a full glyph
-    // re-rasterization several times a second for nothing. Assert the absence so
-    // the cap is not reintroduced on the same disproven theory.
+    // A live agent: one chunk every 50ms, all inside the 180ms settle window.
+    // A plain trailing debounce is reset by every one of them, so the repair
+    // never ran on a pane that kept talking — which is exactly the pane whose
+    // cost row is being rewritten in place, and exactly the row users saw stuck
+    // on a stale value with solid blocks after it until they dragged a selection
+    // over it. Quiet panes still repair once on the settle; a talking pane may
+    // postpone the repair, but not indefinitely.
     for (let i = 0; i < 20; i++) {
       emit()
       vi.advanceTimersByTime(50)
     }
-    expect(clearTextureAtlas).not.toHaveBeenCalled()
+    expect(clearTextureAtlas).toHaveBeenCalled()
+  })
+
+  it('repairs a streaming pane about once a second, not once per chunk', () => {
+    const { clearTextureAtlas, emit } = streamingPane()
+    // The cost of the repair is a full glyph re-rasterization, so the ceiling
+    // has to stay a ceiling: two seconds of solid output is ~2 repairs, not 40.
+    for (let i = 0; i < 40; i++) {
+      emit()
+      vi.advanceTimersByTime(50)
+    }
+    expect(clearTextureAtlas.mock.calls.length).toBeLessThanOrEqual(3)
+  })
+
+  it('forces the redraw the way a user does, by hand, with a selection', () => {
+    // Dragging a selection over a garbled row is what people discover fixes it;
+    // it reaches the renderer by a different door than refresh(). The repair
+    // does the same, and leaves a selection the user made alone.
+    const { clears, terms, emit } = streamingPanes(['s1'])
+    emit('s1')
+    vi.advanceTimersByTime(200)
+    expect(clears.s1).toHaveBeenCalled()
+    expect(terms.s1.clearSelection).toHaveBeenCalled()
+
+    // A selection of the user's own is theirs to keep.
+    terms.s1.clearSelection.mockClear()
+    terms.s1.selected = true
+    emit('s1')
+    vi.advanceTimersByTime(200)
+    expect(terms.s1.clearSelection).not.toHaveBeenCalled()
   })
 
   it('clears once when a burst finally ends, not once per chunk', () => {

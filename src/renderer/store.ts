@@ -20,6 +20,7 @@ import { wrapIndex } from '../core/cycle'
 import { canOpenInIde } from '../core/ideLaunch'
 import { moveBefore, reorderMap } from '../core/sidebarOrder'
 import { bufferLastLine, bufferTail, lastNonEmptyLine } from './lastLine'
+import { nextAtlasClearDelay } from '../core/repaintCadence'
 import {
   DEFAULT_SETTINGS,
   SHELL_ICON,
@@ -29,10 +30,6 @@ import {
   type ResolvedAgent
 } from '../core/settings'
 
-/** How quiet a pane's output must go before its glyph atlas is cleared and
- * repainted. Deliberately a plain trailing debounce: a clear NEVER fires while
- * output is flowing — see scheduleAtlasClear. */
-const ATLAS_SETTLE_MS = 180
 
 /** How long to give a refresh() before treating the pane as latched off (see
  * verifyRepaint). xterm renders on the next animation frame, so this is a few
@@ -207,6 +204,8 @@ export class Store {
   // Per pane, not one shared timer: panes stream independently, and a shared
   // timer made every streaming pane re-rasterize in the same frame.
   private atlasTimers = new Map<string, number>()
+  /** When each pane started putting off its full repaint by continuing to talk. */
+  private atlasDeferredSince = new Map<string, number>()
   // Panes wheeled since the last scroll-repaint tick — see scheduleScrollRepaint.
   private scrollPanes = new Set<string>()
   private scrollTimer: ReturnType<typeof setTimeout> | undefined
@@ -518,31 +517,54 @@ export class Store {
       this.refreshPanes.clear()
     }, 80)
   }
-  /** Clear the glyph atlas once a pane's output settles, then repaint — flushes
-   * a stale glyph left overlaid by an in-place rewrite (doubled status-row text).
+  /**
+   * Fully repair a pane's screen: clear the renderer's glyph atlas AND its
+   * cached cell model, then repaint the viewport from the buffer.
    *
-   * A plain trailing debounce, reset per chunk, so it does NOT fire mid-stream:
-   * pty chunks arrive far closer together than the settle window. That is
-   * deliberate, and was measured. 0.9.2 capped the deferral so a clear would fire
-   * ~2.5x a second during a live agent, on the theory that it would repair the
-   * garbled cost row users were seeing. It did not — that turned out to be a
-   * fault in xterm's WebGL renderer (Settings → GPU terminal rendering is the
-   * escape hatch), and the cap was left charging every streaming pane a full
-   * glyph re-rasterization several times a second for nothing. Restoring the cap
-   * is not the fix; if the garbled row is what you are chasing, it is upstream of
-   * this method entirely. */
+   * This is the strong repaint, and it is the one that fixes a status row an
+   * agent rewrote in place — a stale cost value with solid blocks where the new
+   * text runs past the end of the old. A plain refresh() does not: the renderer
+   * still believes those cells are the ones it already drew. clearTextureAtlas()
+   * discards the model as well as the glyphs, which is what forces the row to be
+   * rebuilt from what the buffer actually says.
+   *
+   * The selection nudge is there because it is the step users discover for
+   * themselves: dragging across a garbled row is what makes it come good, and it
+   * reaches the renderer by a different door than refresh() does. It is skipped
+   * when the user has a selection of their own, which would be theirs to keep.
+   */
+  private forceFullRedraw(id: string): void {
+    const pane = this.panes.get(id)
+    if (!pane) return
+    pane.renderAddon?.clearTextureAtlas?.()
+    pane.term.refresh(0, pane.term.rows - 1)
+    if (!pane.term.hasSelection()) pane.term.clearSelection()
+  }
+
+  /**
+   * Repair a pane's screen once its output settles — and, for a pane that never
+   * settles, at least once per ATLAS_MAX_DEFER_MS.
+   *
+   * The trailing debounce alone was the bug. It is reset on every chunk, and a
+   * live TUI's chunks arrive far closer together than the settle window, so the
+   * repair never reached a streaming pane at all: exactly the pane whose cost row
+   * was being rewritten in place, and exactly the row that came out garbled. It
+   * stayed garbled until the user dragged a selection over it.
+   *
+   * Hidden panes are still skipped. Nothing draws them, so a repair there only
+   * costs a re-rasterization no one sees; <Pane> repairs on reshow, which is
+   * where it matters.
+   */
   private scheduleAtlasClear(id: string): void {
     window.clearTimeout(this.atlasTimers.get(id))
+    const since = this.atlasDeferredSince.get(id) ?? Date.now()
+    this.atlasDeferredSince.set(id, since)
     const timer = window.setTimeout(() => {
       this.atlasTimers.delete(id)
-      const pane = this.panes.get(id)
-      // Nothing draws a hidden pane (another tab or worktree), so clearing its
-      // atlas only costs a re-rasterization no one sees. <Pane> clears the atlas
-      // on reshow, which is where it does matter.
-      if (!pane || !this.visibleSessions().includes(id)) return
-      pane.renderAddon?.clearTextureAtlas?.()
-      pane.term.refresh(0, pane.term.rows - 1)
-    }, ATLAS_SETTLE_MS)
+      this.atlasDeferredSince.delete(id)
+      if (!this.panes.has(id) || !this.visibleSessions().includes(id)) return
+      this.forceFullRedraw(id)
+    }, nextAtlasClearDelay(since, Date.now()))
     this.atlasTimers.set(id, timer)
   }
   /** Record a session's latest bottom line for its sidebar card, coalescing the
@@ -569,6 +591,7 @@ export class Store {
     this.shownOnce.delete(id)
     window.clearTimeout(this.atlasTimers.get(id))
     this.atlasTimers.delete(id)
+    this.atlasDeferredSince.delete(id)
     window.clearTimeout(this.repaintChecks.get(id))
     this.repaintChecks.delete(id)
     this.paneUnstuck.delete(id)
