@@ -50,6 +50,7 @@ export const Channels = {
   fleetList: 'fleet:list',
   mcpLaunch: 'mcp:launch',
   mcpSpawnRequest: 'mcp:spawn-request',
+  windowRepaint: 'window:repaint',
   mcpSpawnResult: 'mcp:spawn-result',
   mcpTailRequest: 'mcp:tail-request',
   mcpTailResult: 'mcp:tail-result',
@@ -287,6 +288,10 @@ export interface RendererApi {
   onSessionExit(cb: (e: SessionExitEvent) => void): () => void
   /** A clicked OS notification asks the renderer to focus that session. */
   onNotifyJump(cb: (e: { id: string }) => void): () => void
+  /** The window's drawing surface was rebuilt (waking from sleep, or the GPU
+   * process coming back) — repaint every pane. Main can force Chromium to
+   * re-composite, but only the renderer can redraw an xterm canvas. */
+  onWindowRepaint(cb: () => void): () => void
   /** A per-project create/remove hook exited non-zero (or failed to spawn). */
   onHookFailed(cb: (e: HookFailedEvent) => void): () => void
   /** Claude's session registry changed — the fleet list is pushed rather than

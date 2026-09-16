@@ -2192,6 +2192,11 @@ export class Store {
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) this.repaintAllPanes()
     })
+    // Main rebuilt the window's drawing surface after a sleep or a GPU process
+    // loss. Neither fires a focus or visibility event — the window never went
+    // away, its pixels just stopped being real — so this is the only signal
+    // that reaches the panes on that path.
+    window.api.onWindowRepaint(() => this.repaintAllPanes())
   }
 }
 

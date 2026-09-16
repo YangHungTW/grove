@@ -4,6 +4,7 @@ import {
   Notification,
   dialog,
   ipcMain,
+  powerMonitor,
   protocol,
   shell,
   type IpcMainInvokeEvent
@@ -26,6 +27,11 @@ import { GroveMcpServer, type McpHost } from './mcpServer'
 import { resolveTarget, sendGuard, type PaneRef } from '../core/paneTargets'
 import { McpStateStore, pruneDurable } from '../core/mcpStateStore'
 import { stripAnsi } from '../core/ansi'
+import {
+  shouldRecoverFromProcessGone,
+  canRebuildSurface,
+  REPAINT_NUDGE_MS
+} from '../core/gpuRecovery'
 import { homedir } from 'node:os'
 import { stat as statAsync, readFile as readFileAsync } from 'node:fs/promises'
 import { SessionRegistry } from '../core/sessionRegistry'
@@ -277,6 +283,70 @@ function applyAppearance(s: AppSettings): void {
   } catch {
     /* vibrancy unsupported on this platform */
   }
+}
+
+/**
+ * Rebuild the window's drawing surface and repaint what is on it.
+ *
+ * The problem this solves: after a long idle — the machine or just the display
+ * asleep — Chromium can come back with the window's compositing surface gone.
+ * The app is alive, timers run, agents keep streaming, but not one pixel
+ * updates, sidebar included, and nothing notices. Quitting and relaunching was
+ * the only cure.
+ *
+ * Two steps, because the polite one is not enough on its own. `invalidate()`
+ * requests a repaint, which a surface that still exists will honour. A surface
+ * that is actually gone ignores it, so the window's BOUNDS are nudged a pixel
+ * and put back: changing bounds is what makes Chromium build a new surface.
+ * Then the renderer is told, because main can force a re-composite but only the
+ * renderer can redraw an xterm canvas from its buffer.
+ */
+function forceWindowRepaint(rebuildSurface: boolean): void {
+  const win = mainWindow
+  if (!win || win.isDestroyed()) return
+  try {
+    win.webContents.invalidate()
+    // The nudge is reserved for the cases where the surface is actually at
+    // risk. It moves the window a pixel, so doing it every time the user comes
+    // back to the keyboard would be a visible twitch in exchange for nothing.
+    if (rebuildSurface && canRebuildSurface(lastSurfaceRebuild, Date.now())) {
+      lastSurfaceRebuild = Date.now()
+      const b = win.getBounds()
+      win.setBounds({ ...b, width: b.width + 1 })
+      setTimeout(() => {
+        if (!win.isDestroyed()) win.setBounds(b)
+      }, REPAINT_NUDGE_MS)
+    }
+  } catch {
+    /* window went away mid-repair */
+  }
+  send(Channels.windowRepaint, undefined)
+}
+let lastSurfaceRebuild = 0
+
+/**
+ * Watch for the moments a window's pixels can stop being real.
+ *
+ * Waking is the common one and has no error attached to it — nothing crashes,
+ * the surface simply does not come back. `resume` covers the machine sleeping,
+ * `unlock-screen` the display locking, and on macOS `user-did-become-active`
+ * catches coming out of an idle the other two never reported. They overlap on
+ * purpose; a repaint is idempotent and cheap next to a black window.
+ */
+function watchForLostSurface(): void {
+  // Typed one at a time: powerMonitor's overloads are per-event, so a loop over
+  // a union of event names has no single signature to match.
+  //
+  // Sleeping and locking are where the surface actually goes, so those get the
+  // full repair. `user-did-become-active` fires whenever the user comes back
+  // from any idle at all, which is far too often to move the window for — it
+  // gets the cheap repaint, which is enough whenever the surface survived.
+  powerMonitor.on('resume', () => forceWindowRepaint(true))
+  powerMonitor.on('unlock-screen', () => forceWindowRepaint(true))
+  powerMonitor.on('user-did-become-active', () => forceWindowRepaint(false))
+  app.on('child-process-gone', (_e, details) => {
+    if (shouldRecoverFromProcessGone(details)) forceWindowRepaint(true)
+  })
 }
 
 /** Validate + record a project by path. Throws if it is not a git repo. */
@@ -1353,6 +1423,7 @@ function createWindow(): void {
     applyAppearance(settings().load())
     mainWindow?.show()
   })
+  watchForLostSurface()
 
   // When the window goes away, stop ptys and drop the ref so late pty data
   // events don't try to post to a destroyed webContents.

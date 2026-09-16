@@ -106,6 +106,7 @@ const api: RendererApi = {
     subscribe(Channels.sessionStateChange, cb),
   onSessionExit: (cb: (e: SessionExitEvent) => void) => subscribe(Channels.sessionExit, cb),
   onNotifyJump: (cb: (e: { id: string }) => void) => subscribe(Channels.notifyJump, cb),
+  onWindowRepaint: (cb: () => void) => subscribe(Channels.windowRepaint, cb),
   onHookFailed: (cb: (e: HookFailedEvent) => void) => subscribe(Channels.hookFailed, cb),
   onFleetChange: (cb: (e: { sessions: RegistryEntry[] }) => void) =>
     subscribe(Channels.fleetChange, cb),
