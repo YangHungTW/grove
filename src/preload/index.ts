@@ -43,7 +43,7 @@ const api: RendererApi = {
     ipcRenderer.invoke(Channels.worktreeStatus, worktreePath),
   worktreeDiff: (worktreePath: string, baseRef?: string): Promise<string> =>
     ipcRenderer.invoke(Channels.worktreeDiff, worktreePath, baseRef),
-  claudeUsage: (worktreePath: string) => ipcRenderer.invoke(Channels.claudeUsage, worktreePath),
+  agentUsage: (worktreePath: string) => ipcRenderer.invoke(Channels.agentUsage, worktreePath),
   worktreeCommitAll: (worktreePath: string, message: string): Promise<void> =>
     ipcRenderer.invoke(Channels.worktreeCommitAll, worktreePath, message),
   worktreeMergeToDefault: (repoRoot: string, branch: string): Promise<string> =>

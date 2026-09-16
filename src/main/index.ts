@@ -52,7 +52,7 @@ import { parseFrameability } from '../core/openTarget'
 import { viewerMime } from '../core/viewerMime'
 import { describeViewerReadError } from '../core/viewerError'
 import { HTML_VIEWER_SCHEME, htmlViewerPath } from '../core/htmlViewerUrl'
-import { worktreeClaudeUsage } from '../core/claudeUsage'
+import { worktreeAgentUsage } from '../core/agentUsage'
 import { ProjectStore, type ProjectEntry, type ProjectPatch } from '../core/projectStore'
 import { LayoutStore, type SessionDescriptor } from '../core/layoutStore'
 import { ClosedAgentsStore, type ClosedAgent } from '../core/closedAgentsStore'
@@ -1116,11 +1116,11 @@ function registerIpc(): void {
       return true
     }
   })
-  ipcMain.handle(Channels.claudeUsage, (_e: IpcMainInvokeEvent, worktreePath: string) => {
-    // "Today" in local time — the card shows what this worktree cost today.
+  ipcMain.handle(Channels.agentUsage, (_e: IpcMainInvokeEvent, worktreePath: string) => {
+    // "Today" in local time — the status bar shows what this worktree cost today.
     const since = new Date()
     since.setHours(0, 0, 0, 0)
-    return worktreeClaudeUsage(worktreePath, since.getTime())
+    return worktreeAgentUsage(worktreePath, since.getTime())
   })
   ipcMain.handle(
     Channels.worktreeRemove,

@@ -2,7 +2,7 @@ import type { Terminal } from '@xterm/xterm'
 import type { FitAddon } from '@xterm/addon-fit'
 import type { SearchAddon } from '@xterm/addon-search'
 import type { SessionKind, SessionState } from '../core/types'
-import type { WorktreeUsage } from '../core/claudeUsage'
+import type { WorktreeUsage } from '../core/agentUsage'
 import type { PrInfo } from '../core/gh'
 import type { RegistryEntry, SessionSnapshot } from '../main/ipc'
 import type { SessionDescriptor } from '../core/layoutStore'
@@ -847,7 +847,7 @@ export class Store {
       })
       .catch(() => {})
     window.api
-      .claudeUsage(wtId)
+      .agentUsage(wtId)
       .then((u) => {
         const had = this.wtUsage.has(wtId)
         if (u) this.wtUsage.set(wtId, u)

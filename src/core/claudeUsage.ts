@@ -12,26 +12,8 @@
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
+import type { TranscriptUsage, WorktreeUsage } from './usageTypes'
 
-export interface TranscriptUsage {
-  input: number
-  output: number
-  cacheRead: number
-  cacheWrite: number
-  /** Estimated USD cost over messages with a known price (null if none had one). */
-  costUsd: number | null
-  /** Model of the newest assistant message. */
-  model: string
-  /** Newest message's full prompt size — the conversation's current context. */
-  contextTokens: number
-  /** Timestamp (ms) of the newest assistant message. */
-  lastTs: number
-}
-
-export interface WorktreeUsage extends TranscriptUsage {
-  /** Number of transcript files (sessions) aggregated. */
-  sessions: number
-}
 
 /** Per-MTok USD prices. Matched by family substring; unknown models contribute
  * tokens but no cost (costUsd stays null if nothing matched). */

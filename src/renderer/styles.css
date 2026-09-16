@@ -36,6 +36,9 @@
      attention highlight is never mistaken for the active/selected state. */
   --attention: #ffb224;
   --radius: 7px;
+  /* Height of the bottom status bar. Fixed, and shared with the sidebar
+     divider so the two always end on the same line. */
+  --statusbar-h: 24px;
   --pane-bg: #1b1b1f;
   color-scheme: dark;
 }
@@ -58,15 +61,19 @@ button {
   font-family: inherit;
 }
 
+/* Two columns (sidebar | content) over a full-width status bar. The overlays
+   (settings, dialog, picker) are position:fixed, so they claim no grid cell. */
 #app {
   position: relative;
   display: grid;
   grid-template-columns: var(--sidebar-w, 248px) 1fr;
+  grid-template-rows: minmax(0, 1fr) auto;
   height: 100vh;
 }
 #app.sidebar-collapsed {
   grid-template-columns: 1fr;
 }
+
 /* Suppress text selection + per-pane resize churn while dragging the divider. */
 #app.resizing-sidebar {
   user-select: none;
@@ -77,7 +84,8 @@ button {
 .sidebar-resizer {
   position: absolute;
   top: 0;
-  bottom: 0;
+  /* Stop at the status bar: the divider only separates sidebar from content. */
+  bottom: var(--statusbar-h);
   left: var(--sidebar-w, 248px);
   width: 7px;
   margin-left: -4px;
@@ -91,6 +99,48 @@ button {
   background: var(--accent);
 }
 
+/* ---------- status bar ---------- */
+/* Spans every column, and keeps a fixed height so the panes above it never
+   resize as the numbers come and go (each resize is a SIGWINCH per agent). */
+#statusbar {
+  grid-column: 1 / -1;
+  height: var(--statusbar-h);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 12px;
+  background: var(--panel);
+  border-top: 1px solid #000;
+  font-size: 10.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  user-select: none;
+}
+.status-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+.status-model {
+  color: color-mix(in srgb, var(--accent) 75%, var(--fg));
+  font-weight: 600;
+}
+.status-sep {
+  opacity: 0.4;
+}
+.status-dim {
+  opacity: 0.7;
+}
+/* The all-worktrees total: last thing on the line, so it is never the part
+   that gets clipped when the window is narrow. */
+.status-total {
+  flex: none;
+}
 /* ---------- sidebar ---------- */
 #sidebar {
   background: var(--panel);
@@ -528,22 +578,6 @@ button {
 }
 
 /* Today's Claude token/cost usage for the worktree. */
-.card-usage {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 3px;
-  font-size: 10.5px;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  overflow: hidden;
-}
-.card-usage-model {
-  color: color-mix(in srgb, var(--accent) 75%, var(--fg));
-  font-weight: 600;
-}
-
 /* Quick-respond row: answer a waiting agent's prompt right from the card. */
 .card-quick {
   display: flex;

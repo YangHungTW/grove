@@ -6,6 +6,7 @@ import { PaneGrid } from './PaneGrid'
 import { SettingsPanel } from './SettingsPanel'
 import { Dialog } from './Dialog'
 import { SessionPicker } from './SessionPicker'
+import { StatusBar } from './StatusBar'
 import { useStore } from './useStore'
 import { store } from './store'
 import { matchesAccel } from './keymatch'
@@ -153,6 +154,7 @@ export function App(): JSX.Element {
         <GroupTabs />
         <PaneGrid />
       </main>
+      <StatusBar />
       <SettingsPanel />
       <Dialog />
       <SessionPicker />

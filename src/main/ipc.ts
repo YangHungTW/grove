@@ -1,6 +1,6 @@
 import type { SessionKind, SessionState, ViewerKind } from '../core/types'
 import type { WorktreeInfo, CreateWorktreeOptions, WorktreeStatus } from '../core/worktree'
-import type { WorktreeUsage } from '../core/claudeUsage'
+import type { WorktreeUsage } from '../core/agentUsage'
 import type { PrInfo } from '../core/gh'
 import type { ProjectEntry, ProjectPatch } from '../core/projectStore'
 import type { SessionDescriptor } from '../core/layoutStore'
@@ -41,7 +41,7 @@ export const Channels = {
   prStatus: 'pr:status',
   openExternal: 'shell:open-external',
   urlEmbeddable: 'url:embeddable',
-  claudeUsage: 'claude:usage',
+  agentUsage: 'agent:usage',
   sessionCreate: 'session:create',
   sessionInput: 'session:input',
   sessionResize: 'session:resize',
@@ -213,9 +213,11 @@ export interface RendererApi {
   worktreeStatus(worktreePath: string): Promise<WorktreeStatus>
   /** Unified diff of everything a worktree changed (committed vs base + uncommitted). */
   worktreeDiff(worktreePath: string, baseRef?: string): Promise<string>
-  /** Today's Claude Code token/cost usage for sessions launched in a worktree
-   * (read from `~/.claude/projects` transcripts; null when there are none). */
-  claudeUsage(worktreePath: string): Promise<WorktreeUsage | null>
+  /** Today's agent token/cost usage for sessions launched in a worktree, across
+   * every agent that leaves a usage trail on disk (see core/agentUsage). Null
+   * when none of them recorded anything — the caller shows nothing rather than
+   * a zero, since an agent that keeps no log is not an agent that was free. */
+  agentUsage(worktreePath: string): Promise<WorktreeUsage | null>
   /** Stage everything in a worktree and commit (throws on a clean tree). */
   worktreeCommitAll(worktreePath: string, message: string): Promise<void>
   /** Merge a worktree's branch into the repo's default branch (run from the
