@@ -1,5 +1,6 @@
 import { useState, type DragEvent, type MouseEvent } from 'react'
 import { useStoreAll } from './useStore'
+import { formatTokens, formatUsd, shortModel } from './usageFormat'
 import { store, type ProjectView, type WorktreeView } from './store'
 import {
   RepoIcon,
@@ -499,6 +500,7 @@ function WorktreeCard({
           switch into the pane to find out. */}
       {waitingFor && <div className="card-waiting">waiting: {waitingFor}</div>}
       {line && <div className="card-sub">{line}</div>}
+      <UsageLine wtId={wt.id} />
       <QuickRespond wtId={wt.id} />
     </div>
   )
@@ -527,6 +529,32 @@ function PrBadge({ pr }: { pr?: PrInfo }): JSX.Element | null {
       #{pr.number}
       {mark && <span className="pr-mark">{mark}</span>}
     </button>
+  )
+}
+
+/** Today's agent token/cost footprint for this worktree.
+ *
+ * On the card, not in a status bar across the bottom of the window: a bar there
+ * is paid for in terminal height on every pane, every hour of the day, in
+ * exchange for a number you glance at. The card already has the room. */
+function UsageLine({ wtId }: { wtId: string }): JSX.Element | null {
+  const s = useStoreAll()
+  const u = s.wtUsage.get(wtId)
+  if (!u) return null
+  const total = u.input + u.output + u.cacheRead + u.cacheWrite
+  const detail =
+    `Today · ${u.sessions} session${u.sessions === 1 ? '' : 's'}\n` +
+    `in ${formatTokens(u.input)} · out ${formatTokens(u.output)} · ` +
+    `cache read ${formatTokens(u.cacheRead)} · cache write ${formatTokens(u.cacheWrite)}` +
+    // No price table for every model (see core/agentUsage) — say which it is
+    // rather than leaving a token count that looks like it should have a cost.
+    (u.costUsd != null ? `\n≈ ${formatUsd(u.costUsd)} (estimated)` : '\nNo price for this model')
+  return (
+    <div className="card-usage" title={detail}>
+      <span className="card-usage-model">{shortModel(u.model)}</span>
+      <span>{u.costUsd != null ? `≈ ${formatUsd(u.costUsd)}` : `${formatTokens(total)} tok`}</span>
+      <span>ctx {formatTokens(u.contextTokens)}</span>
+    </div>
   )
 }
 
