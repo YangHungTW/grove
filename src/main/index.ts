@@ -33,7 +33,11 @@ import {
   REPAINT_NUDGE_MS
 } from '../core/gpuRecovery'
 import { homedir } from 'node:os'
-import { stat as statAsync, readFile as readFileAsync } from 'node:fs/promises'
+import {
+  stat as statAsync,
+  readFile as readFileAsync,
+  readdir as readdirAsync
+} from 'node:fs/promises'
 import { SessionRegistry } from '../core/sessionRegistry'
 import { PtySession } from '../core/session'
 import {
@@ -47,7 +51,8 @@ import {
   defaultBranch,
   commitAll,
   mergeIntoDefault,
-  pushBranch
+  pushBranch,
+  dedupeInFlight
 } from '../core/worktree'
 import { prCreate, prStatus } from '../core/gh'
 import { shellQuote } from '../core/shellQuote'
@@ -166,12 +171,18 @@ function settings(): SettingsStore {
   return settingsStore
 }
 
+/** The user's login shell — what every spawn here goes through, because a GUI
+ * app's own PATH/env is the stripped launchd one, not the user's. */
+function loginShell(): string {
+  return process.env.SHELL || '/bin/zsh'
+}
+
 const installedCache = new Map<string, boolean>()
 /** Is a command on PATH? Checked via a login shell (GUI apps lack shell PATH). */
 function commandExists(cmd: string): boolean {
   const first = cmd.trim().split(/\s+/)[0]
   if (installedCache.has(first)) return installedCache.get(first)!
-  const shell = process.env.SHELL || '/bin/zsh'
+  const shell = loginShell()
   // Pass the command name as a positional arg, not interpolated into the shell
   // string, so a setting like `claude; rm -rf ~` can't inject.
   const found = (flags: string): boolean => {
@@ -255,7 +266,7 @@ function runHook(
     .replace(/\{worktree\}/g, shellQuote(extraEnv.CCM_WORKTREE_PATH ?? ''))
     .replace(/\{branch\}/g, shellQuote(extraEnv.CCM_BRANCH ?? ''))
     .replace(/\{repo\}/g, shellQuote(extraEnv.CCM_REPO ?? ''))
-  const shell = process.env.SHELL || '/bin/zsh'
+  const shell = loginShell()
   const fail = (code: number | null, output: string): void =>
     send(Channels.hookFailed, { kind, command: cmd, code, output: output.trim().slice(-4000) })
   try {
@@ -380,19 +391,27 @@ function snapshot(s: Session): SessionSnapshot {
 }
 
 /**
+ * Is durable (tmux) mode on? When the user opted in AND tmux is installed
+ * (falls back to a direct spawn when it is missing), or when forced via
+ * CCM_TMUX=control (used in dev/e2e). One predicate for the launch spec and the
+ * MCP credential path, so the two can never disagree about a launch.
+ */
+function durableModeOn(): boolean {
+  const forced = process.env.CCM_TMUX === 'control'
+  return forced || durableEnabled(settings().load().durableSessions, commandExists('tmux'))
+}
+
+/**
  * The deterministic tmux session name for a worktree's durable agent, or
- * undefined when this session should NOT run under tmux. Durable mode is on when
- * the user opted in AND tmux is installed (falls back to a direct spawn when it
- * is missing), or when forced via CCM_TMUX=control (used in dev/e2e). One source
- * of truth for both launchSpecFor and createSession's control wiring.
+ * undefined when this session should NOT run under tmux. Computed once per
+ * spawn in createSession (it reads the settings file) and handed to
+ * launchSpecFor, so the launch and the control wiring agree by construction.
  */
 function durableAgentName(req: CreateSessionRequest): string | undefined {
-  if (req.kind !== 'agent') return undefined
-  const forced = process.env.CCM_TMUX === 'control'
-  const on = forced || durableEnabled(settings().load().durableSessions, commandExists('tmux'))
+  if (req.kind !== 'agent' || !durableModeOn()) return undefined
   // Key the session name by a stable per-agent id so multiple agents in one
   // worktree get distinct tmux sessions (and reattach to the right one).
-  return on ? tmuxSessionName(req.worktreeId, req.durableKey) : undefined
+  return tmuxSessionName(req.worktreeId, req.durableKey)
 }
 
 /**
@@ -403,12 +422,15 @@ function durableAgentName(req: CreateSessionRequest): string | undefined {
  * alias expands. The agent command is overridable via CCM_AGENT_CMD (tests use
  * it to avoid real auth).
  */
-function launchSpecFor(req: CreateSessionRequest): {
+function launchSpecFor(
+  req: CreateSessionRequest,
+  tmuxName: string | undefined
+): {
   command: string
   args?: string[]
   bootstrap?: string
 } {
-  const shell = process.env.SHELL || '/bin/zsh'
+  const shell = loginShell()
   if (req.kind === 'agent') {
     // Interactive login shell (`-ilc`): sources .zshrc, so the agent runs with the
     // SAME PATH + aliases + version-manager shims as the user's real terminal. This
@@ -436,9 +458,8 @@ function launchSpecFor(req: CreateSessionRequest): {
     // process. tmux emits a text protocol instead of drawing — createSession parses
     // %output and renders pane bytes in xterm natively (the single renderer, so
     // scroll/search/selection stay native and there is no repaint ghosting).
-    const name = durableAgentName(req)
-    if (name) {
-      return buildTmuxControlLaunch(shell, name, req.cols ?? 120, req.rows ?? 40, agentCmd)
+    if (tmuxName) {
+      return buildTmuxControlLaunch(shell, tmuxName, req.cols ?? 120, req.rows ?? 40, agentCmd)
     }
     return { command: shell, args: ['-ilc', agentCmd] }
   }
@@ -456,7 +477,7 @@ function launchSpecFor(req: CreateSessionRequest): {
  * tests (stands in for a real editor, like CCM_AGENT_CMD).
  */
 function openInEditor(command: string, filePath: string, cwd: string): void {
-  const shell = process.env.SHELL || '/bin/zsh'
+  const shell = loginShell()
   const editor = process.env.CCM_IDE_CMD || command
   try {
     execFile(shell, ['-lc', `${editor} "$1"`, '--', filePath], { cwd }, () => {})
@@ -472,8 +493,7 @@ function openInEditor(command: string, filePath: string, cwd: string): void {
  */
 function killTmuxSessions(names: string[], sync = false): void {
   if (names.length === 0) return
-  const shell = process.env.SHELL || '/bin/zsh'
-  const { command, args } = buildTmuxKill(shell, names)
+  const { command, args } = buildTmuxKill(loginShell(), names)
   try {
     if (sync) execFileSync(command, args, { stdio: 'ignore', timeout: 5000 })
     else execFile(command, args, () => {})
@@ -617,11 +637,54 @@ const mcpHost: McpHost = {
 function writeToPane(id: string, data: string): void {
   const c = control.get(id)
   if (c) {
+    // Control mode: deliver keystrokes as hex via send-keys, not raw pty write.
+    // Chunked — one command per 256 bytes; see SEND_KEYS_CHUNK_BYTES for why a
+    // whole paste in a single send-keys stalls and then loses the input.
     const pty = ptys.get(id)
     for (const cmd of sendKeysCommands(c.name, data)) pty?.write(cmd)
     return
   }
   ptys.get(id)?.write(data)
+}
+
+/**
+ * Per-session output coalescer. A pty read used to be one IPC message, and in
+ * control mode one `%output` protocol LINE was — so a 64 KB read could become
+ * hundreds of sends, each a structured clone plus a renderer wakeup. Instead,
+ * everything a session emits within one event-loop turn is joined and sent
+ * once from a setImmediate; state detection runs on that joined text, at the
+ * same point. (setImmediate, not a timer: it fires right after the I/O phase
+ * that delivered the reads, so this adds no visible latency.)
+ */
+interface Outbox {
+  buf: string
+  scheduled: boolean
+  /** Send what is buffered now (also called from teardown, before the exit). */
+  flush: () => void
+}
+const outbox = new Map<string, Outbox>()
+
+/**
+ * Everything that must happen when a session's process is gone: deliver any
+ * output still coalescing BEFORE the exit (the renderer writes its exit banner
+ * on sessionExit, and bytes arriving after it would land below the banner),
+ * then forget the session everywhere main tracks it. Idempotent — the first
+ * caller wins. That matters in control mode, where tmux's `%exit` and the pty's
+ * own exit both arrive, and only one sessionExit may reach the renderer. A
+ * caller with no `exit` (sessionKill, a failed spawn) only unregisters; output
+ * arriving after teardown is dropped, not forwarded.
+ */
+function teardownSession(id: string, exit?: { exitCode: number; signal?: number }): void {
+  if (!ptys.has(id)) return
+  const ob = outbox.get(id)
+  if (ob) {
+    outbox.delete(id)
+    ob.flush()
+  }
+  if (exit) send(Channels.sessionExit, { id, ...exit })
+  ptys.delete(id)
+  control.delete(id)
+  forgetRegistryJoin(id)
 }
 
 /** How many times one disagreement with tmux is worth re-asserting. A foreign
@@ -690,10 +753,7 @@ function mcpLaunchConfig(durableKey?: string): { handle: string; configPath: str
   try {
     const dir = mcpDir()
     mkdirSync(dir, { recursive: true })
-    const forced = process.env.CCM_TMUX === 'control'
-    const durable =
-      !!durableKey &&
-      (forced || durableEnabled(settings().load().durableSessions, commandExists('tmux')))
+    const durable = !!durableKey && durableModeOn()
     const handle = randomUUID()
     let ticket: string
     let configPath: string
@@ -774,26 +834,31 @@ function pidAlive(pid: number): boolean {
 
 /** Every live record in Claude's registry. Unreadable or half-written files are
  * skipped for this tick rather than failing the sweep — the directory belongs to
- * another program, which rewrites it whenever it likes. */
-function readClaudeRegistry(): RegistryEntry[] {
+ * another program, which rewrites it whenever it likes. Async: this runs from
+ * the directory watcher on the main thread, and every claude on the machine
+ * rewrites its file on each busy/idle flip, so a sync readdir+read-per-file
+ * sweep was a stall under every pty's I/O. Directory order is kept (a
+ * reordered list would read as a fleet change — see applyRegistry). */
+async function readClaudeRegistry(): Promise<RegistryEntry[]> {
   const dir = claudeSessionsDir()
   let names: string[]
   try {
-    names = readdirSync(dir)
+    names = await readdirAsync(dir)
   } catch {
     return []
   }
-  const out: RegistryEntry[] = []
-  for (const name of names) {
-    if (!/^\d+\.json$/.test(name)) continue
-    try {
-      const entry = parseRegistryEntry(JSON.parse(readFileSync(join(dir, name), 'utf8')))
-      if (entry && pidAlive(entry.pid)) out.push(entry)
-    } catch {
-      /* skip this file this tick */
-    }
-  }
-  return out
+  const entries = await Promise.all(
+    names.map(async (name): Promise<RegistryEntry | null> => {
+      if (!/^\d+\.json$/.test(name)) return null
+      try {
+        const entry = parseRegistryEntry(JSON.parse(await readFileAsync(join(dir, name), 'utf8')))
+        return entry && pidAlive(entry.pid) ? entry : null
+      } catch {
+        return null /* skip this file this tick */
+      }
+    })
+  )
+  return entries.filter((e): e is RegistryEntry => e !== null)
 }
 
 /** Does this Grove session currently have a live registry record backing it?
@@ -863,9 +928,8 @@ function fleetSessions(): RegistryEntry[] {
  * as a positional arg so it can never be read as shell (same guard as
  * killTmuxSessions). */
 function stopFleetSession(jobId: string): void {
-  const shell = process.env.SHELL || '/bin/zsh'
   try {
-    execFile(shell, ['-lc', 'claude stop "$1"', '--', jobId], () => {})
+    execFile(loginShell(), ['-lc', 'claude stop "$1"', '--', jobId], () => {})
   } catch {
     /* best-effort — the watcher reports the real outcome either way */
   }
@@ -883,10 +947,32 @@ function stopFleetSession(jobId: string): void {
  */
 function startClaudeRegistryWatch(): void {
   let debounce: NodeJS.Timeout | null = null
+  // The sweep is async, so a burst of watch events can arrive while one is
+  // still reading. Overlapping sweeps would race to assign registryEntries
+  // (an older read could land last); instead a request during a sweep is
+  // remembered and one more sweep runs when it finishes — one, no matter how
+  // many arrived, since the last one sees everything the earlier ones would.
+  let sweeping = false
+  let sweepAgain = false
   const refresh = (): void => {
-    registryEntries = readClaudeRegistry()
-    liveRegistryUuids = new Set(registryEntries.map((e) => e.sessionId))
-    applyRegistry()
+    if (sweeping) {
+      sweepAgain = true
+      return
+    }
+    sweeping = true
+    void readClaudeRegistry()
+      .then((entries) => {
+        registryEntries = entries
+        liveRegistryUuids = new Set(registryEntries.map((e) => e.sessionId))
+        applyRegistry()
+      })
+      .finally(() => {
+        sweeping = false
+        if (sweepAgain) {
+          sweepAgain = false
+          refresh()
+        }
+      })
   }
   const retry = (): void => {
     setTimeout(attach, 30_000).unref?.()
@@ -959,8 +1045,8 @@ function createSession(req: CreateSessionRequest): SessionSnapshot {
     // durable credential decides unbind-vs-revoke in forgetMcp.
     if (req.durableKey) mcpDurableKeyById.set(record.id, req.durableKey)
   }
-  const spec = launchSpecFor(req)
   const tmuxName = durableAgentName(req)
+  const spec = launchSpecFor(req, tmuxName)
   const pty = new PtySession({
     id: record.id,
     worktreeId: req.worktreeId,
@@ -977,19 +1063,39 @@ function createSession(req: CreateSessionRequest): SessionSnapshot {
     encoding: tmuxName ? 'latin1' : undefined
   })
 
-  const forwardOutput = (data: string): void => {
-    send(Channels.sessionData, { id: record.id, data })
-    // Claude's registry is authoritative wherever we can join to it; scraping
-    // the byte stream is the fallback for everything else. Checked per chunk (not
-    // once at spawn) so a session whose registry record disappears mid-flight
-    // degrades back to detection instead of freezing on its last known state.
-    if (agent && !registryBacked(record.id)) {
-      const next = detectState(data, agent)
-      if (next !== record.state) {
-        record.state = next
-        pty.setState(next)
+  // One send per event-loop turn, not per read — see Outbox.
+  const ob: Outbox = {
+    buf: '',
+    scheduled: false,
+    flush: () => {
+      ob.scheduled = false
+      if (!ob.buf) return
+      const data = ob.buf
+      ob.buf = ''
+      send(Channels.sessionData, { id: record.id, data })
+      // Claude's registry is authoritative wherever we can join to it; scraping
+      // the byte stream is the fallback for everything else. Checked per flush
+      // (not once at spawn) so a session whose registry record disappears
+      // mid-flight degrades back to detection instead of freezing on its last
+      // known state. Not on the final flush from teardown, though: the process
+      // is gone, and a 'busy' read off its last bytes would be a lie.
+      if (agent && record.state !== 'exited' && !registryBacked(record.id)) {
+        const next = detectState(data, agent)
+        if (next !== record.state) {
+          record.state = next
+          pty.setState(next)
+        }
       }
     }
+  }
+  outbox.set(record.id, ob)
+  const forwardOutput = (data: string): void => {
+    // Torn down (teardownSession removed the outbox): drop, don't resurrect.
+    if (outbox.get(record.id) !== ob) return
+    ob.buf += data
+    if (ob.scheduled) return
+    ob.scheduled = true
+    setImmediate(ob.flush)
   }
 
   if (tmuxName) {
@@ -1017,12 +1123,10 @@ function createSession(req: CreateSessionRequest): SessionSnapshot {
         if (pane && c && !c.pane) c.pane = pane
       },
       onExit: () => {
-        if (record.state === 'exited') return
+        // The pty's own exit follows shortly and lands in the same teardown,
+        // which ignores it — first exit wins.
         record.state = 'exited'
-        send(Channels.sessionExit, { id: record.id, exitCode: 0 })
-        ptys.delete(record.id)
-        control.delete(record.id)
-        forgetRegistryJoin(record.id)
+        teardownSession(record.id, { exitCode: 0 })
       },
       onLayoutChange: (_win, cols, rows) => onTmuxLayoutChange(record.id, cols, rows),
       onOther: process.env.CCM_TMUX_DEBUG ? (l) => console.error('[tmux]', l) : undefined
@@ -1042,10 +1146,7 @@ function createSession(req: CreateSessionRequest): SessionSnapshot {
   })
   pty.onExit(({ exitCode, signal }) => {
     record.state = 'exited'
-    send(Channels.sessionExit, { id: record.id, exitCode, signal })
-    ptys.delete(record.id)
-    control.delete(record.id)
-    forgetRegistryJoin(record.id)
+    teardownSession(record.id, { exitCode, signal })
   })
 
   ptys.set(record.id, pty)
@@ -1053,9 +1154,7 @@ function createSession(req: CreateSessionRequest): SessionSnapshot {
     pty.start()
   } catch (err) {
     // Spawn failed (e.g. shell not found) — roll back the registry record.
-    ptys.delete(record.id)
-    control.delete(record.id)
-    forgetRegistryJoin(record.id)
+    teardownSession(record.id)
     registry.removeSession(record.id)
     throw err
   }
@@ -1138,8 +1237,11 @@ function registerIpc(): void {
   ipcMain.handle(Channels.worktreeList, (_e: IpcMainInvokeEvent, repoRoot: string) =>
     listWorktrees(repoRoot)
   )
+  // The sidebar, the status bar and the finish dialog can each ask for the same
+  // worktree's status in the same tick; one answer serves them all.
+  const statusOnce = dedupeInFlight(worktreeStatus)
   ipcMain.handle(Channels.worktreeStatus, (_e: IpcMainInvokeEvent, worktreePath: string) =>
-    worktreeStatus(worktreePath)
+    statusOnce(worktreePath)
   )
   ipcMain.handle(
     Channels.worktreeDiff,
@@ -1268,18 +1370,7 @@ function registerIpc(): void {
     }
   )
 
-  ipcMain.on(Channels.sessionInput, (_e, id: string, data: string) => {
-    const c = control.get(id)
-    if (c) {
-      // Control mode: deliver keystrokes as hex via send-keys, not raw pty write.
-      // Chunked — one command per 256 bytes; see SEND_KEYS_CHUNK_BYTES for why a
-      // whole paste in a single send-keys stalls and then loses the input.
-      const pty = ptys.get(id)
-      for (const cmd of sendKeysCommands(c.name, data)) pty?.write(cmd)
-      return
-    }
-    ptys.get(id)?.write(data)
-  })
+  ipcMain.on(Channels.sessionInput, (_e, id: string, data: string) => writeToPane(id, data))
   ipcMain.on(Channels.sessionResize, (_e, id: string, cols: number, rows: number) => {
     if (process.env.CCM_DEBUG_RESIZE) console.log(`[resize] ${id} ${cols}x${rows}`)
     const c = control.get(id)
@@ -1318,9 +1409,8 @@ function registerIpc(): void {
         // Same posture as fleetStop: login shell (tmux/claude PATH), job id as a
         // positional arg so a value from another program's state file can never
         // be read as shell. tail-capped — the peek shows a glimpse, not a log.
-        const shell = process.env.SHELL || '/bin/zsh'
         execFile(
-          shell,
+          loginShell(),
           ['-lc', 'claude logs "$1" 2>&1 | tail -n 40', '--', jobId],
           { timeout: 15_000 },
           (_err, stdout) => resolve(stripAnsi(String(stdout ?? '')).trim())
@@ -1343,8 +1433,9 @@ function registerIpc(): void {
       const dKey = mcpDurableKeyById.get(id)
       if (dKey) mcpRevokeDurable(dKey)
     }
-    control.delete(id)
-    forgetRegistryJoin(id)
+    // No exit here: the renderer closed the tab itself, so the process's
+    // eventual exit has nobody to tell (and teardown ignores it as a repeat).
+    teardownSession(id)
     registry.removeSession(id)
   })
 
@@ -1430,6 +1521,7 @@ function createWindow(): void {
   mainWindow.on('closed', () => {
     for (const p of ptys.values()) p.kill()
     ptys.clear()
+    outbox.clear()
     mainWindow = null
   })
 

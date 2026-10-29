@@ -22,13 +22,80 @@ export interface CreateWorktreeOptions {
   newBranch?: boolean
 }
 
+/**
+ * A counting semaphore as a function wrapper: `limit(fn)` runs `fn` once a slot
+ * is free and queues it (FIFO) otherwise. The slot is released when `fn`
+ * settles either way, so a rejected task never leaks one.
+ */
+export function limitConcurrency(max: number): <T>(task: () => Promise<T>) => Promise<T> {
+  let active = 0
+  const waiting: Array<() => void> = []
+  const release = (): void => {
+    active--
+    waiting.shift()?.()
+  }
+  return async <T>(task: () => Promise<T>): Promise<T> => {
+    if (active >= max) await new Promise<void>((resolve) => waiting.push(resolve))
+    active++
+    try {
+      return await task()
+    } finally {
+      release()
+    }
+  }
+}
+
+/**
+ * Collapse concurrent calls for the same key onto ONE in-flight promise: a call
+ * that arrives while an earlier one for that key is still pending shares its
+ * result instead of starting another. Once it settles the key is forgotten, so
+ * the next call runs fresh — this is in-flight dedup, not a cache.
+ */
+export function dedupeInFlight<R>(fn: (key: string) => Promise<R>): (key: string) => Promise<R> {
+  const pending = new Map<string, Promise<R>>()
+  return (key) => {
+    const hit = pending.get(key)
+    if (hit) return hit
+    const p = fn(key).finally(() => pending.delete(key))
+    pending.set(key, p)
+    return p
+  }
+}
+
+// How many git processes may run at once. The renderer polls the status of
+// EVERY worktree in the same instant every 20 s (3 spawns each), plus diffs
+// and PR checks — a dozen worktrees was 40+ simultaneous git processes forking
+// against the same object store. A cap turns that tick into a short queue
+// instead of a fork storm, with no change to what any caller sees.
+export const GIT_MAX_CONCURRENT = 6
+const gitSlot = limitConcurrency(GIT_MAX_CONCURRENT)
+
+// Node's default maxBuffer is 1 MB, which made `worktreeDiff` reject with
+// "stdout maxBuffer length exceeded" on a diff that large — exactly the diffs
+// the review pane most needs to show (UNTRACKED_DIFF_CAP bounds the rest).
+const GIT_MAX_BUFFER = 64 * 1024 * 1024
+
+type GitExec = (args: string[], cwd: string) => Promise<string>
+const execGit: GitExec = async (args, cwd) => {
+  const { stdout } = await execFileAsync('git', args, {
+    cwd,
+    encoding: 'utf8',
+    maxBuffer: GIT_MAX_BUFFER
+  })
+  return stdout as string
+}
+let gitExec: GitExec = execGit
+/** Test seam: swap the process spawn for a fake (undefined restores the real one). */
+export function setGitExecForTests(fn?: GitExec): void {
+  gitExec = fn ?? execGit
+}
+
 // Async on purpose: these run in the Electron MAIN process. A synchronous
 // execFileSync would block the event loop (and therefore all pty I/O + IPC for
 // every window) for the whole duration of the git call — a large `git diff`
 // would visibly freeze every open terminal. execFile keeps the loop free.
-async function git(repoRoot: string, args: string[]): Promise<string> {
-  const { stdout } = await execFileAsync('git', args, { cwd: repoRoot, encoding: 'utf8' })
-  return stdout as string
+function git(repoRoot: string, args: string[]): Promise<string> {
+  return gitSlot(() => gitExec(args, repoRoot))
 }
 
 function pad2(n: number): string {
