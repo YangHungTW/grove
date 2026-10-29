@@ -112,11 +112,35 @@ export function parseCodexRollout(jsonl: string): { cwd: string; usage: Transcri
   }
 }
 
-/** Parse cache, so a 20s poll doesn't re-read rollouts that did not change. */
-const fileCache = new Map<
-  string,
-  { mtimeMs: number; size: number; parsed: { cwd: string; usage: TranscriptUsage } | null }
->()
+/** What the last scan learned about one rollout file. */
+interface RolloutEntry {
+  mtimeMs: number
+  size: number
+  /** When that stat was taken; see RESTAT_MS. */
+  checkedAt: number
+  /** Null for a file outside the window (never read) or not a usable rollout. */
+  parsed: { cwd: string; usage: TranscriptUsage } | null
+}
+
+/** Per-file cache, so a scan doesn't re-stat or re-read rollouts that did not
+ * change. Pruned to the files the latest scan saw, so a fortnight's rotation of
+ * rollouts cannot grow it for the life of the process. */
+const fileCache = new Map<string, RolloutEntry>()
+
+/** How long a rollout already known to predate the window goes without a stat.
+ *
+ * Nearly every file under the lookback folders is from an earlier day, and the
+ * window starts today: stat-ing all of them on every scan was the bulk of the
+ * work for a result that never changes. A session that is resumed after lying
+ * dormant past the window edge is caught on the next re-check. */
+const RESTAT_MS = 5 * 60_000
+
+/** How long one scan's result answers every worktree's lookup.
+ *
+ * The renderer polls every worktree in the same instant, and the scan is the
+ * same for all of them — the cwd only matters at the very end. One scan per
+ * tick is the point; the TTL just has to outlast the burst of lookups. */
+const SCAN_TTL_MS = 5_000
 
 /** How far back to walk Codex's date-partitioned folders.
  *
@@ -147,6 +171,106 @@ function recentDayDirs(root: string, sinceMs: number, days = LOOKBACK_DAYS): str
   return out
 }
 
+/** Fold one session into its worktree's running total. */
+function addSession(byCwd: Map<string, WorktreeUsage>, cwd: string, u: TranscriptUsage): void {
+  let totals = byCwd.get(cwd)
+  if (!totals) {
+    totals = {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      costUsd: null,
+      model: '',
+      contextTokens: 0,
+      lastTs: 0,
+      sessions: 0
+    }
+    byCwd.set(cwd, totals)
+  }
+  totals.sessions++
+  totals.input += u.input
+  totals.output += u.output
+  totals.cacheRead += u.cacheRead
+  totals.cacheWrite += u.cacheWrite
+  if (u.costUsd != null) totals.costUsd = (totals.costUsd ?? 0) + u.costUsd
+  if (u.lastTs >= totals.lastTs) {
+    totals.lastTs = u.lastTs
+    totals.model = u.model
+    totals.contextTokens = u.contextTokens
+  }
+}
+
+/**
+ * Walk the recent rollouts once and total them per cwd. Nothing here depends on
+ * which worktree is asking, which is what lets one walk serve them all.
+ */
+async function scanRollouts(
+  root: string,
+  sinceMs: number,
+  now: number
+): Promise<Map<string, WorktreeUsage>> {
+  const byCwd = new Map<string, WorktreeUsage>()
+  const seen = new Set<string>()
+  for (const dir of recentDayDirs(root, now)) {
+    let names: string[]
+    try {
+      names = await readdir(dir)
+    } catch {
+      continue // no sessions that day
+    }
+    for (const name of names) {
+      if (!name.endsWith('.jsonl')) continue
+      const path = join(dir, name)
+      seen.add(path)
+      let entry = fileCache.get(path)
+      if (entry && entry.mtimeMs < sinceMs && now - entry.checkedAt < RESTAT_MS) continue
+      let s: { mtimeMs: number; size: number }
+      try {
+        s = await stat(path)
+      } catch {
+        fileCache.delete(path)
+        continue
+      }
+      if (!entry || entry.mtimeMs !== s.mtimeMs || entry.size !== s.size) {
+        let parsed: { cwd: string; usage: TranscriptUsage } | null = null
+        if (s.mtimeMs >= sinceMs) {
+          try {
+            parsed = parseCodexRollout(await readFile(path, 'utf8'))
+          } catch {
+            /* unreadable — skip */
+          }
+        }
+        entry = { mtimeMs: s.mtimeMs, size: s.size, checkedAt: now, parsed }
+        fileCache.set(path, entry)
+      } else {
+        entry.checkedAt = now
+      }
+      if (s.mtimeMs < sinceMs || !entry.parsed) continue
+      addSession(byCwd, entry.parsed.cwd, entry.parsed.usage)
+    }
+  }
+  for (const path of fileCache.keys()) if (!seen.has(path)) fileCache.delete(path)
+  return byCwd
+}
+
+/** The scan in force: shared by every lookup inside SCAN_TTL_MS of its start,
+ * whether it has finished yet or not — concurrent lookups await the same walk. */
+let lastScan:
+  | { root: string; sinceMs: number; at: number; byCwd: Promise<Map<string, WorktreeUsage>> }
+  | undefined
+
+/** Test hook: forget every scan and parsed file, as a fresh process would. */
+export function resetCodexUsageCache(): void {
+  lastScan = undefined
+  fileCache.clear()
+}
+
+/** Test hook: how many rollout files the cache currently remembers. */
+export function cachedRolloutCount(): number {
+  return fileCache.size
+}
+
 /**
  * Aggregate Codex usage for sessions that ran in `worktreePath` and were
  * touched at/after `sinceMs`. Null when Codex has no such session — including
@@ -158,61 +282,14 @@ export async function worktreeCodexUsage(
   home?: string
 ): Promise<WorktreeUsage | null> {
   const root = codexSessionsDir(home)
-  const totals: WorktreeUsage = {
-    input: 0,
-    output: 0,
-    cacheRead: 0,
-    cacheWrite: 0,
-    costUsd: null,
-    model: '',
-    contextTokens: 0,
-    lastTs: 0,
-    sessions: 0
+  const now = Date.now()
+  if (
+    !lastScan ||
+    lastScan.root !== root ||
+    lastScan.sinceMs !== sinceMs ||
+    now - lastScan.at >= SCAN_TTL_MS
+  ) {
+    lastScan = { root, sinceMs, at: now, byCwd: scanRollouts(root, sinceMs, now) }
   }
-
-  for (const dir of recentDayDirs(root, Date.now())) {
-    let names: string[]
-    try {
-      names = await readdir(dir)
-    } catch {
-      continue // no sessions that day
-    }
-    for (const name of names) {
-      if (!name.endsWith('.jsonl')) continue
-      const path = join(dir, name)
-      let s: { mtimeMs: number; size: number }
-      try {
-        s = await stat(path)
-      } catch {
-        continue
-      }
-      if (s.mtimeMs < sinceMs) continue
-      let cached = fileCache.get(path)
-      if (!cached || cached.mtimeMs !== s.mtimeMs || cached.size !== s.size) {
-        let parsed: { cwd: string; usage: TranscriptUsage } | null = null
-        try {
-          parsed = parseCodexRollout(await readFile(path, 'utf8'))
-        } catch {
-          /* unreadable — skip */
-        }
-        cached = { mtimeMs: s.mtimeMs, size: s.size, parsed }
-        fileCache.set(path, cached)
-      }
-      const p = cached.parsed
-      if (!p || p.cwd !== worktreePath) continue
-      const u = p.usage
-      totals.sessions++
-      totals.input += u.input
-      totals.output += u.output
-      totals.cacheRead += u.cacheRead
-      totals.cacheWrite += u.cacheWrite
-      if (u.costUsd != null) totals.costUsd = (totals.costUsd ?? 0) + u.costUsd
-      if (u.lastTs >= totals.lastTs) {
-        totals.lastTs = u.lastTs
-        totals.model = u.model
-        totals.contextTokens = u.contextTokens
-      }
-    }
-  }
-  return totals.sessions > 0 ? totals : null
+  return (await lastScan.byCwd).get(worktreePath) ?? null
 }

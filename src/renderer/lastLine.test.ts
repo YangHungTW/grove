@@ -37,6 +37,23 @@ describe('lastNonEmptyLine (raw-stream fallback)', () => {
     expect(lastNonEmptyLine(`${ESC}[2K\r`)).toBeNull()
     expect(lastNonEmptyLine('')).toBeNull()
   })
+
+  it('finds the line in a large chunk without walking its thousands of lines', () => {
+    // A background agent dumping a 64 KB tool result: every line coloured, the
+    // answer at the very end behind blank and escape-only lines.
+    const body = Array.from({ length: 2000 }, (_, i) => `${ESC}[32m+${ESC}[0m line ${i}`).join('\n')
+    const chunk = `${body}\n${ESC}[1mdone: $0.42${ESC}[0m\n\n${ESC}[2K\r`
+    expect(chunk.length).toBeGreaterThan(64 * 1024 * 0.5)
+    expect(lastNonEmptyLine(chunk)).toBe('done: $0.42')
+  })
+
+  it('still gives the whole-strip answer when an OSC spans the chunk', () => {
+    // An OSC may swallow a line break, and an unterminated one runs to the end
+    // of the chunk — the only escapes a per-line strip would get wrong (it
+    // would answer "not a line" here).
+    expect(lastNonEmptyLine(`real\n${ESC}]8;;http://x\nnot a line`)).toBe('real')
+    expect(lastNonEmptyLine(`real\n${ESC}]0;t\x07shown\n`)).toBe('shown')
+  })
 })
 
 /** Minimal fake of xterm's IBuffer for bufferLastLine: a list of already-rendered

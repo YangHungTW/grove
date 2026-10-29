@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest'
 import {
   TmuxControlParser,
   unescapeOutput,
-  toSendKeysHex,
   parseLayoutSize,
   paneIdFromReply,
   sendKeysCommands,
@@ -26,13 +25,17 @@ describe('unescapeOutput', () => {
     expect(unescapeOutput('\xe4\xbd\xa0')).toBe('\xe4\xbd\xa0') // 你 bytes, untouched
     expect(unescapeOutput('\xe4\\012')).toBe('\xe4\n') // literal byte + octal LF
   })
-})
 
-describe('toSendKeysHex', () => {
-  it('hex-encodes UTF-8 bytes space-separated', () => {
-    expect(toSendKeysHex('hi')).toBe('68 69')
-    expect(toSendKeysHex('\r')).toBe('0d')
-    expect(toSendKeysHex('你')).toBe('e4 bd a0')
+  it('leaves a backslash that is not followed by three octal digits as text', () => {
+    // Defensive: tmux escapes every backslash as \134, so a bare one is never
+    // expected — but the scanner must not eat it, or a torn/short tail, either.
+    expect(unescapeOutput('a\\b')).toBe('a\\b')
+    expect(unescapeOutput('a\\08b')).toBe('a\\08b')
+    expect(unescapeOutput('tail\\01')).toBe('tail\\01')
+    expect(unescapeOutput('end\\')).toBe('end\\')
+    // Two backslashes then digits: the first is literal, the second escapes.
+    expect(unescapeOutput('\\\\033')).toBe('\\\x1b')
+    expect(unescapeOutput('\\033\\134\\015')).toBe('\x1b\\\r')
   })
 })
 

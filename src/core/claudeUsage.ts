@@ -109,12 +109,41 @@ export function parseTranscriptUsage(jsonl: string): TranscriptUsage | null {
   return { input, output, cacheRead, cacheWrite, costUsd, model, contextTokens, lastTs }
 }
 
-// Parse cache so a 30s poll doesn't re-read multi-MB transcripts that didn't
-// change. Keyed by file path; invalidated by mtime+size.
-const fileCache = new Map<
-  string,
-  { mtimeMs: number; size: number; parsed: TranscriptUsage | null }
->()
+/** What the last poll learned about one transcript file. */
+interface TranscriptEntry {
+  mtimeMs: number
+  size: number
+  /** When that stat was taken; see RESTAT_MS. */
+  checkedAt: number
+  /** Null for a file outside the window (never read) or with no usage in it. */
+  parsed: TranscriptUsage | null
+}
+
+// Per-file cache so a 30s poll doesn't re-read multi-MB transcripts that didn't
+// change. Keyed by project dir, then file name; invalidated by mtime+size. Each
+// dir's map is pruned to the names its latest listing showed, so the cache
+// tracks what is on disk instead of growing for the life of the process.
+const dirCache = new Map<string, Map<string, TranscriptEntry>>()
+
+/** How long a transcript already known to predate the window goes without a stat.
+ *
+ * A project dir holds every session ever run there, and the window is today:
+ * stat-ing months of old transcripts on every poll was most of the work for a
+ * result that never changes. A session resumed after lying dormant past the
+ * window edge is caught on the next re-check. */
+const RESTAT_MS = 5 * 60_000
+
+/** Test hook: forget every parsed file, as a fresh process would. */
+export function resetClaudeUsageCache(): void {
+  dirCache.clear()
+}
+
+/** Test hook: how many transcript files the cache currently remembers. */
+export function cachedTranscriptCount(): number {
+  let n = 0
+  for (const files of dirCache.values()) n += files.size
+  return n
+}
 
 /**
  * Aggregate Claude usage for sessions launched in `worktreePath` whose
@@ -131,8 +160,16 @@ export async function worktreeClaudeUsage(
   try {
     names = await readdir(dir)
   } catch {
+    dirCache.delete(dir)
     return null // no Claude sessions for this path
   }
+  let files = dirCache.get(dir)
+  if (!files) {
+    files = new Map()
+    dirCache.set(dir, files)
+  }
+  const now = Date.now()
+  const listed = new Set<string>()
   const totals: WorktreeUsage = {
     input: 0,
     output: 0,
@@ -146,26 +183,32 @@ export async function worktreeClaudeUsage(
   }
   for (const name of names) {
     if (!name.endsWith('.jsonl')) continue
-    const path = join(dir, name)
+    listed.add(name)
+    let entry = files.get(name)
+    if (entry && entry.mtimeMs < sinceMs && now - entry.checkedAt < RESTAT_MS) continue
     let s: { mtimeMs: number; size: number }
     try {
-      s = await stat(path)
+      s = await stat(join(dir, name))
     } catch {
+      files.delete(name)
       continue
     }
-    if (s.mtimeMs < sinceMs) continue
-    let cached = fileCache.get(path)
-    if (!cached || cached.mtimeMs !== s.mtimeMs || cached.size !== s.size) {
+    if (!entry || entry.mtimeMs !== s.mtimeMs || entry.size !== s.size) {
       let parsed: TranscriptUsage | null = null
-      try {
-        parsed = parseTranscriptUsage(await readFile(path, 'utf8'))
-      } catch {
-        /* unreadable — skip */
+      if (s.mtimeMs >= sinceMs) {
+        try {
+          parsed = parseTranscriptUsage(await readFile(join(dir, name), 'utf8'))
+        } catch {
+          /* unreadable — skip */
+        }
       }
-      cached = { mtimeMs: s.mtimeMs, size: s.size, parsed }
-      fileCache.set(path, cached)
+      entry = { mtimeMs: s.mtimeMs, size: s.size, checkedAt: now, parsed }
+      files.set(name, entry)
+    } else {
+      entry.checkedAt = now
     }
-    const p = cached.parsed
+    if (s.mtimeMs < sinceMs) continue
+    const p = entry.parsed
     if (!p) continue
     totals.sessions++
     totals.input += p.input
@@ -179,5 +222,6 @@ export async function worktreeClaudeUsage(
       totals.contextTokens = p.contextTokens
     }
   }
+  for (const name of files.keys()) if (!listed.has(name)) files.delete(name)
   return totals.sessions > 0 ? totals : null
 }

@@ -3,6 +3,7 @@
  * Electron-free so the launch string + session naming are unit-testable without
  * spawning anything. The main process turns these into a real pty.
  */
+import { shellQuote } from './shellQuote'
 
 /**
  * Deterministic, tmux-safe session name for a durable agent. tmux session names
@@ -56,11 +57,6 @@ export function buildTmuxKill(
   }
 }
 
-/** Single-quote a string for safe embedding inside a POSIX `sh -lc '...'`. */
-function shSingleQuote(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`
-}
-
 /**
  * Build the launch for a durable agent via tmux CONTROL MODE. `tmux -CC` emits a
  * text protocol instead of drawing a screen (parsed by `TmuxControlParser`), so
@@ -97,6 +93,6 @@ export function buildTmuxControlLaunch(
 ): { command: string; args: string[] } {
   const tmuxCmd =
     `exec tmux -CC new-session -A -s ${name} -x ${cols} -y ${rows} ` +
-    `${shell} -ilc ${shSingleQuote(`unset TMUX TMUX_PANE; ${agentCmd}`)}`
+    `${shell} -ilc ${shellQuote(`unset TMUX TMUX_PANE; ${agentCmd}`)}`
   return { command: shell, args: ['-lc', tmuxCmd] }
 }

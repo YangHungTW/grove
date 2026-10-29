@@ -44,8 +44,3 @@ export function detectState(buffer: string, agent: string): SessionState {
   }
   return 'idle'
 }
-
-/** Agents with a registered detection strategy. */
-export function supportedAgents(): string[] {
-  return Object.keys(STRATEGIES)
-}

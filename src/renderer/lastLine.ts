@@ -17,13 +17,31 @@ import { stripAnsi } from '../core/ansi'
  * line doesn't concatenate a stale value onto the fresh one — e.g.
  * "$3,232,025\r$323.35" reads as "$323.35", not "…025$323.35". It cannot fully
  * emulate cursor-addressed (Ink-style) repaints; a visible pane should use
- * bufferLastLine, which reads the terminal's already-resolved screen. */
+ * bufferLastLine, which reads the terminal's already-resolved screen.
+ *
+ * Runs on every pty chunk of every pane that is not on screen, so it must not
+ * cost in proportion to the chunk: a background agent dumping a 64 KB tool
+ * result is thousands of lines, of which one is wanted. Scan backwards from the
+ * end and strip only the line that is returned. An OSC is the one escape that
+ * may legally swallow a line break (and an unterminated one runs to the end of
+ * the chunk), so a chunk carrying one is stripped whole first — same answer as
+ * stripping everything, paid only when a title/hyperlink is in the chunk. */
 export function lastNonEmptyLine(data: string): string | null {
-  const lines = stripAnsi(data)
-    .split(/\r\n|\r|\n/)
-    .map((l) => l.trim())
-    .filter(Boolean)
-  return lines.length ? lines[lines.length - 1] : null
+  const stripped = data.includes('\x1b]')
+  const s = stripped ? stripAnsi(data) : data
+  let end = s.length
+  while (end > 0) {
+    let start = end
+    while (start > 0) {
+      const c = s.charCodeAt(start - 1)
+      if (c === 10 /* \n */ || c === 13 /* \r */) break
+      start--
+    }
+    const line = (stripped ? s.slice(start, end) : stripAnsi(s.slice(start, end))).trim()
+    if (line) return line
+    end = start - 1 // step over the terminator; \r\n leaves an empty line, skipped
+  }
+  return null
 }
 
 /** The last non-empty visible row exactly as xterm rendered it — authoritative
