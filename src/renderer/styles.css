@@ -581,39 +581,11 @@ button {
   font-weight: 700;
 }
 
-.card-confirm {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 6px;
-  font-size: 11px;
-  color: var(--fg);
-}
-.card-confirm span {
-  flex: 1;
-}
-.card-confirm button {
-  border: 0;
-  border-radius: 5px;
-  padding: 3px 8px;
-  font-size: 11px;
-  cursor: pointer;
-}
-.confirm-yes {
-  background: var(--danger);
-  color: #fff;
-}
-.confirm-no {
-  background: var(--panel-2);
-  color: var(--fg);
-}
-
 .project {
   margin-bottom: 4px;
 }
 
-.project-header,
-.wt-header {
+.project-header {
   display: flex;
   align-items: center;
   gap: 2px;
@@ -622,61 +594,7 @@ button {
 .project-header.active {
   background: rgba(79, 156, 255, 0.16);
 }
-.wt-header {
-  margin-left: 10px;
-}
-.wt-header.active {
-  background: rgba(79, 156, 255, 0.1);
-}
 
-.caret {
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  padding: 4px 4px 4px 6px;
-  font-size: 10px;
-  width: 22px;
-  flex: 0 0 auto;
-}
-.caret:hover {
-  color: var(--fg);
-}
-
-.wt-count {
-  font-size: 10px;
-  color: var(--muted);
-  background: var(--panel-2);
-  border-radius: 9px;
-  padding: 0 7px;
-  line-height: 16px;
-}
-.wt-count.attention {
-  background: var(--attention);
-  color: #1a1a1a;
-}
-
-.project-title,
-.wt-title {
-  flex: 1;
-  min-width: 0;
-  text-align: left;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  padding: 6px 6px;
-  cursor: pointer;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.project-title {
-  font-weight: 600;
-}
-.wt-title {
-  font-size: 12px;
-}
 .wt-status {
   font-size: 10px;
   color: var(--muted);
@@ -698,8 +616,6 @@ button {
   transition: color 0.1s;
 }
 .project-header:hover .row-x,
-.wt-header:hover .row-x,
-.session-row:hover .row-x,
 .card:hover .row-x,
 .tab:hover .tab-x {
   color: var(--muted);
@@ -707,54 +623,6 @@ button {
 .row-x:hover,
 .tab-x:hover {
   color: var(--danger) !important;
-}
-
-.session-row {
-  margin-left: 22px;
-  padding: 4px 6px;
-  border-radius: var(--radius);
-}
-.session-row:hover {
-  background: rgba(255, 255, 255, 0.05);
-}
-.session-row.active {
-  background: rgba(79, 156, 255, 0.2);
-}
-.session-row.attention {
-  box-shadow: inset 0 0 0 1px var(--attention);
-}
-.session-top {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.session-label {
-  flex: 1;
-  min-width: 0;
-  text-align: left;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.session-state {
-  font-size: 9px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--muted);
-}
-.session-line {
-  margin: 2px 0 0 16px;
-  font-size: 10px;
-  color: var(--muted);
-  font-family: "MesloLGS NF", Menlo, monospace;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .dot {
@@ -800,23 +668,6 @@ button {
 }
 .actions button:hover {
   background: #383841;
-}
-
-.new-worktree,
-.wt-input {
-  width: calc(100% - 10px);
-  margin: 0 0 8px 10px;
-  padding: 6px 8px;
-  border: 0;
-  border-radius: var(--radius);
-  font-size: 11px;
-  background: var(--panel-2);
-  color: var(--fg);
-  cursor: pointer;
-}
-.wt-input {
-  cursor: text;
-  outline: 1px solid var(--accent);
 }
 
 /* ---------- content (tab bar + panes) ---------- */
@@ -946,17 +797,6 @@ button {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-.tab-rename {
-  width: 110px;
-  background: var(--bg);
-  border: 1px solid var(--accent);
-  border-radius: 4px;
-  color: var(--fg);
-  font-size: 12px;
-  font-family: inherit;
-  padding: 2px 5px;
-  outline: none;
 }
 .tab-x {
   display: inline-flex;
@@ -1138,36 +978,6 @@ button {
   opacity: 0.4;
   cursor: default;
 }
-.agent-add {
-  position: relative;
-}
-.agent-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  min-width: 130px;
-  background: var(--panel-2);
-  border: 1px solid #000;
-  border-radius: var(--radius);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-  padding: 4px;
-  z-index: 40;
-  display: flex;
-  flex-direction: column;
-}
-.agent-menu button {
-  text-align: left;
-  background: transparent !important;
-  border: 0;
-  color: var(--fg);
-  padding: 6px 10px;
-  border-radius: 5px;
-  font-size: 12px;
-  cursor: pointer;
-}
-.agent-menu button:hover {
-  background: rgba(255, 255, 255, 0.07) !important;
-}
 .toolbar-sep {
   width: 1px;
   align-self: stretch;
@@ -1302,11 +1112,6 @@ button {
 .theme-customs {
   display: flex;
   gap: 6px;
-}
-.agent-missing {
-  color: var(--muted);
-  font-style: italic;
-  font-size: 11px;
 }
 .agent-edit {
   display: flex;

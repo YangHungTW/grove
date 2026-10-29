@@ -1,4 +1,6 @@
 /** Solid, monochrome SVG icons (fill = currentColor). No emoji. */
+import { DIFF_ICON, VIEWER_ICON } from './store'
+
 type P = { size?: number; className?: string }
 const svg = (
   size: number,
@@ -170,7 +172,7 @@ export function AgentTabIcon({ icon, size = 13 }: { icon?: string; size?: number
   if (icon === '★') return <StarIcon size={size} />
   if (icon === '◆') return <HexIcon size={size} />
   if (icon === '✦') return <SparkleIcon size={size} />
-  if (icon === '▤') return <DocIcon size={size} />
-  if (icon === '±') return <DiffIcon size={size} />
+  if (icon === VIEWER_ICON) return <DocIcon size={size} />
+  if (icon === DIFF_ICON) return <DiffIcon size={size} />
   return <AgentIcon size={size} />
 }

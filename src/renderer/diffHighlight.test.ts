@@ -1,5 +1,19 @@
 import { describe, it, expect } from 'vitest'
-import { extToLang, highlightDiffLine } from './diffHighlight'
+import hljs from 'highlight.js/lib/common'
+import { EXT_LANG, extToLang, highlightDiffLine } from './diffHighlight'
+
+describe('EXT_LANG only names registered languages', () => {
+  // The module imports 'highlight.js/lib/common' (plus a couple of individually
+  // registered grammars) to keep the full 190-grammar build out of the renderer
+  // chunk. An unregistered id would silently fall back to plain text, so pin
+  // every mapped id to a grammar the module actually registered. hljs/lib/common
+  // is a singleton, so the module's registerLanguage calls are visible here.
+  it('every mapped language id resolves via hljs.getLanguage', () => {
+    for (const id of new Set(Object.values(EXT_LANG))) {
+      expect(hljs.getLanguage(id), `EXT_LANG id "${id}" is not registered`).toBeDefined()
+    }
+  })
+})
 
 describe('extToLang', () => {
   it('maps known extensions to highlight.js language ids', () => {

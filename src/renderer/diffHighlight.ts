@@ -2,8 +2,20 @@
  * synchronous and self-escaping, so it slots into the existing hand-escaped diff
  * renderer without re-introducing an injection vector: `highlightDiffLine` is the
  * ONLY producer of the HTML fed to `dangerouslySetInnerHTML`, and it always
- * escapes (hljs escapes; the fallback escapes manually). */
-import hljs from 'highlight.js'
+ * escapes (hljs escapes; the fallback escapes manually).
+ *
+ * The `common` bundle (~36 languages), NOT the full build: `highlight.js` proper
+ * registers all 190+ grammars and put ~1 MB of parse-on-launch JS into the main
+ * renderer chunk for ids EXT_LANG never returns. A test pins every EXT_LANG value
+ * to a registered language; a new id outside the common bundle must be
+ * registered individually from 'highlight.js/lib/languages/<id>', as below. */
+import hljs from 'highlight.js/lib/common'
+import scala from 'highlight.js/lib/languages/scala'
+import dockerfile from 'highlight.js/lib/languages/dockerfile'
+
+// The two EXT_LANG ids the common bundle leaves out (each a few KB).
+hljs.registerLanguage('scala', scala)
+hljs.registerLanguage('dockerfile', dockerfile)
 
 /** Escape the five HTML-significant characters. Used for the no-language fallback
  * so the output is exactly what React children would have rendered. */
@@ -17,8 +29,9 @@ function escapeHtml(s: string): string {
 }
 
 /** File extension → highlight.js language id. Only returns ids hljs registers in
- * its common bundle; anything unknown returns undefined (→ plain escaped text). */
-const EXT_LANG: Record<string, string> = {
+ * its common bundle; anything unknown returns undefined (→ plain escaped text).
+ * Exported for the test that enforces that bundle invariant. */
+export const EXT_LANG: Record<string, string> = {
   ts: 'typescript',
   tsx: 'typescript',
   cts: 'typescript',

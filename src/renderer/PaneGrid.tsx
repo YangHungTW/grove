@@ -1,4 +1,5 @@
 import {
+  memo,
   useEffect,
   useRef,
   useState,
@@ -31,16 +32,7 @@ export function PaneGrid(): JSX.Element {
   const panes = s.visiblePanes() // [{ id, group }] — one active pane per column
   const colOf = new Map(panes.map((p) => [p.id, p.group + 1]))
   const ref = useRef<HTMLDivElement>(null)
-  const [size, setSize] = useState({ w: 0, h: 0 })
-
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const ro = new ResizeObserver(() => setSize({ w: el.clientWidth, h: el.clientHeight }))
-    ro.observe(el)
-    setSize({ w: el.clientWidth, h: el.clientHeight })
-    return () => ro.disconnect()
-  }, [])
+  const ideEnabled = s.canOpenInIde()
 
   function startDrag(e: MouseEvent, i: number): void {
     e.preventDefault()
@@ -67,6 +59,9 @@ export function PaneGrid(): JSX.Element {
     document.addEventListener('mouseup', onUp)
   }
 
+  // Gutter positions as a percentage of the grid, so the browser tracks the
+  // grid's width itself. Measuring it in px here needed a ResizeObserver →
+  // setState → one more render of every pane per window-resize frame.
   const gutters: JSX.Element[] = []
   const ctot = s.colFr.reduce((a, b) => a + b, 0) || 1
   let acc = 0
@@ -76,7 +71,7 @@ export function PaneGrid(): JSX.Element {
       <div
         key={'c' + i}
         className="gutter gutter-col"
-        style={{ left: (size.w * acc) / ctot - 3 }}
+        style={{ left: `calc(${(acc / ctot) * 100}% - 3px)` }}
         onMouseDown={(e) => startDrag(e, i)}
       />
     )
@@ -104,6 +99,7 @@ export function PaneGrid(): JSX.Element {
             visible={colOf.has(sess.id)}
             column={colOf.get(sess.id) ?? 1}
             focused={sess.id === s.focusedSessionId}
+            ideEnabled={ideEnabled}
           />
         ) : (
           <Pane
@@ -124,7 +120,13 @@ export function PaneGrid(): JSX.Element {
   )
 }
 
-function Pane({
+/**
+ * One terminal pane. Memoized: PaneGrid renders on every ui notify (a gutter
+ * drag is one per mousemove), and each render used to re-run every Pane. The
+ * props are primitives plus `session`, whose identity only changes on rename —
+ * and the pane reads nothing from it but id/kind/worktreeId.
+ */
+const Pane = memo(function Pane({
   session,
   visible,
   column,
@@ -494,4 +496,4 @@ function Pane({
       {dragOver && <div className="pane-drop-hint">Drop to paste file path</div>}
     </div>
   )
-}
+})

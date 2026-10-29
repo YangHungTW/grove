@@ -40,6 +40,24 @@ const ATLAS_SETTLE_MS = 180
  * frames of slack, not a guess at how long a repaint takes. */
 const REPAINT_VERIFY_MS = 120
 
+/** How long a meta/fleet change waits for stragglers before the sidebar is
+ * told. One worktree card refresh is two IPC round-trips and the 20s poll fires
+ * them for every worktree; each reply lands in its own task, so a microtask
+ * would not fold them. A frame's worth of delay is invisible on sidebar data
+ * and turns a 12-worktree burst (~24 full Sidebar renders) into one. */
+const META_EMIT_MS = 30
+
+/** The settings keys applyAppearance() reads — a patch touching none of them
+ * leaves the terminals alone (see updateSettings). */
+const APPEARANCE_KEYS: ReadonlyArray<keyof AppSettings> = [
+  'background',
+  'foreground',
+  'opacity',
+  'transparent',
+  'fontFamily',
+  'fontSize'
+]
+
 export interface WorktreeView {
   id: string // = path
   path: string
@@ -208,6 +226,8 @@ export class Store {
   // Per pane, not one shared timer: panes stream independently, and a shared
   // timer made every streaming pane re-rasterize in the same frame.
   private atlasTimers = new Map<string, number>()
+  /** A durable pane's settle-mask timers (see fitVisible), cleared on close. */
+  private settleTimers = new Map<string, number[]>()
   // Panes wheeled since the last scroll-repaint tick — see scheduleScrollRepaint.
   private scrollPanes = new Set<string>()
   private scrollTimer: ReturnType<typeof setTimeout> | undefined
@@ -233,7 +253,12 @@ export class Store {
   getVersion = (): number => this.versions.ui
   /** Strictly increases when ANY slice bumps — the Sidebar's snapshot. */
   getAllVersion = (): number => this.versions.ui + this.versions.meta + this.versions.fleet
+  private metaEmitTimer: number | undefined
   private emit(): void {
+    // A ui emit re-renders the Sidebar too (its snapshot sums all slices), so a
+    // meta/fleet emit still waiting its turn has nothing left to say.
+    window.clearTimeout(this.metaEmitTimer)
+    this.metaEmitTimer = undefined
     this.listeners.forEach((l) => l())
   }
   private notify(): void {
@@ -241,14 +266,23 @@ export class Store {
     this.emit()
   }
   /** Sidebar-card data changed (wtStatus/usage/PR/lastLine) — nothing outside
-   * the sidebar reads it, so the rest of the tree stays quiet. */
+   * the sidebar reads it, so the rest of the tree stays quiet. The version bumps
+   * at once (a snapshot read sees it), but the emit is coalesced: a burst of
+   * card refreshes is one Sidebar render, not one per reply. */
   private notifyMeta(): void {
     this.versions.meta++
-    this.emit()
+    this.scheduleMetaEmit()
   }
   private notifyFleet(): void {
     this.versions.fleet++
-    this.emit()
+    this.scheduleMetaEmit()
+  }
+  private scheduleMetaEmit(): void {
+    if (this.metaEmitTimer !== undefined) return
+    this.metaEmitTimer = window.setTimeout(() => {
+      this.metaEmitTimer = undefined
+      this.emit()
+    }, META_EMIT_MS)
   }
 
   // --- selectors ---------------------------------------------------------
@@ -476,8 +510,10 @@ export class Store {
       el.style.display = 'none'
       requestAnimationFrame(() => {
         // React owns this style and will set it back on its next render; writing
-        // it here keeps the pane visible in the meantime.
-        el.style.display = 'block'
+        // it here keeps the pane visible in the meantime — unless the pane was
+        // hidden in between (tab/worktree switch), in which case showing it
+        // would put a stale pane on top of the one React just revealed.
+        if (this.visibleSessions().includes(id)) el.style.display = 'block'
         requestAnimationFrame(paint)
       })
       return
@@ -581,6 +617,8 @@ export class Store {
     this.shownOnce.delete(id)
     window.clearTimeout(this.atlasTimers.get(id))
     this.atlasTimers.delete(id)
+    for (const t of this.settleTimers.get(id) ?? []) window.clearTimeout(t)
+    this.settleTimers.delete(id)
     window.clearTimeout(this.repaintChecks.get(id))
     this.repaintChecks.delete(id)
     this.paneUnstuck.delete(id)
@@ -682,22 +720,28 @@ export class Store {
             this.settledOnce.add(id)
             this.settling.add(id)
             this.notify()
-            setTimeout(() => {
-              const p = this.panes.get(id)
-              if (!p) return
-              p.term.resize(cols, rows - 1)
-              window.api.sessionResize(id, cols, rows - 1)
-            }, 350)
-            setTimeout(() => {
-              const p = this.panes.get(id)
-              if (!p) return
-              p.term.resize(cols, rows)
-              window.api.sessionResize(id, cols, rows)
-            }, 480)
-            setTimeout(() => {
-              this.settling.delete(id)
-              this.notify()
-            }, 750)
+            // Tracked per pane (like atlasTimers) so closing the tab mid-settle
+            // cancels them, rather than the 750ms one firing a notify for a
+            // pane that no longer exists.
+            this.settleTimers.set(id, [
+              window.setTimeout(() => {
+                const p = this.panes.get(id)
+                if (!p) return
+                p.term.resize(cols, rows - 1)
+                window.api.sessionResize(id, cols, rows - 1)
+              }, 350),
+              window.setTimeout(() => {
+                const p = this.panes.get(id)
+                if (!p) return
+                p.term.resize(cols, rows)
+                window.api.sessionResize(id, cols, rows)
+              }, 480),
+              window.setTimeout(() => {
+                this.settleTimers.delete(id)
+                this.settling.delete(id)
+                this.notify()
+              }, 750)
+            ])
           } else {
             pane.term.resize(cols, rows - 1)
             window.api.sessionResize(id, cols, rows - 1)
@@ -1706,16 +1750,6 @@ export class Store {
     this.searchSessionId = id
     this.notify()
   }
-  /** Whether terminal search can only reach the visible screen for the pane whose
-   * search bar is open: true when the app has put xterm on the ALTERNATE buffer
-   * (a full-screen TUI like Claude Code that paints + scrolls its own transcript),
-   * which has no xterm scrollback for SearchAddon to traverse. Lets the UI say so
-   * rather than silently finding only on-screen matches. */
-  searchLimitedToScreen(): boolean {
-    const id = this.searchSessionId
-    const term = id ? this.panes.get(id)?.term : undefined
-    return !searchCoversScrollback(term?.buffer.active.type)
-  }
   closeSearch(refocus = true): void {
     const id = this.searchSessionId
     if (!id) return
@@ -1752,9 +1786,6 @@ export class Store {
   }
   closeFocused(): void {
     if (this.focusedSessionId) this.closeSession(this.focusedSessionId)
-  }
-  newShellInActive(): void {
-    if (this.activeWorktreeId) void this.addSession(this.activeWorktreeId, 'shell')
   }
   /** Populate availableSkills for a project (New task dialog opening). Failure
    * is silently an empty list: skills are optional, and a project with no
@@ -1948,18 +1979,29 @@ export class Store {
     void this.updateSettings({ sidebarCollapsed: !this.settings.sidebarCollapsed })
   }
   async updateSettings(patch: Partial<AppSettings>): Promise<void> {
+    this.previewSettings(patch)
+    // Persist in the background. The local merge is authoritative — don't reassign
+    // from the result, or an out-of-order save during fast typing would revert it.
+    await window.api.settingsSave(patch)
+  }
+  /** Apply a settings patch to the running app WITHOUT persisting it. The
+   * settings sliders call this per step so the font size / opacity track the
+   * drag live, and commit the final value through updateSettings once the drag
+   * settles — one settings-file write per gesture instead of one per notch. */
+  previewSettings(patch: Partial<AppSettings>): void {
     // Apply optimistically + synchronously so controlled inputs (e.g. the folder
     // template) keep their caret. Previously this awaited the IPC save FIRST, so
     // the controlled value lagged a tick and the cursor jumped to the end on every
     // keystroke (and fast typing dropped chars).
     this.settings = { ...this.settings, ...patch }
-    this.applyAppearance()
+    // Only a patch that can change how things LOOK re-themes the terminals. This
+    // used to run unconditionally, and a sidebar drag release, a project
+    // collapse, a tab reorder or a keystroke in a settings text field all go
+    // through here — each one re-themed and fully repainted every pane.
+    if (APPEARANCE_KEYS.some((k) => k in patch)) this.applyAppearance()
     // Font changes alter the cell size → re-fit visible panes (rows/cols change).
     if ('fontFamily' in patch || 'fontSize' in patch) this.fitVisible()
     this.notify()
-    // Persist in the background. The local merge is authoritative — don't reassign
-    // from the result, or an out-of-order save during fast typing would revert it.
-    await window.api.settingsSave(patch)
   }
   /**
    * Apply background colour / transparency. Only sets CSS variables — terminals
@@ -1995,13 +2037,21 @@ export class Store {
     }
     // Apply theme + font to live terminals too. (Font changes also need a refit
     // since the cell size changes — updateSettings triggers fitVisible for that.)
+    // Each option is written only when its value actually differs: xterm's
+    // option setter dedupes by `!==`, so handing it a fresh theme object every
+    // time counted as a change and fired onChangeColors → a full WebGL repaint,
+    // atlas refresh and cell re-measure on EVERY pane, even for a no-op patch.
     const font = this.terminalFont()
     for (const { term } of this.panes.values()) {
       try {
-        term.options.allowTransparency = s.transparent
-        term.options.theme = { background: termBg, foreground: s.foreground }
-        term.options.fontFamily = font.fontFamily
-        term.options.fontSize = font.fontSize
+        const o = term.options
+        if (o.allowTransparency !== s.transparent) o.allowTransparency = s.transparent
+        const t = o.theme
+        if (t?.background !== termBg || t?.foreground !== s.foreground) {
+          o.theme = { background: termBg, foreground: s.foreground }
+        }
+        if (o.fontFamily !== font.fontFamily) o.fontFamily = font.fontFamily
+        if (o.fontSize !== font.fontSize) o.fontSize = font.fontSize
       } catch {
         /* ignore */
       }
@@ -2212,15 +2262,15 @@ export class Store {
   }
 }
 
-function hexToRgba(hex: string, alpha: number): string {
-  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex.trim())
-  if (!m) return hex
-  const [r, g, b] = [m[1], m[2], m[3]].map((h) => parseInt(h, 16))
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`
-}
+/** `#rrggbb` (hash optional) → [r, g, b], or null for anything else. */
 function parseHex(hex: string): [number, number, number] | null {
   const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex.trim())
   return m ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)] : null
+}
+/** `#rrggbb` + alpha → `rgba(...)`; a non-hex value passes through unchanged. */
+function hexToRgba(hex: string, alpha: number): string {
+  const c = parseHex(hex)
+  return c ? `rgba(${c[0]}, ${c[1]}, ${c[2]}, ${alpha})` : hex
 }
 /** Blend `a` toward `b` by `t` (0..1); used to derive panel shades from the bg. */
 function mix(a: string, b: string, t: number): string {

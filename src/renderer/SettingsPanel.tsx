@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type InputHTMLAttributes } from 'react'
 import type { AgentDef } from '../core/settings'
 import { parseSkillList } from '../core/skills'
 import { useStore } from './useStore'
@@ -132,29 +132,19 @@ export function SettingsPanel(): JSX.Element | null {
         {fontIsCustom && (
           <label className="settings-row">
             <span>Custom font</span>
-            <input
+            <DraftInput
               type="text"
               className="key-input"
               style={{ width: 184 }}
               value={cfg.fontFamily}
               spellCheck={false}
               placeholder="Exact font name"
-              onChange={(e) => void store.updateSettings({ fontFamily: e.target.value })}
+              onCommit={(v) => void store.updateSettings({ fontFamily: v })}
             />
           </label>
         )}
 
-        <label className="settings-row">
-          <span>Font size {cfg.fontSize}px</span>
-          <input
-            type="range"
-            min={9}
-            max={24}
-            step={1}
-            value={cfg.fontSize}
-            onChange={(e) => void store.updateSettings({ fontSize: Number(e.target.value) })}
-          />
-        </label>
+        <FontSizeRow value={cfg.fontSize} />
 
         <label className="settings-row">
           <span title="Off = canvas 2D. Slightly laggier typing, but immune to the WebGL glyph corruption some GPUs show on an agent's status row.">
@@ -183,18 +173,7 @@ export function SettingsPanel(): JSX.Element | null {
           />
         </label>
 
-        <label className="settings-row">
-          <span>Opacity {Math.round(cfg.opacity * 100)}%</span>
-          <input
-            type="range"
-            min={0.3}
-            max={1}
-            step={0.05}
-            value={cfg.opacity}
-            disabled={!cfg.transparent}
-            onChange={(e) => void store.updateSettings({ opacity: Number(e.target.value) })}
-          />
-        </label>
+        <OpacityRow value={cfg.opacity} disabled={!cfg.transparent} />
 
         <div className="settings-section">Sessions</div>
         <label
@@ -231,14 +210,14 @@ export function SettingsPanel(): JSX.Element | null {
           <>
             <label className="settings-row">
               <span>Editor command</span>
-              <input
+              <DraftInput
                 type="text"
                 className="key-input"
                 style={{ width: 184 }}
                 value={ide.command}
                 spellCheck={false}
                 placeholder="e.g. code, subl, nvim"
-                onChange={(e) => updateIde({ command: e.target.value })}
+                onCommit={(v) => updateIde({ command: v })}
               />
             </label>
             <label className="settings-row">
@@ -261,24 +240,24 @@ export function SettingsPanel(): JSX.Element | null {
           const isInstalled = installedById.get(a.id)
           return (
             <div className="agent-edit" key={a.id}>
-              <input
+              <DraftInput
                 className="agent-icon"
                 value={a.icon}
                 title="Icon"
-                onChange={(e) => updateAgent(i, { icon: e.target.value })}
+                onCommit={(v) => updateAgent(i, { icon: v })}
               />
-              <input
+              <DraftInput
                 className="agent-name"
                 value={a.name}
                 placeholder="Name"
-                onChange={(e) => updateAgent(i, { name: e.target.value })}
+                onCommit={(v) => updateAgent(i, { name: v })}
               />
-              <input
+              <DraftInput
                 className="agent-cmd"
                 value={a.command}
                 placeholder="command"
                 spellCheck={false}
-                onChange={(e) => updateAgent(i, { command: e.target.value })}
+                onCommit={(v) => updateAgent(i, { command: v })}
               />
               <span
                 className={'agent-state ' + (isInstalled ? 'ok' : 'missing')}
@@ -313,11 +292,11 @@ export function SettingsPanel(): JSX.Element | null {
 
         <label className="settings-col">
           <span>Folder template (relative to project)</span>
-          <input
+          <DraftInput
             type="text"
             value={cfg.worktreeFolder}
             placeholder="../{repo}-wt-{branch}"
-            onChange={(e) => void store.updateSettings({ worktreeFolder: e.target.value })}
+            onCommit={(v) => void store.updateSettings({ worktreeFolder: v })}
           />
           <small>Placeholders: {'{repo}'}, {'{branch}'}, {'{timestamp}'}</small>
         </label>
@@ -330,14 +309,14 @@ export function SettingsPanel(): JSX.Element | null {
         {KEYBIND_LABELS.map(({ action, label }) => (
           <label className="settings-row" key={action}>
             <span>{label}</span>
-            <input
+            <DraftInput
               type="text"
               className="key-input"
               value={cfg.keybindings[action]}
               spellCheck={false}
-              onChange={(e) =>
+              onCommit={(v) =>
                 void store.updateSettings({
-                  keybindings: { ...cfg.keybindings, [action]: e.target.value }
+                  keybindings: { ...cfg.keybindings, [action]: v }
                 })
               }
             />
@@ -359,6 +338,135 @@ export function SettingsPanel(): JSX.Element | null {
         </small>
       </div>
     </div>
+  )
+}
+
+/** How long a settings text field / slider waits after the last edit before
+ * committing to the store. Long enough to swallow a typing burst or a slider
+ * drag, short enough that a pause reads as "applied". */
+const DRAFT_COMMIT_MS = 300
+
+/**
+ * Hold a field's value locally while it is being edited and commit it on a
+ * trailing debounce — or at once on blur / Enter / unmount. Every change used
+ * to go straight to store.updateSettings: one IPC settings-file write per
+ * keystroke or slider notch, and for the font fields a re-theme + refit of
+ * every pane per character. store.updateSettings itself stays immediate (and
+ * its tests count saves); only these controls coalesce. The draft is the
+ * input's value while editing, so the caret never fights a lagging store value.
+ *
+ * `onPreview`, when given, runs on EVERY edit (the sliders pass
+ * store.previewSettings so the app tracks the drag live); only the save waits.
+ */
+function useDraft(
+  value: string,
+  onCommit: (v: string) => void,
+  onPreview?: (v: string) => void
+): { draft: string; edit: (v: string) => void; flush: () => void } {
+  // null = not editing → mirror the store (so a Reset / external change shows).
+  const [draft, setDraft] = useState<string | null>(null)
+  const pending = useRef<string | null>(null)
+  const timer = useRef<number | undefined>(undefined)
+  // Always commit through the latest closure: the callers build the patch from
+  // the current settings (keybindings map, agents list).
+  const commit = useRef(onCommit)
+  commit.current = onCommit
+  const preview = useRef(onPreview)
+  preview.current = onPreview
+  const commitPending = useCallback((): void => {
+    window.clearTimeout(timer.current)
+    const v = pending.current
+    pending.current = null
+    if (v !== null) commit.current(v)
+  }, [])
+  const flush = useCallback((): void => {
+    commitPending()
+    setDraft(null)
+  }, [commitPending])
+  const edit = useCallback(
+    (v: string): void => {
+      setDraft(v)
+      pending.current = v
+      preview.current?.(v)
+      window.clearTimeout(timer.current)
+      timer.current = window.setTimeout(flush, DRAFT_COMMIT_MS)
+    },
+    [flush]
+  )
+  // Closing the panel mid-edit must not lose the last keystrokes.
+  useEffect(() => commitPending, [commitPending])
+  return { draft: draft ?? value, edit, flush }
+}
+
+/** A text <input> whose value reaches the store through useDraft. */
+function DraftInput({
+  value,
+  onCommit,
+  ...rest
+}: Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange'> & {
+  value: string
+  onCommit: (v: string) => void
+}): JSX.Element {
+  const { draft, edit, flush } = useDraft(value, onCommit)
+  return (
+    <input
+      {...rest}
+      value={draft}
+      onChange={(e) => edit(e.target.value)}
+      onBlur={flush}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') flush()
+      }}
+    />
+  )
+}
+
+/** Font size slider: each step previews live (panes re-font as you drag); the
+ * value is saved once the drag settles. */
+function FontSizeRow({ value }: { value: number }): JSX.Element {
+  const { draft, edit, flush } = useDraft(
+    String(value),
+    (v) => void store.updateSettings({ fontSize: Number(v) }),
+    (v) => store.previewSettings({ fontSize: Number(v) })
+  )
+  return (
+    <label className="settings-row">
+      <span>Font size {draft}px</span>
+      <input
+        type="range"
+        min={9}
+        max={24}
+        step={1}
+        value={draft}
+        onChange={(e) => edit(e.target.value)}
+        onBlur={flush}
+      />
+    </label>
+  )
+}
+
+/** Opacity slider (enabled only while the window is transparent); previews
+ * live, saves once per gesture. */
+function OpacityRow({ value, disabled }: { value: number; disabled: boolean }): JSX.Element {
+  const { draft, edit, flush } = useDraft(
+    String(value),
+    (v) => void store.updateSettings({ opacity: Number(v) }),
+    (v) => store.previewSettings({ opacity: Number(v) })
+  )
+  return (
+    <label className="settings-row">
+      <span>Opacity {Math.round(Number(draft) * 100)}%</span>
+      <input
+        type="range"
+        min={0.3}
+        max={1}
+        step={0.05}
+        value={draft}
+        disabled={disabled}
+        onChange={(e) => edit(e.target.value)}
+        onBlur={flush}
+      />
+    </label>
   )
 }
 

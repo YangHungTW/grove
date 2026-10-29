@@ -226,10 +226,13 @@ describe('startTask (New task flow)', () => {
 // term.resize mirrors xterm (updates cols/rows) so the bounce logic in
 // fitVisible reads back what it wrote.
 function fakePane(): {
-  term: { cols: number; rows: number; paints: boolean; selected: boolean } & Record<
-    string,
-    ReturnType<typeof vi.fn>
-  >
+  term: {
+    cols: number
+    rows: number
+    paints: boolean
+    selected: boolean
+    options: Record<string, unknown>
+  } & Record<string, ReturnType<typeof vi.fn>>
   fit: { fit: ReturnType<typeof vi.fn> }
   refit: ReturnType<typeof vi.fn>
 } {
@@ -261,6 +264,9 @@ function fakePane(): {
     }),
     focus: vi.fn(),
     dispose: vi.fn(),
+    // Plain bag standing in for xterm's options proxy: applyAppearance writes
+    // theme/font here, and the test for it checks what landed.
+    options: {} as Record<string, unknown>,
     // Enough of the write/read surface for the onSessionData path: xterm parses
     // asynchronously and calls back, and the store then reads the resolved row.
     write: vi.fn((_data: string, cb?: () => void) => cb?.()),
@@ -509,6 +515,10 @@ describe('a pane whose renderer has latched off still gets painted', () => {
     const el = document.createElement('div')
     el.style.display = 'block'
     document.body.appendChild(el)
+    // The pane is the active worktree's one session, i.e. what React renders
+    // visible — the un-stick toggle only restores display for such a pane.
+    store.sessions.set('s1', { id: 's1', worktreeId: '/wt', kind: 'agent' } as never)
+    store.activeWorktreeId = '/wt'
     store.registerPane('s1', pane.term as never, pane.fit as never, undefined, pane.refit, el)
     return el
   }
@@ -600,6 +610,28 @@ describe('a pane whose renderer has latched off still gets painted', () => {
     await vi.advanceTimersByTimeAsync(500)
 
     expect(pane.term.clearSelection).not.toHaveBeenCalled()
+  })
+
+  it('does not re-show a pane that stopped being visible mid-toggle', async () => {
+    // The layout toggle hides the element for a frame and restores it by hand
+    // (React only writes the style on its next render). If the user switched
+    // worktree in that frame, restoring would stack a stale pane over the new
+    // one — so the restore has to re-check what should be on screen.
+    const store = new Store()
+    const pane = fakePane()
+    pane.term.paints = false
+    const el = register(store, pane)
+    const frames: FrameRequestCallback[] = []
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => frames.push(cb))
+
+    store.repaintPane('s1')
+    await vi.advanceTimersByTimeAsync(500) // verify fails → toggle: display none
+    expect(el.style.display).toBe('none')
+    store.activeWorktreeId = '/elsewhere' // switched away before the frame ran
+    frames.splice(0).forEach((cb) => cb(0))
+
+    expect(el.style.display).toBe('none')
+    vi.unstubAllGlobals()
   })
 })
 
@@ -1150,6 +1182,93 @@ describe('store slices (per-slice subscriptions)', () => {
     const ui = store.getVersion()
     store.focusSession('s1')
     expect(store.getVersion()).toBeGreaterThan(ui)
+  })
+
+  // One card refresh is two IPC replies, the 20s poll fires it for every
+  // worktree, and each reply used to emit on its own — a 12-worktree sidebar
+  // rendered ~24 times per poll. The versions still move at once (a snapshot
+  // read is never stale); only the listener call is held for the burst.
+  it('a burst of meta/fleet changes reaches listeners as ONE emit', () => {
+    const store = new Store()
+    const listener = vi.fn()
+    store.subscribe(listener)
+    const priv = store as unknown as { notifyMeta: () => void; notifyFleet: () => void }
+    const all = store.getAllVersion()
+    for (let i = 0; i < 10; i++) priv.notifyMeta()
+    priv.notifyFleet()
+    expect(store.getAllVersion()).toBe(all + 11)
+    expect(listener).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(100)
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  it('a ui notify flushes a pending meta emit instead of doubling it', () => {
+    const store = new Store()
+    const listener = vi.fn()
+    store.subscribe(listener)
+    ;(store as unknown as { notifyMeta: () => void }).notifyMeta()
+    store.setFractions([1, 1], [])
+    expect(listener).toHaveBeenCalledTimes(1)
+    vi.advanceTimersByTime(100)
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+})
+
+// applyAppearance used to run on EVERY settings patch and hand each terminal a
+// fresh theme object — which xterm's `!==` dedupe counts as a change, firing a
+// full WebGL repaint + atlas refresh per pane for a sidebar drag or a keystroke
+// in a settings text field.
+describe('updateSettings → terminal appearance', () => {
+  beforeEach(() => {
+    installApi()
+  })
+
+  it('a non-appearance patch leaves terminal options untouched', async () => {
+    const store = new Store()
+    const pane = fakePane()
+    store.registerPane('s1', pane.term as never, pane.fit as never)
+    await store.updateSettings({ sidebarCollapsed: true })
+    await store.updateSettings({ sidebarWidth: 300 })
+    await store.updateSettings({ worktreeFolder: '../x' })
+    expect(pane.term.options).toEqual({})
+  })
+
+  it('an appearance patch re-themes live terminals, and only when a value changed', async () => {
+    const store = new Store()
+    const pane = fakePane()
+    store.registerPane('s1', pane.term as never, pane.fit as never)
+    await store.updateSettings({ background: '#112233', foreground: '#eeeeee' })
+    const theme = pane.term.options.theme as { background: string; foreground: string }
+    expect(theme).toEqual({ background: '#112233', foreground: '#eeeeee' })
+    expect(pane.term.options.fontSize).toBe(store.terminalFont().fontSize)
+
+    // Same values again (e.g. the colour picker firing without a change): the
+    // theme object must keep its identity, or xterm repaints every pane.
+    await store.updateSettings({ background: '#112233' })
+    expect(pane.term.options.theme).toBe(theme)
+
+    await store.updateSettings({ background: '#445566' })
+    expect(pane.term.options.theme).not.toBe(theme)
+    expect((pane.term.options.theme as { background: string }).background).toBe('#445566')
+  })
+
+  // The sliders preview every step (the app must track the drag live) and save
+  // once the gesture settles — a settings-file write per notch was the cost.
+  it('previewSettings applies without saving; the final updateSettings saves once', async () => {
+    const { api } = installApi()
+    const store = new Store()
+    const pane = fakePane()
+    store.registerPane('s1', pane.term as never, pane.fit as never)
+    const ui = store.getVersion()
+    for (let size = 13; size <= 20; size++) store.previewSettings({ fontSize: size })
+    expect(store.settings.fontSize).toBe(20)
+    expect(pane.term.options.fontSize).toBe(20)
+    expect(store.getVersion()).toBeGreaterThan(ui)
+    expect(api.settingsSave).not.toHaveBeenCalled()
+
+    await store.updateSettings({ fontSize: 20 })
+    expect(api.settingsSave).toHaveBeenCalledTimes(1)
+    expect(api.settingsSave).toHaveBeenCalledWith({ fontSize: 20 })
   })
 })
 
