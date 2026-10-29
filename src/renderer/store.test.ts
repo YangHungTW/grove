@@ -440,7 +440,7 @@ describe('renderer-atlas plumbing (stale-glyph / doubled status-row fix)', () =>
     const pane = fakePane()
     store.registerPane('s1', pane.term as never, pane.fit as never)
     const clearTextureAtlas = vi.fn()
-    store.setRenderAddon('s1', { clearTextureAtlas })
+    store.setRenderAddon('s1', { clearTextureAtlas, dispose: vi.fn() })
 
     store.clearPaneAtlas('s1')
     expect(clearTextureAtlas).toHaveBeenCalledTimes(1)
@@ -451,7 +451,7 @@ describe('renderer-atlas plumbing (stale-glyph / doubled status-row fix)', () =>
     const pane = fakePane()
     store.registerPane('s1', pane.term as never, pane.fit as never)
     const clearTextureAtlas = vi.fn()
-    store.setRenderAddon('s1', { clearTextureAtlas })
+    store.setRenderAddon('s1', { clearTextureAtlas, dispose: vi.fn() })
     store.setRenderAddon('s1', null)
 
     expect(() => store.clearPaneAtlas('s1')).not.toThrow()
@@ -464,13 +464,30 @@ describe('renderer-atlas plumbing (stale-glyph / doubled status-row fix)', () =>
     const b = fakePane()
     store.registerPane('s1', a.term as never, a.fit as never)
     const clearTextureAtlas = vi.fn()
-    store.setRenderAddon('s1', { clearTextureAtlas })
+    store.setRenderAddon('s1', { clearTextureAtlas, dispose: vi.fn() })
     // <Pane> can re-run registerPane without the renderer effect re-firing; the
     // addon reference must survive so clears still reach the live renderer.
     store.registerPane('s1', b.term as never, b.fit as never)
 
     store.clearPaneAtlas('s1')
     expect(clearTextureAtlas).toHaveBeenCalledTimes(1)
+  })
+
+  it("closing a pane stops its WebGL renderer's cursor-blink timer before the terminal goes", () => {
+    // term.dispose() would dispose the addon itself — but plainly, which leaks
+    // a WebGL renderer through its never-disposed blink interval.
+    const store = new Store()
+    const pane = fakePane()
+    store.registerPane('s1', pane.term as never, pane.fit as never)
+    const order: string[] = []
+    pane.term.dispose.mockImplementation(() => order.push('term'))
+    store.setRenderAddon('s1', {
+      _renderer: { _cursorBlinkStateManager: { dispose: () => order.push('blink') } },
+      dispose: () => order.push('addon')
+    } as never)
+
+    store.unregisterPane('s1')
+    expect(order).toEqual(['blink', 'addon', 'term'])
   })
 })
 
@@ -680,7 +697,7 @@ describe('atlas clear under sustained output (garbled cost row while an agent ru
       store.sessions.set(id, { id, worktreeId: wtId, kind: 'agent' } as never)
       store.registerPane(id, pane.term as never, pane.fit as never)
       clears[id] = vi.fn()
-      store.setRenderAddon(id, { clearTextureAtlas: clears[id] })
+      store.setRenderAddon(id, { clearTextureAtlas: clears[id], dispose: vi.fn() })
     }
     // One group per session, so every pane is its group's active (= visible) one.
     store.groupsByWt.set(
@@ -780,8 +797,8 @@ describe('repaintAllPanes (blank pane after window occlusion)', () => {
     store.registerPane('s2', b.term as never, b.fit as never)
     const clearA = vi.fn()
     const clearB = vi.fn()
-    store.setRenderAddon('s1', { clearTextureAtlas: clearA })
-    store.setRenderAddon('s2', { clearTextureAtlas: clearB })
+    store.setRenderAddon('s1', { clearTextureAtlas: clearA, dispose: vi.fn() })
+    store.setRenderAddon('s2', { clearTextureAtlas: clearB, dispose: vi.fn() })
 
     store.repaintAllPanes()
 
@@ -833,7 +850,7 @@ describe('scheduleScrollRepaint (blank pane after scrolling past the buffer end)
     const pane = fakePane()
     store.registerPane('s1', pane.term as never, pane.fit as never)
     const clear = vi.fn()
-    store.setRenderAddon('s1', { clearTextureAtlas: clear })
+    store.setRenderAddon('s1', { clearTextureAtlas: clear, dispose: vi.fn() })
 
     store.scheduleScrollRepaint('s1')
     // Trailing edge: nothing repaints while the gesture is still going.

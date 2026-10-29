@@ -20,6 +20,7 @@ import { wrapIndex } from '../core/cycle'
 import { canOpenInIde } from '../core/ideLaunch'
 import { moveBefore, reorderMap } from '../core/sidebarOrder'
 import { bufferLastLine, bufferTail, lastNonEmptyLine } from './lastLine'
+import { clearRenderAtlas, disposeRenderAddon, type RenderAddon } from './renderAddon'
 import {
   DEFAULT_SETTINGS,
   SHELL_ICON,
@@ -88,7 +89,7 @@ interface PaneRef {
    * the pane is hidden). Both expose clearTextureAtlas(); the DOM fallback has
    * none. Registered separately from the term because <Pane> creates it in a
    * later effect (renderer choice depends on visibility + the GPU setting). */
-  renderAddon?: { clearTextureAtlas?: () => void }
+  renderAddon?: RenderAddon
   /** The pane's own element. Needed to un-stick a terminal whose renderer has
    * been latched off-screen — see Store.unstickPane. */
   el?: HTMLElement
@@ -361,7 +362,7 @@ export class Store {
    * can reach clearTextureAtlas(). Called by <Pane> when it (re)loads WebGL or
    * Canvas — after registerPane, and again whenever the transparent setting
    * flips the renderer. */
-  setRenderAddon(id: string, addon: { clearTextureAtlas?: () => void } | null): void {
+  setRenderAddon(id: string, addon: RenderAddon | null): void {
     const pane = this.panes.get(id)
     if (pane) pane.renderAddon = addon ?? undefined
   }
@@ -370,7 +371,8 @@ export class Store {
    * which does both AND checks that the repaint landed. This is the bare
    * primitive, kept separate because scheduleAtlasClear owns its own timing. */
   clearPaneAtlas(id: string): void {
-    this.panes.get(id)?.renderAddon?.clearTextureAtlas?.()
+    const addon = this.panes.get(id)?.renderAddon
+    if (addon) clearRenderAtlas(addon)
   }
   /** Repaint every live pane from scratch (drop the glyph atlas, then refresh).
    *
@@ -388,7 +390,7 @@ export class Store {
   repaintPane(id: string): void {
     const pane = this.panes.get(id)
     if (!pane) return
-    pane.renderAddon?.clearTextureAtlas?.()
+    if (pane.renderAddon) clearRenderAtlas(pane.renderAddon)
     this.refreshChecked(id)
   }
 
@@ -540,7 +542,7 @@ export class Store {
       // atlas only costs a re-rasterization no one sees. <Pane> clears the atlas
       // on reshow, which is where it does matter.
       if (!pane || !this.visibleSessions().includes(id)) return
-      pane.renderAddon?.clearTextureAtlas?.()
+      if (pane.renderAddon) clearRenderAtlas(pane.renderAddon)
       pane.term.refresh(0, pane.term.rows - 1)
     }, ATLAS_SETTLE_MS)
     this.atlasTimers.set(id, timer)
@@ -562,7 +564,17 @@ export class Store {
     }, 600)
   }
   unregisterPane(id: string): void {
-    this.panes.get(id)?.term.dispose()
+    const pane = this.panes.get(id)
+    // Dispose the renderer through disposeRenderAddon BEFORE the terminal: the
+    // terminal would dispose it too, but plainly, leaking a WebGL renderer.
+    if (pane?.renderAddon) {
+      try {
+        disposeRenderAddon(pane.renderAddon)
+      } catch {
+        /* already disposed */
+      }
+    }
+    pane?.term.dispose()
     this.panes.delete(id)
     this.settling.delete(id)
     this.settledOnce.delete(id)

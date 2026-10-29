@@ -22,6 +22,7 @@ import { findFileLinks } from '../core/fileLinks'
 import { isHttpUrl } from '../core/openTarget'
 import { shellQuote } from '../core/shellQuote'
 import { canRetryWebgl, webglRetryDelay } from '../core/renderRetry'
+import { disposeRenderAddon, type RenderAddon } from './renderAddon'
 import type { SessionSnapshot } from '../main/ipc'
 
 export function PaneGrid(): JSX.Element {
@@ -362,7 +363,6 @@ function Pane({
   useEffect(() => {
     const term = termRef.current
     if (!term) return
-    type RenderAddon = { dispose(): void; clearTextureAtlas?: () => void }
     let addon: RenderAddon | null = null
     let gone = false
     let retryTimer = 0
@@ -400,7 +400,7 @@ function Pane({
         const webgl = new WebglAddon()
         webgl.onContextLoss(() => {
           try {
-            webgl.dispose()
+            disposeRenderAddon(webgl)
           } catch {
             /* ignore */
           }
@@ -433,7 +433,7 @@ function Pane({
       retryTimer = window.setTimeout(() => {
         if (gone) return
         try {
-          addon?.dispose()
+          if (addon) disposeRenderAddon(addon)
         } catch {
           /* ignore */
         }
@@ -457,7 +457,7 @@ function Pane({
       cancelAnimationFrame(repaintFrame)
       store.setRenderAddon(session.id, null)
       try {
-        addon?.dispose()
+        if (addon) disposeRenderAddon(addon)
       } catch {
         /* term may already be disposed */
       }
