@@ -4,6 +4,8 @@ import {
   unescapeOutput,
   parseLayoutSize,
   paneIdFromReply,
+  titleQuery,
+  titleFromReply,
   sendKeysCommands,
   SEND_KEYS_CHUNK_BYTES
 } from './tmuxControl'
@@ -75,6 +77,18 @@ describe('TmuxControlParser', () => {
     p.feed('%begin 123 7 1\n%1\n%end 123 7 1\n')
     expect(out).toEqual([])
     expect(replies).toEqual([{ lines: ['%1'], error: false }])
+  })
+
+  it('decodes a reply as UTF-8 (the stream itself is read as latin1 bytes)', () => {
+    const replies: string[][] = []
+    const p = new TmuxControlParser({
+      onOutput: () => {},
+      onExit: () => {},
+      onReply: (_n, lines) => replies.push(lines)
+    })
+    const bytes = Buffer.from('grove-title:✳ 修正 leaks', 'utf8').toString('latin1')
+    p.feed(`%begin 1 2 1\n${bytes}\n%end 1 2 1\n`)
+    expect(replies).toEqual([['grove-title:✳ 修正 leaks']])
   })
 
   it('flags %error blocks', () => {
@@ -191,6 +205,34 @@ describe('sendKeysCommands', () => {
 
   it('sends nothing for empty input', () => {
     expect(sendKeysCommands('p1', '')).toEqual([])
+  })
+})
+
+describe('titleQuery / titleFromReply', () => {
+  it('asks for the pane title with a marker only its own reply carries', () => {
+    const q = titleQuery('%3')
+    expect(q).toMatch(/^display-message -p -t %3 /)
+    expect(q).toContain('grove-title:#{pane_title}')
+    expect(q.endsWith('\n')).toBe(true)
+  })
+
+  it('reads the title back out of the marked reply', () => {
+    expect(titleFromReply(['grove-title:✳ Fix leaks'], 'box.local')).toBe('✳ Fix leaks')
+    // Verified against tmux 3.6b: quotes and CJK come through untouched.
+    expect(titleFromReply(['grove-title:Second: Title "q" 你好'], 'box.local')).toBe(
+      'Second: Title "q" 你好'
+    )
+  })
+
+  it("ignores tmux's default title (the hostname) and every other reply", () => {
+    expect(titleFromReply(['grove-title:box.local'], 'box.local')).toBeUndefined()
+    expect(titleFromReply(['grove-title:BOX.local'], 'box.local')).toBeUndefined()
+    expect(titleFromReply(['%0'], 'box.local')).toBeUndefined()
+    expect(titleFromReply([], 'box.local')).toBeUndefined()
+  })
+
+  it('keeps an empty title as a reply (the caller decides what empty means)', () => {
+    expect(titleFromReply(['grove-title:'], 'box.local')).toBe('')
   })
 })
 

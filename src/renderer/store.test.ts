@@ -24,6 +24,7 @@ function installApi(): { creates: SessionSnapshot[]; api: Record<string, ReturnT
     }),
     sessionResize: vi.fn(),
     sessionKill: vi.fn(),
+    sessionRename: vi.fn(),
     setBadgeCount: vi.fn(),
     layoutSave: vi.fn(),
     refreshWorktreeMeta: vi.fn(),
@@ -34,6 +35,7 @@ function installApi(): { creates: SessionSnapshot[]; api: Record<string, ReturnT
     // handler off the mock's calls.
     onSessionData: vi.fn(),
     onSessionState: vi.fn(),
+    onSessionTitle: vi.fn(),
     onSessionExit: vi.fn(),
     onNotifyJump: vi.fn(),
     onHookFailed: vi.fn(),
@@ -1476,5 +1478,209 @@ describe('closing a tab terminates a durable agent (no background leak)', () => 
     await store.removeWorktree(project, wtId)
 
     expect(api.sessionKill).toHaveBeenCalledWith(id, false)
+  })
+})
+
+describe('agent tabs name themselves from the terminal title', () => {
+  // Claude writes an OSC 0 title on every status change: a status glyph plus the
+  // conversation's title once it has one. The store mirrors that into the tab,
+  // unless the user named the tab themselves — then theirs wins, and survives a
+  // restore and a close/resume.
+  const CLAUDE = { id: 'claude', name: 'Claude', command: 'claude', icon: '★' } as never
+  const wtId = '/tmp/repo-wt-feat'
+
+  const openAgent = async (store: Store, opts?: { renamed?: boolean }): Promise<string> => {
+    const project = seedProject(store)
+    project.worktrees.set(wtId, { id: wtId, path: wtId, branch: 'feat', primary: false })
+    // Select it first, as a user would have: the layout save only replaces the
+    // descriptors of worktrees that have been shown (restored) this run.
+    await store.selectWorktree(project.repoRoot, wtId)
+    const id = await store.addSession(wtId, 'agent', CLAUDE, undefined, undefined, undefined, undefined, opts)
+    return id!
+  }
+  const savedTitles = (api: Record<string, ReturnType<typeof vi.fn>>): { title: string; renamed?: boolean }[] =>
+    (api.layoutSave.mock.calls.at(-1)?.[0] ?? []) as { title: string; renamed?: boolean }[]
+
+  it('takes the announced title, stripped of the status glyph, and persists it', async () => {
+    const { api } = installApi()
+    const store = new Store()
+    const id = await openAgent(store)
+    expect(store.sessions.get(id)?.title).toBe('claude')
+
+    store.autoTitleSession(id, '◐ Fix renderer leaks')
+    expect(store.sessions.get(id)?.title).toBe('Fix renderer leaks')
+    expect(api.sessionRename).toHaveBeenCalledWith(id, 'Fix renderer leaks')
+    expect(savedTitles(api)[0]).toMatchObject({ title: 'Fix renderer leaks' })
+    expect(savedTitles(api)[0].renamed).toBeUndefined()
+  })
+
+  it("ignores the agent's generic title and a spinner tick that changes nothing", async () => {
+    const { api } = installApi()
+    const store = new Store()
+    const id = await openAgent(store)
+    store.autoTitleSession(id, '✳ Claude Code')
+    expect(store.sessions.get(id)?.title).toBe('claude')
+
+    store.autoTitleSession(id, '◐ Fix leaks')
+    const saves = api.layoutSave.mock.calls.length
+    store.autoTitleSession(id, '◓ Fix leaks')
+    expect(api.layoutSave.mock.calls.length).toBe(saves)
+  })
+
+  it('never renames a shell from its title', async () => {
+    installApi()
+    const store = new Store()
+    const project = seedProject(store)
+    project.worktrees.set(wtId, { id: wtId, path: wtId, branch: 'feat', primary: false })
+    const id = (await store.addSession(wtId, 'shell'))!
+    store.autoTitleSession(id, '~/Tools/grove')
+    expect(store.sessions.get(id)?.title).toBe('shell')
+  })
+
+  it('a user rename pins the title against later announcements, and is persisted as such', async () => {
+    const { api } = installApi()
+    const store = new Store()
+    const id = await openAgent(store)
+    store.renameSession(id, 'release work')
+    store.autoTitleSession(id, '◐ Something else')
+    expect(store.sessions.get(id)?.title).toBe('release work')
+    expect(savedTitles(api)[0]).toMatchObject({ title: 'release work', renamed: true })
+  })
+
+  it('a restored tab the user had renamed stays renamed', async () => {
+    installApi()
+    const store = new Store()
+    const id = await openAgent(store, { renamed: true })
+    store.autoTitleSession(id, '◐ Something else')
+    expect(store.sessions.get(id)?.title).toBe('claude')
+  })
+
+  it('a title an agent gave to spawn_agent is kept, like a rename', async () => {
+    const { api } = installApi()
+    const store = new Store()
+    seedProject(store).worktrees.set(wtId, { id: wtId, path: wtId, branch: 'feat', primary: false })
+    store.wireEvents()
+    const onSpawn = api.onMcpSpawn.mock.calls[0][0] as (e: {
+      requestId: string
+      worktree: string
+      prompt: string
+      title?: string
+    }) => Promise<void>
+    await onSpawn({ requestId: 'r1', worktree: wtId, prompt: 'do x', title: 'helper: docs' })
+    const id = store.sessionsOf(wtId)[0].id
+    store.autoTitleSession(id, '◐ Writing docs')
+    expect(store.sessions.get(id)?.title).toBe('helper: docs')
+  })
+
+  it('a renamed agent carries the pin through close and resume', async () => {
+    const { api } = installApi()
+    const store = new Store()
+    const id = await openAgent(store)
+    store.renameSession(id, 'mine')
+    store.closeSession(id)
+    const closed = store.closedAgentsOf(wtId)
+    expect(closed).toHaveLength(1)
+    expect(closed[0]).toMatchObject({ title: 'mine', renamed: true })
+
+    store.resumeClosedAgent(closed[0])
+    await vi.waitFor(() => expect(api.sessionCreate).toHaveBeenCalledTimes(2))
+    const resumed = store.sessionsOf(wtId)[0].id
+    store.autoTitleSession(resumed, '◐ New topic')
+    expect(store.sessions.get(resumed)?.title).toBe('mine')
+  })
+
+  it("main's title poll (durable panes) feeds the same path", async () => {
+    const { api } = installApi()
+    const store = new Store()
+    const id = await openAgent(store)
+    store.wireEvents()
+    const onTitle = api.onSessionTitle.mock.calls[0][0] as (e: { id: string; title: string }) => void
+    onTitle({ id, title: '✳ Durable topic' })
+    expect(store.sessions.get(id)?.title).toBe('Durable topic')
+  })
+})
+
+describe('clearing a shared glyph atlas rebuilds every pane drawing from it', () => {
+  // A WebGL pane keeps, per cell, where its glyph sits in the atlas — and only
+  // re-resolves a cell when the buffer under it changes. Clearing the atlas from
+  // one pane left the others pointing at blank space: black on their next draw
+  // (a click into the pane), with only a selection's cells coming back.
+  beforeEach(() => {
+    installApi()
+  })
+
+  // Mimics xterm: clearTextureAtlas() bumps the page version unless the atlas is empty.
+  const atlasWith = (empty = false) => {
+    const atlas = { pages: [{ version: 0, _glyphs: ['a'] as unknown[], _usedPixels: 1 }] }
+    const clear = (): void => {
+      if (!empty) atlas.pages[0].version++
+    }
+    return { atlas, clear }
+  }
+  const webglAddon = (atlas: object, clear: () => void) => ({
+    _renderer: { _charAtlas: atlas, _clearModel: vi.fn() },
+    clearTextureAtlas: vi.fn(clear),
+    dispose: vi.fn()
+  })
+
+  it('rebuilds siblings on the same atlas, and leaves panes on another alone', () => {
+    const store = new Store()
+    const shared = atlasWith()
+    const own = atlasWith()
+    const a = webglAddon(shared.atlas, shared.clear)
+    const b = webglAddon(shared.atlas, shared.clear)
+    const c = webglAddon(own.atlas, own.clear)
+    const panes = { a: fakePane(), b: fakePane(), c: fakePane() }
+    for (const [id, p] of Object.entries(panes)) store.registerPane(id, p.term as never, p.fit as never)
+    store.setRenderAddon('a', a as never)
+    store.setRenderAddon('b', b as never)
+    store.setRenderAddon('c', c as never)
+
+    store.clearPaneAtlas('a')
+    expect(a.clearTextureAtlas).toHaveBeenCalledOnce()
+    expect(b._renderer._clearModel).toHaveBeenCalledWith(true)
+    expect(panes.b.term.refresh).toHaveBeenCalledWith(0, panes.b.term.rows - 1)
+    // xterm already rebuilt the clearing pane's own model.
+    expect(a._renderer._clearModel).not.toHaveBeenCalled()
+    expect(c._renderer._clearModel).not.toHaveBeenCalled()
+    expect(c.clearTextureAtlas).not.toHaveBeenCalled()
+  })
+
+  it('does nothing to siblings when xterm skipped the clear (empty atlas)', () => {
+    const store = new Store()
+    const shared = atlasWith(true)
+    const a = webglAddon(shared.atlas, shared.clear)
+    const b = webglAddon(shared.atlas, shared.clear)
+    const pa = fakePane()
+    const pb = fakePane()
+    store.registerPane('a', pa.term as never, pa.fit as never)
+    store.registerPane('b', pb.term as never, pb.fit as never)
+    store.setRenderAddon('a', a as never)
+    store.setRenderAddon('b', b as never)
+
+    store.clearPaneAtlas('a')
+    expect(b._renderer._clearModel).not.toHaveBeenCalled()
+    expect(pb.term.refresh).not.toHaveBeenCalled()
+  })
+
+  it('a hidden sibling on the Canvas renderer is not touched', () => {
+    const store = new Store()
+    const shared = atlasWith()
+    const a = webglAddon(shared.atlas, shared.clear)
+    const canvas = {
+      _renderer: { _renderLayers: [{ _charAtlas: shared.atlas }], _clearModel: vi.fn() },
+      clearTextureAtlas: vi.fn(),
+      dispose: vi.fn()
+    }
+    const pa = fakePane()
+    const pb = fakePane()
+    store.registerPane('a', pa.term as never, pa.fit as never)
+    store.registerPane('b', pb.term as never, pb.fit as never)
+    store.setRenderAddon('a', a as never)
+    store.setRenderAddon('b', canvas as never)
+
+    store.clearPaneAtlas('a')
+    expect(canvas._renderer._clearModel).not.toHaveBeenCalled()
+    expect(canvas.clearTextureAtlas).not.toHaveBeenCalled()
   })
 })

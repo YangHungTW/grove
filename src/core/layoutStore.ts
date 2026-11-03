@@ -8,6 +8,9 @@ export interface SessionDescriptor {
   worktreePath: string
   kind: SessionKind
   title: string
+  /** The title was chosen by the user (rename), not by the agent's own title
+   * announcements — which must keep leaving it alone after a restore. */
+  renamed?: boolean
   /** Tab icon — also used on restore to recover which agent it was. */
   icon?: string
   /** Pinned agent session id (claude) — restored via `--resume` so the agent

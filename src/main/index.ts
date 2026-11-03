@@ -32,7 +32,7 @@ import {
   canRebuildSurface,
   REPAINT_NUDGE_MS
 } from '../core/gpuRecovery'
-import { homedir } from 'node:os'
+import { homedir, hostname } from 'node:os'
 import {
   stat as statAsync,
   readFile as readFileAsync,
@@ -71,7 +71,13 @@ import { SettingsStore, type AppSettings } from '../core/settingsStore'
 import type { ResolvedAgent } from '../core/settings'
 import { execFileSync } from 'node:child_process'
 import { detectState } from '../core/stateDetection'
-import { TmuxControlParser, sendKeysCommands, paneIdFromReply } from '../core/tmuxControl'
+import {
+  TmuxControlParser,
+  sendKeysCommands,
+  paneIdFromReply,
+  titleQuery,
+  titleFromReply
+} from '../core/tmuxControl'
 import {
   parseRegistryEntry,
   registryUpdates,
@@ -116,8 +122,23 @@ const ptys = new Map<string, PtySession>()
 // translated to tmux commands instead of written to the pty directly.
 const control = new Map<
   string,
-  { name: string; want?: { cols: number; rows: number }; fixes: number; pane?: string }
+  {
+    name: string
+    want?: { cols: number; rows: number }
+    fixes: number
+    pane?: string
+    /** The pane title last relayed to the renderer (see TITLE_POLL_MS). */
+    title?: string
+    titleTimer?: NodeJS.Timeout
+  }
 >()
+/**
+ * How often a control-mode session is asked for its pane title. tmux swallows
+ * the OSC an agent sets its title with and announces nothing, so the title
+ * Grove mirrors into the tab has to be polled. One local command per durable
+ * pane; Claude changes its title at most a few times per conversation.
+ */
+const TITLE_POLL_MS = 4000
 // Claude's own session registry (~/.claude/sessions/<pid>.json): authoritative
 // busy/idle/waiting, computed from the CLI's UI state rather than scraped out of
 // its output. `agentSessionIds` is the join — Grove session id → the uuid Grove
@@ -438,21 +459,27 @@ function launchSpecFor(
     // on a `.zshrc`-only PATH — a non-interactive `-lc` shell would launch a bare/
     // different binary and silently drop the user's plugins/skills. `-c <cmd>` means
     // no interactive prompt renders, so the pane still shows the CLI directly.
-    // CCM_AGENT_CMD (a trusted env override, used by tests) takes precedence.
+    // CCM_AGENT_CMD (a trusted env override, used by tests) takes precedence —
+    // over the command only: the durable (tmux) wrapping below still applies, so
+    // a test can exercise control mode. (It used to return here, which left the
+    // session registered as control mode around a plain pty: the parser then
+    // dropped every byte the stand-in printed, and the pane stayed empty.)
     const override = process.env.CCM_AGENT_CMD
-    if (override) return { command: shell, args: ['-ilc', override] }
-    // Defense-in-depth: the command runs via `$SHELL -ilc`, so a compromised
-    // renderer could otherwise request an arbitrary command. The legitimate
-    // value (built by buildAgentLaunch) always begins with a CONFIGURED agent
-    // command, so require that prefix before handing it to the shell.
-    const agentCmd = req.command ?? 'claude'
-    const allowed = settings()
-      .load()
-      .agents.map((a) => a.command.trim())
-      .filter(Boolean)
-    const ok =
-      allowed.length === 0 || allowed.some((ac) => agentCmd === ac || agentCmd.startsWith(`${ac} `))
-    if (!ok) throw new Error(`agent command not allowed: ${agentCmd.split(/\s+/)[0]}`)
+    const agentCmd = override ?? req.command ?? 'claude'
+    if (!override) {
+      // Defense-in-depth: the command runs via `$SHELL -ilc`, so a compromised
+      // renderer could otherwise request an arbitrary command. The legitimate
+      // value (built by buildAgentLaunch) always begins with a CONFIGURED agent
+      // command, so require that prefix before handing it to the shell.
+      const allowed = settings()
+        .load()
+        .agents.map((a) => a.command.trim())
+        .filter(Boolean)
+      const ok =
+        allowed.length === 0 ||
+        allowed.some((ac) => agentCmd === ac || agentCmd.startsWith(`${ac} `))
+      if (!ok) throw new Error(`agent command not allowed: ${agentCmd.split(/\s+/)[0]}`)
+    }
     // Durable sessions: when enabled (+ tmux installed) the agent runs under tmux
     // CONTROL MODE so it survives a Grove restart and reattaches to the live
     // process. tmux emits a text protocol instead of drawing — createSession parses
@@ -683,6 +710,7 @@ function teardownSession(id: string, exit?: { exitCode: number; signal?: number 
   }
   if (exit) send(Channels.sessionExit, { id, ...exit })
   ptys.delete(id)
+  clearInterval(control.get(id)?.titleTimer)
   control.delete(id)
   forgetRegistryJoin(id)
 }
@@ -1118,9 +1146,17 @@ function createSession(req: CreateSessionRequest): SessionSnapshot {
       },
       onReply: (_num, lines, error) => {
         if (error) return
-        const pane = paneIdFromReply(lines)
         const c = control.get(record.id)
-        if (pane && c && !c.pane) c.pane = pane
+        if (!c) return
+        const pane = paneIdFromReply(lines)
+        if (pane && !c.pane) c.pane = pane
+        // The title poll's answer. Relayed only when it changes — the renderer
+        // treats every title as news (a notify + a layout save).
+        const title = titleFromReply(lines, hostname())
+        if (title !== undefined && title !== c.title) {
+          c.title = title
+          send(Channels.sessionTitle, { id: record.id, title })
+        }
       },
       onExit: () => {
         // The pty's own exit follows shortly and lands in the same teardown,
@@ -1178,6 +1214,14 @@ function createSession(req: CreateSessionRequest): SessionSnapshot {
     // whatever an agent may later split into the window. Read back through
     // onReply — the only reply Grove takes a pane id from.
     pty.write(`list-panes -t ${tmuxName} -f '#{==:#{pane_index},0}' -F '#{pane_id}'\n`)
+    // Mirror the agent's terminal title into the tab (see TITLE_POLL_MS). Asked
+    // of our pane once known, else of the session (its active pane).
+    const c = control.get(record.id)
+    if (c) {
+      c.titleTimer = setInterval(() => {
+        ptys.get(record.id)?.write(titleQuery(c.pane ?? tmuxName))
+      }, TITLE_POLL_MS)
+    }
   }
   record.pid = pty.pid
   return snapshot(record)
@@ -1417,6 +1461,10 @@ function registerIpc(): void {
         )
       })
   )
+  ipcMain.on(Channels.sessionRename, (_e, id: string, title: string) => {
+    const record = registry.getSession(id)
+    if (record && title) record.title = title
+  })
   ipcMain.on(Channels.sessionKill, (_e, id: string, detach?: boolean) => {
     // For a control session, killing the pty only exits the -CC client — the tmux
     // session and the agent inside it keep running. Durability is meant to survive

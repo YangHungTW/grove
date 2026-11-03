@@ -46,6 +46,7 @@ export const Channels = {
   sessionInput: 'session:input',
   sessionResize: 'session:resize',
   sessionKill: 'session:kill',
+  sessionRename: 'session:rename',
   sessionList: 'session:list',
   fleetList: 'fleet:list',
   mcpLaunch: 'mcp:launch',
@@ -65,6 +66,7 @@ export const Channels = {
   // events (main -> renderer)
   sessionData: 'session:data',
   sessionStateChange: 'session:state-change',
+  sessionTitle: 'session:title',
   sessionExit: 'session:exit',
   notifyJump: 'notify:jump',
   hookFailed: 'hook:failed'
@@ -156,6 +158,13 @@ export interface SessionStateEvent {
   /** Reason accompanying a `waiting` state; cleared on any other state. */
   waitingFor?: string
 }
+/** A durable (tmux) agent set its terminal title. In a plain pty the OSC reaches
+ * xterm and the renderer reads it there; tmux keeps it, so main asks and relays. */
+export interface SessionTitleEvent {
+  id: string
+  /** The raw title, status glyph and all (see core/tabTitle). */
+  title: string
+}
 export interface SessionExitEvent {
   id: string
   exitCode: number
@@ -246,6 +255,9 @@ export interface RendererApi {
    * to only drop the control client and leave the agent running in the
    * background (the tab menu's "Detach (keep running)"). */
   sessionKill(id: string, detach?: boolean): void
+  /** The tab's title changed (user rename or auto-title) — keep main's record,
+   * and so `list_sessions` for other agents, in step. */
+  sessionRename(id: string, title: string): void
   sessionList(worktreeId?: string): Promise<SessionSnapshot[]>
   /** Claude sessions running on this machine that are NOT one of Grove's panes:
    * started in a plain terminal, or dispatched with `claude --bg`. Grove would
@@ -285,6 +297,7 @@ export interface RendererApi {
   setBadgeCount(count: number): void
   onSessionData(cb: (e: SessionDataEvent) => void): () => void
   onSessionState(cb: (e: SessionStateEvent) => void): () => void
+  onSessionTitle(cb: (e: SessionTitleEvent) => void): () => void
   onSessionExit(cb: (e: SessionExitEvent) => void): () => void
   /** A clicked OS notification asks the renderer to focus that session. */
   onNotifyJump(cb: (e: { id: string }) => void): () => void

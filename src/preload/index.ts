@@ -10,6 +10,7 @@ import {
   type SessionExitEvent,
   type SessionSnapshot,
   type SessionStateEvent,
+  type SessionTitleEvent,
   type WorktreeRemoveRequest
 } from '../main/ipc'
 import type { CreateWorktreeOptions, WorktreeInfo } from '../core/worktree'
@@ -70,6 +71,9 @@ const api: RendererApi = {
   sessionResize: (id: string, cols: number, rows: number): void => {
     ipcRenderer.send(Channels.sessionResize, id, cols, rows)
   },
+  sessionRename: (id: string, title: string): void => {
+    ipcRenderer.send(Channels.sessionRename, id, title)
+  },
   sessionKill: (id: string, detach?: boolean): void => {
     ipcRenderer.send(Channels.sessionKill, id, detach)
   },
@@ -104,6 +108,7 @@ const api: RendererApi = {
   onSessionData: (cb: (e: SessionDataEvent) => void) => subscribe(Channels.sessionData, cb),
   onSessionState: (cb: (e: SessionStateEvent) => void) =>
     subscribe(Channels.sessionStateChange, cb),
+  onSessionTitle: (cb: (e: SessionTitleEvent) => void) => subscribe(Channels.sessionTitle, cb),
   onSessionExit: (cb: (e: SessionExitEvent) => void) => subscribe(Channels.sessionExit, cb),
   onNotifyJump: (cb: (e: { id: string }) => void) => subscribe(Channels.notifyJump, cb),
   onWindowRepaint: (cb: () => void) => subscribe(Channels.windowRepaint, cb),

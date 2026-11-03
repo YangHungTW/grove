@@ -9,19 +9,38 @@ interface AtlasPage {
   _glyphs?: unknown[]
   _usedPixels?: number
 }
+interface Atlas {
+  pages?: AtlasPage[]
+}
 interface RendererInternals {
   _cursorBlinkStateManager?: { dispose?(): void }
   /** WebGL renderer's atlas. */
-  _charAtlas?: { pages?: AtlasPage[] }
+  _charAtlas?: Atlas
   /** Canvas renderer's layers — they all share one atlas. */
-  _renderLayers?: { _charAtlas?: { pages?: AtlasPage[] } }[]
+  _renderLayers?: { _charAtlas?: Atlas }[]
+  /** WebGL renderer: forget every cell, so the next frame re-reads the buffer
+   * and re-resolves every glyph's place in the atlas. */
+  _clearModel?(clearGlyphRenderer: boolean): void
 }
 function rendererOf(addon: RenderAddon): RendererInternals | undefined {
   return (addon as { _renderer?: RendererInternals })._renderer
 }
 
 /**
- * Drop the addon's glyph atlas — without growing it.
+ * The glyph atlas a WebGL addon draws from — as an identity, for telling which
+ * panes share one. xterm keys atlases on the render config (font, colours,
+ * device pixel ratio), so every visible pane normally draws from the SAME
+ * object. Canvas renderers are not reported: they copy glyph pixels onto their
+ * canvas as they draw, so a shared clear costs them a re-rasterization but
+ * never a wrong picture (see rebuildRenderModel).
+ */
+export function renderAtlasOf(addon: RenderAddon): object | undefined {
+  return rendererOf(addon)?._charAtlas
+}
+
+/**
+ * Drop the addon's glyph atlas — without growing it. Returns whether anything
+ * was actually cleared (xterm skips an empty atlas).
  *
  * xterm's AtlasPage.clear() (5.5, and still 6.0) resets the page's canvas and
  * packing cursor but not its `_glyphs` list or `_usedPixels`, and clearTexture()
@@ -33,16 +52,41 @@ function rendererOf(addon: RenderAddon): RendererInternals | undefined {
  * forgot — only on pages that were actually cleared (clearTexture() is a no-op
  * on an empty atlas, and then the glyphs it holds are still live).
  */
-export function clearRenderAtlas(addon: RenderAddon): void {
+export function clearRenderAtlas(addon: RenderAddon): boolean {
   const r = rendererOf(addon)
   const pages = r?._charAtlas?.pages ?? r?._renderLayers?.find((l) => l._charAtlas)?._charAtlas?.pages
   const before = pages?.map((p) => p.version)
   addon.clearTextureAtlas?.()
+  let cleared = !pages // unknown internals: assume the clear went through
   pages?.forEach((p, i) => {
-    if (p.version === before?.[i] || !Array.isArray(p._glyphs)) return
+    if (p.version === before?.[i]) return
+    cleared = true
+    if (!Array.isArray(p._glyphs)) return
     p._glyphs.length = 0
     p._usedPixels = 0
   })
+  return cleared
+}
+
+/**
+ * Make a WebGL renderer re-resolve every cell on its next frame.
+ *
+ * A WebGL pane does not draw glyphs; it keeps, per cell, the texture
+ * coordinates of the glyph's place in the atlas, and only re-resolves a cell
+ * when the buffer under it changes. When ANOTHER pane clears the atlas they
+ * share (xterm's clearTextureAtlas() rebuilds only the caller's own model), the
+ * idle pane's coordinates now point at blank or reused atlas space — and the
+ * next thing that makes it render (a click into it, a hover, its cursor) paints
+ * its text as nothing, or as the wrong glyphs. Dragging a selection "repairs" it
+ * one cell at a time, because selection is a per-cell change. Hence Grove
+ * rebuilds every sibling's model whenever it clears a shared atlas. A renderer
+ * without the hook (another xterm) falls back to its own public clear, which is
+ * a model rebuild plus a redundant — harmless — atlas clear.
+ */
+export function rebuildRenderModel(addon: RenderAddon): void {
+  const r = rendererOf(addon)
+  if (r?._clearModel) r._clearModel(true)
+  else addon.clearTextureAtlas?.()
 }
 
 /**

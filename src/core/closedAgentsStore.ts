@@ -16,6 +16,9 @@ export interface ClosedAgent {
   baseCommand: string
   /** Tab title at close time (preserves a renamed tab). */
   title: string
+  /** The user named this tab; after a resume the agent's own title must not
+   * replace it. */
+  renamed?: boolean
   /** Tab icon. */
   icon?: string
   /** Epoch ms when the agent was closed (for the "x ago" label + ordering). */

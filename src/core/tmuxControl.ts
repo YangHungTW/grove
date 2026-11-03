@@ -88,6 +88,31 @@ export function paneIdFromReply(lines: string[]): string | undefined {
   return ids.length === 1 && /^%\d+$/.test(ids[0].trim()) ? ids[0].trim() : undefined
 }
 
+/** Marks the reply to `titleQuery` so it can't be mistaken for any other. */
+const TITLE_PREFIX = 'grove-title:'
+
+/**
+ * The control-mode command that reads the pane's title (what the agent set with
+ * OSC 0/2). tmux keeps that title itself and never forwards the escape to a
+ * control client — nor does it announce a change — so the only way to mirror it
+ * into Grove's tab is to ask. `-p` prints the format as a %begin..%end reply.
+ */
+export function titleQuery(target: string): string {
+  return `display-message -p -t ${target} "${TITLE_PREFIX}#{pane_title}"\n`
+}
+
+/**
+ * The pane title out of a reply to `titleQuery`, or undefined for any other
+ * reply — and for tmux's own default. Until a program sets one, a pane's title
+ * is the machine's hostname, which is not a tab name anyone asked for.
+ */
+export function titleFromReply(lines: string[], hostname: string): string | undefined {
+  const line = lines.find((l) => l.startsWith(TITLE_PREFIX))
+  if (line === undefined) return undefined
+  const title = line.slice(TITLE_PREFIX.length)
+  return title.toLowerCase() === hostname.toLowerCase() ? undefined : title
+}
+
 export class TmuxControlParser {
   private buf = ''
   private inBlock = false
@@ -126,7 +151,10 @@ export class TmuxControlParser {
         this.inBlock = false
         this.blockLines = []
       } else {
-        this.blockLines.push(line)
+        // The stream is read as latin1 (one char per byte) so %output's octal
+        // escapes resolve to bytes; a reply's text is plain UTF-8 bytes, so
+        // decode it here — a pane title can hold CJK, "✳", anything.
+        this.blockLines.push(Buffer.from(line, 'latin1').toString('utf8'))
       }
       return
     }

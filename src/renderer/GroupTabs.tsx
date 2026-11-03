@@ -32,35 +32,45 @@ export function GroupTabs(): JSX.Element | null {
   )
 }
 
+/** How many recently-closed agents the menu opens with; "Show more" adds as many
+ * again. The newest are what you came for; the long tail stays a click away. */
+const RECENT_PAGE = 10
+
 /** Trailing control: lists this worktree's recently-closed agents; click one to
  * relaunch it with `claude --resume <id>`. Hidden when there are none. */
 function RecentlyClosed({ wt }: { wt: string }): JSX.Element | null {
   const s = useStore()
   const [open, setOpen] = useState(false)
+  const [limit, setLimit] = useState(RECENT_PAGE)
   const closed = s.closedAgentsOf(wt)
   if (closed.length === 0) return null
+  const hidden = Math.max(0, closed.length - limit)
+  const toggle = (next: boolean): void => {
+    setOpen(next)
+    setLimit(RECENT_PAGE) // reopen at the top again
+  }
   return (
     <div className="recent-closed">
       <button
         className={'recent-btn' + (open ? ' open' : '')}
         title="Recently closed agents — click to resume"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => toggle(!open)}
       >
         <HistoryIcon size={13} />
         <span className="recent-count">{closed.length}</span>
       </button>
       {open && (
         <>
-          <div className="recent-backdrop" onClick={() => setOpen(false)} />
+          <div className="recent-backdrop" onClick={() => toggle(false)} />
           <ul className="recent-menu">
             <li className="recent-head">Recently closed — resume</li>
-            {closed.map((c: ClosedAgent) => (
+            {closed.slice(0, limit).map((c: ClosedAgent) => (
               <li key={c.resumeId} className="recent-item">
                 <button
                   className="recent-resume"
                   title={`Resume ${c.title} (claude --resume ${c.resumeId})`}
                   onClick={() => {
-                    setOpen(false)
+                    toggle(false)
                     store.resumeClosedAgent(c)
                   }}
                 >
@@ -82,6 +92,13 @@ function RecentlyClosed({ wt }: { wt: string }): JSX.Element | null {
                 </button>
               </li>
             ))}
+            {hidden > 0 && (
+              <li className="recent-more">
+                <button onClick={() => setLimit((l) => l + RECENT_PAGE)}>
+                  Show {Math.min(RECENT_PAGE, hidden)} more · {hidden} older
+                </button>
+              </li>
+            )}
           </ul>
         </>
       )}

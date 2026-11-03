@@ -20,7 +20,14 @@ import { wrapIndex } from '../core/cycle'
 import { canOpenInIde } from '../core/ideLaunch'
 import { moveBefore, reorderMap } from '../core/sidebarOrder'
 import { bufferLastLine, bufferTail, lastNonEmptyLine } from './lastLine'
-import { clearRenderAtlas, disposeRenderAddon, type RenderAddon } from './renderAddon'
+import {
+  clearRenderAtlas,
+  disposeRenderAddon,
+  rebuildRenderModel,
+  renderAtlasOf,
+  type RenderAddon
+} from './renderAddon'
+import { autoTabTitle } from '../core/tabTitle'
 import {
   DEFAULT_SETTINGS,
   SHELL_ICON,
@@ -188,6 +195,10 @@ export class Store {
   // Live agents that own a pinned resume id, keyed by session id. On close the
   // entry becomes a ClosedAgent so the agent can be resumed later.
   private resumeMeta = new Map<string, { resumeId: string; baseCommand: string }>()
+  // Sessions whose title the user chose (rename dialog, or a title an agent
+  // passed to spawn_agent). An agent's own title announcements never overwrite
+  // these; persisted so a restore/resume keeps the choice.
+  private renamedByUser = new Set<string>()
   // Sessions that must NOT be persisted to the layout: an attached fleet pane is
   // a window onto a daemon-owned process — restoring it as a fresh agent on the
   // next launch would spawn a NEW claude instead. The session lives in Elsewhere
@@ -403,10 +414,26 @@ export class Store {
   /** Drop the pane's cached glyph textures so the next redraw re-rasterizes from
    * scratch. Clearing the atlas alone does not repaint, so prefer repaintPane(),
    * which does both AND checks that the repaint landed. This is the bare
-   * primitive, kept separate because scheduleAtlasClear owns its own timing. */
+   * primitive, kept separate because scheduleAtlasClear owns its own timing.
+   *
+   * The atlas is SHARED: xterm hands every pane with the same font and colours
+   * one texture atlas, and a WebGL pane remembers where in it each cell's glyph
+   * sits. Clearing it from this pane therefore silently invalidates every other
+   * visible pane's picture — they come up blank or mis-glyphed the next time
+   * anything makes them draw (a click into the pane was the usual report, since
+   * focus requests a redraw), and only the cells a selection touches come back.
+   * So every sibling drawing from the same atlas is made to re-resolve its cells
+   * too. Hidden panes are on the Canvas renderer and are not affected. */
   clearPaneAtlas(id: string): void {
     const addon = this.panes.get(id)?.renderAddon
-    if (addon) clearRenderAtlas(addon)
+    if (!addon) return
+    const atlas = renderAtlasOf(addon)
+    if (!clearRenderAtlas(addon) || !atlas) return
+    for (const [otherId, other] of this.panes) {
+      if (otherId === id || !other.renderAddon || renderAtlasOf(other.renderAddon) !== atlas) continue
+      rebuildRenderModel(other.renderAddon)
+      other.term.refresh(0, other.term.rows - 1)
+    }
   }
   /** Repaint every live pane from scratch (drop the glyph atlas, then refresh).
    *
@@ -422,9 +449,8 @@ export class Store {
   }
   /** Repaint one pane from scratch (drop its glyph atlas, then full refresh). */
   repaintPane(id: string): void {
-    const pane = this.panes.get(id)
-    if (!pane) return
-    if (pane.renderAddon) clearRenderAtlas(pane.renderAddon)
+    if (!this.panes.has(id)) return
+    this.clearPaneAtlas(id)
     this.refreshChecked(id)
   }
 
@@ -578,7 +604,7 @@ export class Store {
       // atlas only costs a re-rasterization no one sees. <Pane> clears the atlas
       // on reshow, which is where it does matter.
       if (!pane || !this.visibleSessions().includes(id)) return
-      if (pane.renderAddon) clearRenderAtlas(pane.renderAddon)
+      this.clearPaneAtlas(id)
       pane.term.refresh(0, pane.term.rows - 1)
     }, ATLAS_SETTLE_MS)
     this.atlasTimers.set(id, timer)
@@ -773,6 +799,7 @@ export class Store {
             // Persist the agent's pinned resume id so a relaunch can `--resume`
             // back into the same conversation. undefined → omitted by JSON.
             resumeId: this.resumeMeta.get(s.id)?.resumeId,
+            renamed: this.renamedByUser.has(s.id) || undefined,
             // Mark durable agents so the card can show it; on restore the agent
             // relaunches durable and tmux reattaches to the still-live process.
             durable: s.durable,
@@ -810,7 +837,9 @@ export class Store {
       // themselves (not the default), and keep the saved/renamed title.
       const agentDef =
         d.kind === 'agent' ? this.availableAgents.find((a) => a.icon === d.icon) : undefined
-      await this.addSession(wtId, d.kind, agentDef, d.title, d.resumeId, d.durableKey)
+      await this.addSession(wtId, d.kind, agentDef, d.title, d.resumeId, d.durableKey, undefined, {
+        renamed: d.renamed
+      })
     }
     this.restoring = false
     this.persistLayout()
@@ -1290,7 +1319,9 @@ export class Store {
     initialPrompt?: string,
     // focus:false = a background spawn (mcp spawn_agent): the pane is created
     // and persisted but must not yank the user's active worktree or focus.
-    opts?: { focus?: boolean }
+    // renamed = titleOverride was chosen by a person (or a spawning agent), so
+    // the agent's own title announcements must leave it alone.
+    opts?: { focus?: boolean; renamed?: boolean }
   ): Promise<string | undefined> {
     // Search EVERY project, not just the active one: an agent in project A can
     // legitimately spawn a helper into project B's worktree.
@@ -1356,6 +1387,7 @@ export class Store {
         durableKey: dKey
       })
       this.sessions.set(snap.id, snap)
+      if (opts?.renamed) this.renamedByUser.add(snap.id)
       if (launch.resumeId) this.resumeMeta.set(snap.id, { resumeId: launch.resumeId, baseCommand })
       if (dKey) this.durableKeyById.set(snap.id, dKey)
       if (opts?.focus === false) {
@@ -1534,8 +1566,29 @@ export class Store {
   renameSession(id: string, title: string): void {
     const s = this.sessions.get(id)
     const next = title.trim()
-    if (!s || !next || s.title === next) return
-    this.sessions.set(id, { ...s, title: next })
+    if (!s || !next) return
+    // A rename pins the title even when it matches the current (auto) one: the
+    // user is saying "keep this".
+    this.renamedByUser.add(id)
+    if (s.title === next) return
+    this.setTitle(s, next)
+  }
+  /**
+   * The agent announced its terminal title (OSC 0/2 — Claude sets it to the
+   * conversation's topic). Mirror it into the tab unless the user named the tab
+   * themselves. Reaches here from xterm's onTitleChange for a plain pty, and
+   * from main's title poll for a durable (tmux) pane, which eats the OSC.
+   */
+  autoTitleSession(id: string, raw: string): void {
+    const s = this.sessions.get(id)
+    if (!s || s.kind !== 'agent' || this.renamedByUser.has(id)) return
+    const title = autoTabTitle(raw)
+    if (title && title !== s.title) this.setTitle(s, title)
+  }
+  private setTitle(s: SessionSnapshot, title: string): void {
+    this.sessions.set(s.id, { ...s, title })
+    // Main's record feeds list_sessions for the other agents.
+    window.api.sessionRename(s.id, title)
     this.persistLayout()
     this.notify()
   }
@@ -1563,6 +1616,7 @@ export class Store {
     const meta = this.resumeMeta.get(id)
     if (!quiet && meta && sess) this.recordClosedAgent(sess, meta, this.durableKeyById.get(id))
     this.resumeMeta.delete(id)
+    this.renamedByUser.delete(id)
     this.durableKeyById.delete(id)
     this.sessions.delete(id)
     this.pending.delete(id)
@@ -1666,6 +1720,7 @@ export class Store {
       resumeId: meta.resumeId,
       baseCommand: meta.baseCommand,
       title: sess.title,
+      renamed: this.renamedByUser.has(sess.id) || undefined,
       icon: sess.icon,
       closedAt: Date.now(),
       // Carry the stable durable key either way: after a DETACH it reattaches to
@@ -1692,7 +1747,9 @@ export class Store {
       command: c.baseCommand,
       icon: c.icon ?? '★'
     }
-    void this.addSession(c.worktreePath, 'agent', agentDef, c.title, c.resumeId, c.durableKey)
+    void this.addSession(c.worktreePath, 'agent', agentDef, c.title, c.resumeId, c.durableKey, undefined, {
+      renamed: c.renamed
+    })
   }
   /** Drop a closed agent from the list without resuming it. */
   forgetClosedAgent(c: ClosedAgent): void {
@@ -2118,7 +2175,8 @@ export class Store {
       // The first installed agent is what the user would get from the picker.
       const agentDef = this.availableAgents.find((a) => a.installed) ?? this.availableAgents[0]
       const paneId = await this.addSession(worktree, 'agent', agentDef, title, undefined, undefined, prompt, {
-        focus: false
+        focus: false,
+        renamed: !!title
       })
       window.api.mcpSpawnResult(
         requestId,
@@ -2141,6 +2199,7 @@ export class Store {
         this.setLastLine(id, lastNonEmptyLine(data))
       }
     })
+    window.api.onSessionTitle(({ id, title }) => this.autoTitleSession(id, title))
     window.api.onSessionState(({ id, state, waitingFor }) => {
       const s = this.sessions.get(id)
       if (!s) return

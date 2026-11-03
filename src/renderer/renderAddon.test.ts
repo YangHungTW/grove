@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { clearRenderAtlas, disposeRenderAddon } from './renderAddon'
+import { clearRenderAtlas, disposeRenderAddon, rebuildRenderModel, renderAtlasOf } from './renderAddon'
 
 describe('disposeRenderAddon', () => {
   it("disposes a WebGL renderer's cursor-blink manager before the addon", () => {
@@ -79,6 +79,52 @@ describe('clearRenderAtlas', () => {
   it('still clears an addon whose internals it does not recognise', () => {
     const clearTextureAtlas = vi.fn()
     clearRenderAtlas({ clearTextureAtlas, dispose: vi.fn() })
+    expect(clearTextureAtlas).toHaveBeenCalledOnce()
+  })
+
+  it('reports whether anything was cleared, so siblings are rebuilt only then', () => {
+    const live = fakeAtlas()
+    const liveAddon = { _renderer: { _charAtlas: live }, clearTextureAtlas: live.clearTexture, dispose: vi.fn() }
+    expect(clearRenderAtlas(liveAddon)).toBe(true)
+    const empty = fakeAtlas(true)
+    const emptyAddon = { _renderer: { _charAtlas: empty }, clearTextureAtlas: empty.clearTexture, dispose: vi.fn() }
+    expect(clearRenderAtlas(emptyAddon)).toBe(false)
+    // Unknown internals: the clear was asked for, assume it happened.
+    expect(clearRenderAtlas({ clearTextureAtlas: vi.fn(), dispose: vi.fn() })).toBe(true)
+  })
+})
+
+describe('renderAtlasOf', () => {
+  it('identifies the WebGL atlas, so panes sharing one can be told apart from the rest', () => {
+    const atlas = fakeAtlas()
+    const a = { _renderer: { _charAtlas: atlas }, dispose: vi.fn() }
+    const b = { _renderer: { _charAtlas: atlas }, dispose: vi.fn() }
+    const c = { _renderer: { _charAtlas: fakeAtlas() }, dispose: vi.fn() }
+    expect(renderAtlasOf(a)).toBe(renderAtlasOf(b))
+    expect(renderAtlasOf(a)).not.toBe(renderAtlasOf(c))
+  })
+
+  it('reports nothing for a Canvas renderer (it copies pixels, so a shared clear cannot mis-draw it)', () => {
+    const canvas = { _renderer: { _renderLayers: [{ _charAtlas: fakeAtlas() }] }, dispose: vi.fn() }
+    expect(renderAtlasOf(canvas)).toBeUndefined()
+    expect(renderAtlasOf({ dispose: vi.fn() })).toBeUndefined()
+  })
+})
+
+describe('rebuildRenderModel', () => {
+  it("forgets a WebGL renderer's cells without touching the atlas", () => {
+    const _clearModel = vi.fn()
+    const clearTextureAtlas = vi.fn()
+    const addon = { _renderer: { _clearModel }, clearTextureAtlas, dispose: vi.fn() }
+    rebuildRenderModel(addon)
+    expect(_clearModel).toHaveBeenCalledWith(true)
+    expect(clearTextureAtlas).not.toHaveBeenCalled()
+  })
+
+  it('falls back to the public clear (a rebuild plus a harmless clear) without the hook', () => {
+    const clearTextureAtlas = vi.fn()
+    const addon = { _renderer: {}, clearTextureAtlas, dispose: vi.fn() }
+    rebuildRenderModel(addon)
     expect(clearTextureAtlas).toHaveBeenCalledOnce()
   })
 })

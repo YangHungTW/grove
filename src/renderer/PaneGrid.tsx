@@ -214,6 +214,11 @@ const Pane = memo(function Pane({
     term.loadAddon(search)
     term.open(el)
     term.onData((d) => window.api.sessionInput(session.id, d))
+    // An agent's terminal title (OSC 0/2) names the tab — Claude sets it to the
+    // conversation's topic. The store ignores it for a tab the user renamed.
+    if (session.kind === 'agent') {
+      term.onTitleChange((t) => store.autoTitleSession(session.id, t))
+    }
     // Shift+Enter inserts a newline instead of submitting. xterm sends plain CR
     // (\r = submit) for both Enter and Shift+Enter; send LF (\x0a) instead, which
     // is exactly what agents like claude treat as "newline" (its chat:newline is
